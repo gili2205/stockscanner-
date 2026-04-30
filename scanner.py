@@ -18,7 +18,7 @@ import json
 import os
 import sys
 import time
-import webbrowser
+import webbrowse
 from datetime import datetime
 from pathlib import Path
 
@@ -200,15 +200,6 @@ def _compute_qullamaggie_score(consolidation, rs, catalyst, breakout_level, week
 
     return min(100.0, score)
 
-
-def _get_status(score: int) -> str:
-    if score >= 85:
-        return "READY"
-    if score >= 70:
-        return "WATCH"
-    if score >= 50:
-        return "BUILDING"
-    return "WEAK"
 
 
 def run_scan(min_score: int = 50, nasdaq_only: bool = True) -> list[dict]:
