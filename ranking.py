@@ -13,15 +13,15 @@ from config import (
 from factors.relative_strength import assign_rs_percentiles
 
 
-def quality_gate(consolidation: dict, rs: dict) -> bool:
+def quality_gate(consolidation: dict, rs: dict, vol_ratio: float = 0.0) -> bool:
     """
     Stock must pass all 3 criteria or it sorts last (shown grayed out).
     From Qullamaggie scanner v5 ranking logic.
     """
     ema_ok = consolidation.get("ema_stack", "none") in ("full", "partial", "weak")
     rs_ok = rs.get("percentile", 0) >= QUALITY_GATE_RS_MIN
-    # vol_ratio checked in main loop from the raw data
-    return ema_ok and rs_ok
+    vol_ok = vol_ratio >= QUALITY_GATE_VOL_RATIO
+    return ema_ok and rs_ok and vol_ok
 
 
 def rank_stocks(results: list[dict]) -> list[dict]:
