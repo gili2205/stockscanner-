@@ -79,7 +79,8 @@ def analyze_stock(ticker: str, df: pd.DataFrame, benchmark_df: pd.DataFrame) -> 
         composite = max(0, min(100, composite))
 
         # --- Quality gate (must pass or ranks last) ---
-        passes_gate = quality_gate(consolidation, rs)
+                        vol_ratio = round(float(df["Volume"].iloc[-1]) / float(df["Volume"].iloc[-20:].mean()), 2) if len(df) >= 20 else 0.0
+      passes_gate = quality_gate(consolidation, rs, vol_ratio)
 
         last = df.iloc[-1]
         prev = df.iloc[-2]
