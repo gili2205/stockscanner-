@@ -298,12 +298,13 @@ def watch_mode(results: list[dict]):
                     if closes.empty:
                         continue
                     current = float(closes.iloc[-1])
-                    # Alert if within 1% of breakout level (use 52-week high as proxy)
-                    highs = live["High"][ticker].dropna()
-                    level = float(highs.max())
-                    dist = (level - current) / level
-                    if dist <= 0.01:
-                        alerts.append(f"  🚀 {ticker} — within 1% of breakout level at ${current:.2f}")
+                                                    # Alert if current price is within 1% above the scan-time price
+                                              # (uses scan result price as breakout level proxy — more accurate than intraday high)
+                                              scan_price = result.get("price", 0)
+                                              if scan_price > 0:
+                                                                                    dist = (current - scan_price) / scan_price
+                                                                                    if -0.01 <= dist <= 0.02:  # within 1% below or 2% above scan price
+                                                                                                                              alerts.append(f"  🚀 {ticker} — near breakout level at ${current:.2f} (scan: ${scan_price:.2f})")
                 except Exception:
                     continue
 
