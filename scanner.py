@@ -36,7 +36,7 @@ from factors.breakout_level import classify_breakout_level
 from factors.weekly import score_weekly_confluence
 from factors.bull_flag import detect_bull_flag, score_bull_flag
 from factors.pattern import score_pattern_quality
-from ranking import rank_stocks, quality_gate
+from ranking import rank_stocks, quality_gate, assign_rs_percentiles
 from dashboard import render_dashboard
 
 
@@ -243,6 +243,7 @@ def run_scan(min_score: int = 50, nasdaq_only: bool = True) -> list[dict]:
 
     # Step 5: Rank
     print("\n[5/6] Ranking by composite score...")
+    assign_rs_percentiles(results)
     ranked = rank_stocks(results)
     qualified = [r for r in ranked if r["composite_score"] >= min_score]
     print(f"   → {len(qualified)} stocks scored {min_score}+")
