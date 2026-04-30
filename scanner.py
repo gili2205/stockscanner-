@@ -16,10 +16,16 @@ Run:
 import argparse
 import json
 import os
+import sys
 import time
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+
+# Ensure nasdaq_scanner/factors package is importable when running from repo root
+_pkg_root = str(Path(__file__).resolve().parent / "nasdaq_scanner")
+if _pkg_root not in sys.path:
+      sys.path.insert(0, _pkg_root)
 
 import pandas as pd
 
