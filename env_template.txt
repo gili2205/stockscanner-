@@ -1,0 +1,7 @@
+# NASDAQ Live Scanner - GCP VM Environment Variables
+# Copy this to /home/scanner/.env on your GCP VM
+
+ALPACA_KEY=PKOSHKDTBW62H442Y3W2IWFHZ3
+ALPACA_SECRET=46Jp46xPcREEggJKH3iNjzz8h4ra9EdJJPAwi7frf6KY
+FIREBASE_URL=https://stockscanner-f9f81-default-rtdb.firebaseio.com
+FIREBASE_CRED=/home/scanner/firebase-key.json
