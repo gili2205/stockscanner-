@@ -742,43 +742,60 @@ function makeCard(s, rank) {{
     +'<div class="rsizones"><span style="color:#9b59b6">Oversold 30</span><span>50</span><span style="color:#e67e22">Overbought 70</span></div></div>';
   var targetHTML="";
 
-  return '<div class="card '+(s.pre_breakout?"pre":s.status==="WATCH"?"watch":"")+'">'
-        +'<div class="rank '+(isTop?"top":"")+'">' +rank+ '</div>'
-        +'<div class="ctop"><div class="ticker">'+s.ticker+'</div><div class="co">'+(s.sector||"NASDAQ")+'</div></div>'
-        +'<div class="srow"><div class="snum" style="color:'+color+'">'+s.score+'</div><div class="smeta"><div class="slbl" style="color:'+color+'">'+s.status+'</div><div class="sbar2"><div class="sfill" style="width:'+Math.min(100,s.score||0)+'%;background:'+color+'"></div></div></div></div>'
-        +'<div class="funds"><div class="fbox"><div class="flbl">P/E Ratio</div><div class="fval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):"&mdash;")+'</div><div class="fsub">'+(pe&&pe>0?(pe<20?"Cheap":pe<40?"Fair":"Pricey"):"N/A")+'</div></div>'
-        +'<div class="fbox"><div class="flbl">RSI (14)</div><div class="fval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):"&mdash;")+'</div><div class="fsub">'+rsiL(rsi)+'</div></div>'
-        +'<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upside&&parseFloat(upside)>0?"#27ae60":"#8892a4")+'">'+(target?"$"+target.toFixed(0):"&mdash;")+'</div><div class="fsub" style="color:'+(upside&&parseFloat(upside)>0?"#27ae60":"#8892a4")+'">'+(upside?(parseFloat(upside)>=0?"+":"")+upside+"%":"N/A")+'</div></div></div>'
-        +rsiHTML
-        +'<div class="prox"><div class="ptop"><span>Distance to breakout trigger</span><span style="color:'+pc+';font-weight:600">'+dist.toFixed(1)+'% away</span></div><div class="ptrack"><div class="pfill" style="width:'+prox+'%;background:'+pc+'"></div></div></div>'
-        +'<div class="sigs">'+sigs+'</div>'
-        +'<div class="stitle">Technical Factors</div>'
-        +'<div class="factors">'
-        +'<div class="factor"><span class="fn">ATR coil</span><span class="fv '+((s.atr||1)<=0.25?"fg":(s.atr||1)<=0.35?"fa":"fr")+'">'+(s.atr||0).toFixed(2)+'</span></div>'
-        +'<div class="factor"><span class="fn">Vol contraction</span><span class="fv '+((s.vol_contraction||1)<=0.7?"fg":(s.vol_contraction||1)<=0.9?"fa":"fr")+'">'+Math.round((s.vol_contraction||1)*100)+'%</span></div>'
-        +'<div class="factor"><span class="fn">RS percentile</span><span class="fv '+((s.rs_percentile||50)>=80?"fg":"")+'">'+(s.rs_percentile||50).toFixed(0)+'th</span></div>'
-        +'<div class="factor"><span class="fn">EMA stack</span><span class="fv '+ec(s.ema_stack)+'">'+(s.ema_stack||"&mdash;")+'</span></div>'
-        +'<div class="factor"><span class="fn">HH/HL</span><span class="fv '+((s.hh_hl||0)>=0.8?"fg":"fa")+'">'+Math.round((s.hh_hl||0)*100)+'%</span></div>'
-        +'<div class="factor"><span class="fn">Level</span><span class="fv" style="color:'+lc(s.level)+'">'+(s.level||"&mdash;")+'</span></div></div>'
-        +'<div class="trade">'
-        +'<div class="ttitle">Risk / Reward</div>'
-        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">'
-        +'<div style="background:'+riskBg+';border-radius:6px;padding:8px;text-align:center">'
-        +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Risk</div>'
-        +'<div style="font-size:16px;font-weight:700;color:'+riskColor+'">'+riskCat+'</div>'
-        +'<div style="font-size:9px;color:'+riskColor+';margin-top:2px">stop '+stpPct+'%</div></div>'
-        +'<div style="background:'+rewardBg+';border-radius:6px;padding:8px;text-align:center">'
-        +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Reward</div>'
-        +'<div style="font-size:16px;font-weight:700;color:'+rewardColor+'">'+rewardCat+'</div>'
-        +'<div style="font-size:9px;color:'+rewardColor+';margin-top:2px">'+rewardPts+'/4 signals</div></div></div>'
-        +'<div style="background:'+setupBg+';border:1px solid '+setupColor+'55;border-radius:8px;padding:9px 12px;display:flex;justify-content:space-between;align-items:center">'
-        +'<div style="font-size:13px;font-weight:700;color:'+setupColor+'">'+setupIcon+' '+setupCat+'</div>'
-        +'<div style="font-size:10px;color:var(--muted)">Entry $'+entryNum.toFixed(2)+'&nbsp;&nbsp;Stop $'+stopNum.toFixed(2)+'</div></div>'
-        +targetHTML
-        +'</div>'
-        +'<div class="cfoot"><div><span class="price">$'+price.toLocaleString()+'</span><span class="chg '+chgCls+'">'+chgStr+'</span></div>'
-        +'</div>'
-        +'<button class="chart-btn" id="cbtn-'+s.ticker+'" onclick="toggleChart(this,\'cpanel-'+s.ticker+'\',\'cframe-'+s.ticker+'\')">&#128202; Chart</button>'        +'</div>'        +'<div class="chart-panel" id="cpanel-'+s.ticker+'">'        +'<button class="chart-close" onclick="closeChart(\''+s.ticker+'\')">&times; Close</button>'        +'<iframe id="cframe-'+s.ticker+'" src="" scrolling="no" allowtransparency="true"></iframe>'        +'</div>'        +'</div>';
+  var h = '';
+  h += '<div class="card '+(s.pre_breakout?"pre":s.status==="WATCH"?"watch":"")+'">';
+  h += '<div class="card-body">';
+  h += '<div class="rank '+(isTop?"top":"")+'">'+rank+'</div>';
+  h += '<div class="ctop"><div class="ticker">'+s.ticker+'</div>';
+  h += '<div class="co">'+(s.name&&s.name!==s.ticker?s.name+' &middot; ':'')+(s.sector||'NASDAQ')+'</div></div>';
+  h += '<div class="srow"><div class="snum" style="color:'+color+'">'+(s.score||'—')+'</div>';
+  h += '<div class="smeta"><div class="slbl" style="color:'+color+'">'+s.status+'</div>';
+  h += '<div class="sbar2"><div class="sfill" style="width:'+Math.min(100,s.score||0)+'%;background:'+color+'"></div></div></div></div>';
+  h += '<div class="funds">';
+  h += '<div class="fbox"><div class="flbl">P/E Ratio</div><div class="fval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div><div class="fsub">'+(pe&&pe>0?(pe<20?'Cheap':pe<40?'Fair':'Pricey'):'N/A')+'</div></div>';
+  h += '<div class="fbox"><div class="flbl">RSI (14)</div><div class="fval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div><div class="fsub">'+rsiL(rsi)+'</div></div>';
+  h += '<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upside&&parseFloat(upside)>0?'#27ae60':'#8892a4')+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div>';
+  h += '<div class="fsub" style="color:'+(upside&&parseFloat(upside)>0?'#27ae60':'#8892a4')+'">'+(upside?(parseFloat(upside)>=0?'+':'')+upside+'%':'N/A')+'</div></div>';
+  h += '</div>';
+  h += rsiHTML;
+  h += '<div class="prox"><div class="ptop"><span>Distance to breakout trigger</span><span style="color:'+pc+';font-weight:600">'+dist.toFixed(1)+'% away</span></div>';
+  h += '<div class="ptrack"><div class="pfill" style="width:'+prox+'%;background:'+pc+'"></div></div></div>';
+  h += '<div class="sigs">'+sigs+'</div>';
+  h += '<div class="stitle">Technical Factors</div>';
+  h += '<div class="factors">';
+  h += '<div class="factor"><span class="fn">ATR coil</span><span class="fv '+((s.atr||1)<=0.25?'fg':(s.atr||1)<=0.35?'fa':'fr')+'">'+(s.atr||0).toFixed(2)+'</span></div>';
+  h += '<div class="factor"><span class="fn">Vol contraction</span><span class="fv '+((s.vol_contraction||1)<=0.7?'fg':(s.vol_contraction||1)<=0.9?'fa':'fr')+'">'+Math.round((s.vol_contraction||1)*100)+'%</span></div>';
+  h += '<div class="factor"><span class="fn">RS percentile</span><span class="fv '+((s.rs_percentile||0)>=80?'fg':'')+'">'+(s.rs_percentile!=null?s.rs_percentile.toFixed(0):'—')+'th</span></div>';
+  h += '<div class="factor"><span class="fn">EMA stack</span><span class="fv '+ec(s.ema_stack)+'">'+(s.ema_stack||'&mdash;')+'</span></div>';
+  h += '<div class="factor"><span class="fn">HH/HL</span><span class="fv '+((s.hh_hl||0)>=0.8?'fg':'fa')+'">'+Math.round((s.hh_hl||0)*100)+'%</span></div>';
+  h += '<div class="factor"><span class="fn">Level</span><span class="fv" style="color:'+lc(s.level)+'">'+(s.level||'&mdash;')+'</span></div>';
+  h += '</div>';
+  h += '<div class="trade"><div class="ttitle">Risk / Reward</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
+  h += '<div style="background:'+riskBg+';border-radius:8px;padding:12px;text-align:center">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Risk</div>';
+  h += '<div style="font-size:20px;font-weight:700;color:'+riskColor+'">'+riskCat+'</div>';
+  h += '<div style="font-size:10px;color:'+riskColor+';margin-top:4px">stop '+stpPct+'%</div></div>';
+  h += '<div style="background:'+rewardBg+';border-radius:8px;padding:12px;text-align:center">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Reward</div>';
+  h += '<div style="font-size:20px;font-weight:700;color:'+rewardColor+'">'+rewardCat+'</div>';
+  h += '<div style="font-size:10px;color:'+rewardColor+';margin-top:4px">'+rewardPts+'/4 signals</div></div>';
+  h += '</div>';
+  h += '<div style="background:'+setupBg+';border:1px solid '+setupColor+'44;border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">';
+  h += '<div style="font-size:15px;font-weight:700;color:'+setupColor+'">'+setupIcon+' '+setupCat+'</div>';
+  h += '<div style="font-size:11px;color:var(--muted)">Entry $'+entryNum.toFixed(2)+'&nbsp;&nbsp;Stop $'+stopNum.toFixed(2)+'</div>';
+  h += '</div></div>';
+  h += '<div class="cfoot">';
+  h += '<div><span class="price">$'+price.toFixed(2)+'</span><span class="chg '+chgCls+'">'+chgStr+'</span></div>';
+  h += '<button class="chart-btn" id="cbtn-'+s.ticker+'" onclick="toggleChart(this,\'cpanel-'+s.ticker+'\',\'cframe-'+s.ticker+'\')">&#128202; Chart</button>';
+  h += '</div>';
+  h += '</div>';
+  h += '<div class="chart-panel" id="cpanel-'+s.ticker+'">';
+  h += '<button class="chart-close" onclick="closeChart(\''+s.ticker+'\')">&#10005; Close chart</button>';
+  h += '<iframe id="cframe-'+s.ticker+'" src="" scrolling="no" allowtransparency="true"></iframe>';
+  h += '</div>';
+  h += '</div>';
+  return h;
 }}
 
 function toggleChart(btn, panelId, frameId) {{
