@@ -262,7 +262,8 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 <div class="grid" id="grid"><div class="empty">&#9203; Connecting to live scanner...</div></div>
 <div class="pgfoot">NASDAQ Pre-Breakout Scanner {ver} &middot; Alpaca + Firebase + GCP VM &middot; &#9888; Not financial advice. Always use stop losses.</div>
 
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script>
 function toggleChart(ticker, btn) {
   var embed = document.getElementById('tv-' + ticker);
   if (!embed) return;
