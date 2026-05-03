@@ -404,8 +404,16 @@ function startWatchdog() {{
   watchdogTimer = setInterval(function() {{
     if (!lastDataTime) return;
     var age = (Date.now()-lastDataTime)/1000;
-    if (age>300) {{ setStatus("err","No data for "+Math.round(age/60)+" min \u2014 check GCP VM"); document.getElementById("dot").className="dot r"; }}
-    else if (age>120) {{ setStatus("warn","Last update "+Math.round(age)+"s ago \u2014 scanner may be slow"); document.getElementById("dot").className="dot a"; }}
+    // During market hours (9:30-16:00 ET Mon-Fri) be strict; otherwise be relaxed
+  var now = new Date();
+  var etOffset = -4; // EDT; adjust to -5 for EST in winter
+  var etHour = (now.getUTCHours() + etOffset + 24) % 24;
+  var etDay = now.getUTCDay();
+  var marketHours = etDay>=1 && etDay<=5 && etHour>=9 && etHour<16;
+  var warnThresh  = marketHours ? 180  : 3600;   // 3min live, 60min closed
+  var errThresh   = marketHours ? 600  : 86400;  // 10min live, 24h closed
+  if (age>errThresh) {{ setStatus("err","No data for "+Math.round(age/60)+" min \u2014 check GCP VM"); document.getElementById("dot").className="dot r"; }}
+    else if (age>warnThresh) {{ setStatus("warn","Last update "+Math.round(age/60)+" min ago"); document.getElementById("dot").className="dot a"; }}
   }}, 15000);
 }}
 
@@ -429,6 +437,11 @@ fdb.ref("/scanner").on("value", function(snap) {{
     if (sv) sv.textContent = d.scanner_version;
   }}
 
+  var now2 = new Date();
+  var etHour2 = (now2.getUTCHours() - 4 + 24) % 24;
+  var etDay2  = now2.getUTCDay();
+  var mktOpen = etDay2>=1 && etDay2<=5 && etHour2>=9 && etHour2<16;
+  var warnThresh = mktOpen ? 180 : 3600;
   var age = d.last_updated_ts ? Math.round((Date.now()/1000 - d.last_updated_ts)) : (d.last_updated ? Math.round((Date.now()-new Date(d.last_updated))/1000) : 0);
   var scanTime = d.last_scan_time ? " \u00b7 "+d.last_scan_time : "";
   var duration = d.scan_duration_sec ? " ("+d.scan_duration_sec+"s)" : "";
@@ -436,7 +449,7 @@ fdb.ref("/scanner").on("value", function(snap) {{
 
   var dlPct = d.download_progress ? d.download_progress.pct||0 : 0;
   if (scanned===0) setStatus("dl","Downloading market data\u2026 "+dlPct+"% complete", dlPct, "", "");
-  else if (age>180) setStatus("warn","Data is "+Math.round(age/60)+" min old \u2014 check GCP VM"+scanTime, 100, "", "");
+  else if (age>warnThresh) setStatus("warn","Data is "+Math.round(age/60)+" min old"+scanTime, 100, "", "");
   else setStatus("ok","LIVE \u00b7 "+scanned.toLocaleString()+" stocks scanned", 100, "updated "+age+"s ago", duration ? "scan took "+duration : "");
 
   document.getElementById("m-total").textContent = scanned.toLocaleString();
