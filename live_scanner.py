@@ -664,8 +664,15 @@ while True:
         scan_time = now_et.strftime("%Y-%m-%d %H:%M:%S ET")
 
         push_results(results, sess, scan_time, elapsed)
-        log.info("Next scan in 60s...")
-        time.sleep(60)
+
+        # Dynamic sleep — active sessions scan every 60s, closed market hourly heartbeat
+        if sess in ("Market Open", "Pre-Market", "After-Hours"):
+            sleep_secs = 60
+        else:
+            sleep_secs = 3600  # Market Closed — 1 hour heartbeat to confirm scanner is alive
+
+        log.info(f"Next scan in {sleep_secs}s... [{sess}]")
+        time.sleep(sleep_secs)
 
     except KeyboardInterrupt:
         log.info("Stopped."); break
