@@ -676,9 +676,9 @@ function makeCard(s, rank) {{
 
   // Risk category
   var riskCat, riskColor, riskBg;
-  if (stopDist<=0.03)      { riskCat="Low";    riskColor="#27ae60"; riskBg="#1a3d2b"; }
-  else if (stopDist<=0.06) { riskCat="Medium"; riskColor="#e67e22"; riskBg="#3d2e10"; }
-  else                     { riskCat="High";   riskColor="#e74c3c"; riskBg="#3d1a1a"; }
+  if (stopDist<=0.03)      {{ riskCat="Low";    riskColor="#27ae60"; riskBg="#1a3d2b"; }}
+  else if (stopDist<=0.06) {{ riskCat="Medium"; riskColor="#e67e22"; riskBg="#3d2e10"; }}
+  else                     {{ riskCat="High";   riskColor="#e74c3c"; riskBg="#3d1a1a"; }}
 
   // Reward score (0-4 bonuses)
   var rewardPts = 0;
@@ -688,20 +688,20 @@ function makeCard(s, rank) {{
   if ((s.level||"").indexOf("ATH")>=0||(s.level||"").indexOf("multi")>=0) rewardPts++;
 
   var rewardCat, rewardColor, rewardBg;
-  if (rewardPts>=3)      { rewardCat="High";   rewardColor="#27ae60"; rewardBg="#1a3d2b"; }
-  else if (rewardPts>=2) { rewardCat="Medium"; rewardColor="#e67e22"; rewardBg="#3d2e10"; }
-  else                   { rewardCat="Low";    rewardColor="#e74c3c"; rewardBg="#3d1a1a"; }
+  if (rewardPts>=3)      {{ rewardCat="High";   rewardColor="#27ae60"; rewardBg="#1a3d2b"; }}
+  else if (rewardPts>=2) {{ rewardCat="Medium"; rewardColor="#e67e22"; rewardBg="#3d2e10"; }}
+  else                   {{ rewardCat="Low";    rewardColor="#e74c3c"; rewardBg="#3d1a1a"; }}
 
   // Setup label combining risk + reward
   var setupCat, setupColor, setupBg, setupIcon;
   var rr = riskCat+"/"+rewardCat;
-  if      (rr==="Low/High")     { setupCat="Best setup";  setupColor="#27ae60"; setupBg="#1a3d2b"; setupIcon="⭐"; }
-  else if (rr==="Low/Medium")   { setupCat="Good setup";  setupColor="#27ae60"; setupBg="#1a3d2b"; setupIcon="✅"; }
-  else if (rr==="Medium/High")  { setupCat="High upside"; setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="🎯"; }
-  else if (rr==="Medium/Medium"){ setupCat="Balanced";    setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="📊"; }
-  else if (rr==="High/High")    { setupCat="Aggressive";  setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="🎲"; }
-  else if (rr==="Low/Low")      { setupCat="Weak upside"; setupColor="#8892a4"; setupBg="#22263a"; setupIcon="📉"; }
-  else                          { setupCat="Skip";        setupColor="#e74c3c"; setupBg="#3d1a1a"; setupIcon="⚠️"; }
+  if      (rr==="Low/High")     {{ setupCat="Best setup";  setupColor="#27ae60"; setupBg="#1a3d2b"; setupIcon="⭐"; }}
+  else if (rr==="Low/Medium")   {{ setupCat="Good setup";  setupColor="#27ae60"; setupBg="#1a3d2b"; setupIcon="✅"; }}
+  else if (rr==="Medium/High")  {{ setupCat="High upside"; setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="🎯"; }}
+  else if (rr==="Medium/Medium"){{ setupCat="Balanced";    setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="📊"; }}
+  else if (rr==="High/High")    {{ setupCat="Aggressive";  setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="🎲"; }}
+  else if (rr==="Low/Low")      {{ setupCat="Weak upside"; setupColor="#8892a4"; setupBg="#22263a"; setupIcon="📉"; }}
+  else                          {{ setupCat="Skip";        setupColor="#e74c3c"; setupBg="#3d1a1a"; setupIcon="⚠️"; }}
 
   var sigs = '<span class="sig sg">'+s.status+'</span>';
   sigs += track==="CATALYST"?'<span class="sig sp">&#128197; Catalyst</span>':'<span class="sig sb">&#128293; Breakout</span>';
