@@ -3,7 +3,7 @@ from flask import Flask
 
 app = Flask(__name__)
 
-VERSION = "v2.2.0"
+VERSION = "v2.0.2"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -40,11 +40,15 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .regime.pre{{background:#1a2a3d;color:var(--blue);border:1px solid #3498db55;}}
 .regime.after{{background:#2d1a3d;color:var(--purple);border:1px solid #9b59b655;}}
 .regime.closed{{background:var(--bg3);color:var(--muted);border:1px solid var(--border);}}
-.sbar{{padding:8px 24px;font-size:12px;display:flex;align-items:center;gap:8px;transition:all .3s;border-bottom:1px solid var(--border);}}
+.sbar{{padding:0 24px;font-size:12px;display:flex;align-items:center;gap:10px;transition:background .4s,color .4s;border-bottom:1px solid var(--border);min-height:36px;position:relative;overflow:hidden;}}
 .sbar.ok{{background:#1a3d2b33;color:var(--green);}}
 .sbar.warn{{background:#3d2e1033;color:var(--amber);}}
 .sbar.err{{background:#3d1a1a;color:var(--red);border-color:var(--red);}}
 .sbar.conn{{background:var(--bg2);color:var(--muted);}}
+.sbar.dl{{background:#1a2a3d55;color:var(--blue);}}
+.sbar-progress{{position:absolute;left:0;top:0;height:100%;background:currentColor;opacity:.07;transition:width 2s ease;pointer-events:none;}}
+.sbar-dot{{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0;animation:pulse 1.4s infinite;}}
+.sbar-right{{margin-left:auto;font-size:11px;opacity:.65;display:flex;gap:16px;}}
 .metrics{{display:flex;gap:10px;padding:12px 24px;flex-wrap:wrap;background:var(--bg2);border-bottom:1px solid var(--border);}}
 .metric{{background:var(--bg3);border-radius:8px;padding:8px 14px;min-width:110px;}}
 .mlabel{{font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px;}}
@@ -154,8 +158,10 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 </div>
 
 <div class="sbar conn" id="sbar">
-  <span id="sicon">&#9203;</span>
+  <div class="sbar-progress" id="sbar-progress" style="width:0%"></div>
+  <span class="sbar-dot" id="sbar-dot"></span>
   <span id="smsg">Connecting to Firebase...</span>
+  <span class="sbar-right"><span id="sbar-age"></span><span id="sbar-dur"></span><span id="sbar-ver"></span></span>
 </div>
 
 <div class="metrics">
@@ -369,11 +375,16 @@ function getActiveDesc() {{
 }}
 
 // ── Status helpers ────────────────────────────────────────────────────────────
-function setStatus(type, icon, msg) {{
+function setStatus(type, msg, progress, age, dur) {{
   var b = document.getElementById("sbar");
   b.className = "sbar " + type;
-  document.getElementById("sicon").textContent = icon;
   document.getElementById("smsg").textContent = msg;
+  var pg = document.getElementById("sbar-progress");
+  if (pg) pg.style.width = (progress||0) + "%";
+  var ael = document.getElementById("sbar-age");
+  if (ael) ael.textContent = age||"";
+  var del2 = document.getElementById("sbar-dur");
+  if (del2) del2.textContent = dur||"";
 }}
 
 function startWatchdog() {{
@@ -381,8 +392,8 @@ function startWatchdog() {{
   watchdogTimer = setInterval(function() {{
     if (!lastDataTime) return;
     var age = (Date.now()-lastDataTime)/1000;
-    if (age>300) {{ setStatus("err","WARN","No data for "+Math.round(age/60)+" min \u2014 check GCP VM"); document.getElementById("dot").className="dot r"; }}
-    else if (age>120) {{ setStatus("warn","SLOW","Last update "+Math.round(age)+"s ago"); document.getElementById("dot").className="dot a"; }}
+    if (age>300) {{ setStatus("err","No data for "+Math.round(age/60)+" min \u2014 check GCP VM"); document.getElementById("dot").className="dot r"; }}
+    else if (age>120) {{ setStatus("warn","Last update "+Math.round(age)+"s ago \u2014 scanner may be slow"); document.getElementById("dot").className="dot a"; }}
   }}, 15000);
 }}
 
@@ -391,25 +402,30 @@ var fdb = firebase.database();
 
 fdb.ref(".info/connected").on("value", function(snap) {{
   connected = snap.val();
-  if (connected) {{ setStatus("ok","OK","Connected \u2014 waiting for scanner data..."); document.getElementById("dot").className="dot g"; }}
-  else {{ setStatus("err","ERR","Lost Firebase connection"); document.getElementById("dot").className="dot r"; }}
+  if (connected) {{ setStatus("ok","Connected \u2014 waiting for scanner data..."); document.getElementById("dot").className="dot g"; }}
+  else {{ setStatus("err","Lost Firebase connection"); document.getElementById("dot").className="dot r"; }}
 }});
 
 fdb.ref("/scanner").on("value", function(snap) {{
   var d = snap.val();
   lastDataTime = Date.now();
-  if (!d) {{ setStatus("warn","WAIT","No scanner data yet"); return; }}
+  if (!d) {{ setStatus("warn","No scanner data in Firebase yet"); return; }}
 
-  if (d.scanner_version) document.getElementById("verspan").textContent = d.scanner_version;
+  if (d.scanner_version) {{
+    document.getElementById("verspan").textContent = d.scanner_version;
+    var sv = document.getElementById("sbar-ver");
+    if (sv) sv.textContent = d.scanner_version;
+  }}
 
   var age = d.last_updated_ts ? Math.round((Date.now()/1000 - d.last_updated_ts)) : (d.last_updated ? Math.round((Date.now()-new Date(d.last_updated))/1000) : 0);
   var scanTime = d.last_scan_time ? " \u00b7 "+d.last_scan_time : "";
   var duration = d.scan_duration_sec ? " ("+d.scan_duration_sec+"s)" : "";
   var scanned  = d.stocks_scanned||0;
 
-  if (scanned===0) setStatus("warn","DL","Downloading market data\u2026");
-  else if (age>180) setStatus("warn","OLD","Data is "+Math.round(age/60)+" min old"+scanTime);
-  else setStatus("ok","LIVE","LIVE \u00b7 "+scanned.toLocaleString()+" stocks \u00b7 Updated "+age+"s ago"+scanTime+duration);
+  var dlPct = d.download_progress ? d.download_progress.pct||0 : 0;
+  if (scanned===0) setStatus("dl","Downloading market data\u2026 "+dlPct+"% complete", dlPct, "", "");
+  else if (age>180) setStatus("warn","Data is "+Math.round(age/60)+" min old \u2014 check GCP VM"+scanTime, 100, "", "");
+  else setStatus("ok","LIVE \u00b7 "+scanned.toLocaleString()+" stocks scanned", 100, "updated "+age+"s ago", duration ? "scan took "+duration : "");
 
   document.getElementById("m-total").textContent = scanned.toLocaleString();
   document.getElementById("m-pre").textContent    = d.pre_breakout_count||0;
