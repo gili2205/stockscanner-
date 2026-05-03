@@ -402,7 +402,7 @@ fdb.ref("/scanner").on("value", function(snap) {{
 
   if (d.scanner_version) document.getElementById("verspan").textContent = d.scanner_version;
 
-  var age = d.last_updated ? Math.round((Date.now()-new Date(d.last_updated))/1000) : 0;
+  var age = d.last_updated_ts ? Math.round((Date.now()/1000 - d.last_updated_ts)) : (d.last_updated ? Math.round((Date.now()-new Date(d.last_updated))/1000) : 0);
   var scanTime = d.last_scan_time ? " \u00b7 "+d.last_scan_time : "";
   var duration = d.scan_duration_sec ? " ("+d.scan_duration_sec+"s)" : "";
   var scanned  = d.stocks_scanned||0;

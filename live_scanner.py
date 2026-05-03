@@ -570,6 +570,7 @@ def push_results(results, sess, scan_time, elapsed):
         "market_open":        sess=="Market Open",
         "session":            sess,
         "last_updated":       now_et.isoformat(),
+        "last_updated_ts":    int(now_et.timestamp()),  # Unix epoch — timezone-safe age calc
         "last_scan_time":     scan_time,
         "scan_duration_sec":  elapsed,
         "scanner_version":    "v2.0.2",
