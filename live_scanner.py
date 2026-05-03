@@ -499,7 +499,7 @@ def score_stock(ticker, df, live_price=None, fund=None):
             "analyst_upside":   upside,
             "breakout_score":   breakout_score,
             "catalyst_score":   catalyst_score,
-            "rs_percentile":    70,
+            "rs_percentile":    None,  # filled in by fast_rescore() after full universe scoring
             "rank":             0,
             "name":             ticker,
             "sector":           fund.get("sector",""),
@@ -579,12 +579,12 @@ def push_results(results, sess, scan_time, elapsed):
     # Also push all scored stocks so dashboard filters work across full universe
     # Send as a dict keyed by ticker for fast lookup
     try:
-        all_stocks = {{r["ticker"]: r for r in results[:200]}}  # top 200 by score
+        all_stocks = {r["ticker"]: r for r in results[:200]}  # top 200 by score
         ref.child("all_stocks").set(all_stocks)
     except Exception as e:
-        log.debug(f"all_stocks push failed: {{e}}")
+        log.debug(f"all_stocks push failed: {e}")
 
-    log.info(f"Pushed: top10={{top10_tickers}} | READY={{payload['ready_count']}} | [{{sess}}] | {{elapsed}}s")
+    log.info(f"Pushed: top10={top10_tickers} | READY={payload['ready_count']} | [{sess}] | {elapsed}s")
 
 # ── Session helper ────────────────────────────────────────────────────────────
 def get_session():
