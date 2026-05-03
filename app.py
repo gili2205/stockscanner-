@@ -84,7 +84,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 
 .alertbox{{background:#1a3d2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin:8px 24px;font-size:12px;color:var(--green);display:none;}}
 .grid{{display:flex;flex-wrap:wrap;gap:14px;padding:16px 24px;}}
-.card{{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;width:480px;border-left:3px solid var(--border);position:relative;}}
+.card{{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;width:360px;border-left:3px solid var(--border);position:relative;}}
 .card.pre{{border-left-color:var(--green);}}
 .card.watch{{border-left-color:var(--amber);}}
 .rank{{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--muted);}}
@@ -140,10 +140,6 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .cdn{{color:var(--red);}}
 .tvlink{{color:var(--blue);font-size:11px;text-decoration:none;}}
 .tvlink:hover{{text-decoration:underline;}}
-.chart-btn{{display:inline-flex;align-items:center;gap:4px;background:var(--bg3);color:var(--blue);border:1px solid var(--blue);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;transition:background 0.15s,color 0.15s;}}
-.chart-btn:hover{{background:var(--blue);color:#fff;}}
-.tv-embed{{display:none;width:100%;margin-top:10px;border-radius:8px;overflow:hidden;border:1px solid var(--border);}}
-.tv-embed.open{{display:block;}}
 .empty{{text-align:center;padding:60px;color:var(--muted);width:100%;font-size:15px;line-height:2;}}
 .pgfoot{{padding:14px 24px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);text-align:center;margin-top:8px;}}
 @media(max-width:750px){{.card{{width:100%;}}.grid{{padding:10px;gap:10px;}}.filterrow{{gap:12px;}}.filterpanel{{padding:10px 14px;}}}}
@@ -263,25 +259,6 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 <div class="pgfoot">NASDAQ Pre-Breakout Scanner {ver} &middot; Alpaca + Firebase + GCP VM &middot; &#9888; Not financial advice. Always use stop losses.</div>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script>
-function toggleChart(ticker, btn) {
-  var embed = document.getElementById('tv-' + ticker);
-  if (!embed) return;
-  var isOpen = embed.classList.toggle('open');
-  if (isOpen) {
-    btn.textContent = '\u2715 Close Chart';
-    btn.style.borderColor = 'var(--red)';
-    btn.style.color = 'var(--red)';
-    if (!embed.innerHTML.trim()) {
-      embed.innerHTML = '<iframe src="https://www.tradingview.com/widgetembed/?frameElementId=tv-' + ticker + '&symbol=NASDAQ:' + ticker + '&interval=D&theme=dark&style=1&locale=en&toolbar_bg=%230f1117&enable_publishing=0&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&calendar=0&studies=[]&hideideas=1" style="width:100%;height:300px;border:none;" allowtransparency="true" scrolling="no"></iframe>';
-    }
-  } else {
-    btn.textContent = '\u{1F4CA} Chart';
-    btn.style.borderColor = '';
-    btn.style.color = '';
-  }
-}
-</script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
 var VER = "{ver}";
@@ -601,11 +578,7 @@ function makeCard(s, rank) {{
         +targetHTML
         +'<div class="trow" style="margin-top:4px"><span class="tl">Risk / Reward</span><span class="rrbadge">2.0:1 → 3.5:1</span></div></div>'
         +'<div class="cfoot"><div><span class="price">$'+price.toLocaleString()+'</span><span class="chg '+chgCls+'">'+chgStr+'</span></div>'
-        +'<a class="tvlink" href="https://www.tradingview.com/chart/?symbol=NASDAQ:'+s.ticker+'" target="_blank">TradingView &rarr;</a>'
-        +'<button class="chart-btn" onclick="toggleChart(\''+s.ticker+'\',this)">&#128202; Chart</button>'
-        +'</div>'
-        +'<div class="tv-embed" id="tv-'+s.ticker+'">'
-        +'</div></div>';
+        +'<a class="tvlink" href="https://www.tradingview.com/chart/?symbol=NASDAQ:'+s.ticker+'" target="_blank">TradingView &rarr;</a></div></div>';
 }}
 </script>
 </body>
