@@ -419,24 +419,24 @@ function startWatchdog() {{
   var marketHours = etDay>=1 && etDay<=5 && etHour>=9 && etHour<16;
   var warnThresh  = marketHours ? 180  : 3600;   // 3min live, 60min closed
   var errThresh   = marketHours ? 600  : 86400;  // 10min live, 24h closed
-  if (age>errThresh) {{ setStatus("err","No data for "+Math.round(age/60)+" min \u2014 check GCP VM"); document.getElementById("dot").className="dot r"; }}
-    else if (age>warnThresh) {{ setStatus("warn","Last update "+Math.round(age/60)+" min ago"); document.getElementById("dot").className="dot a"; }}
+  if (age>errThresh) {{ setStatus("err","No data for "+Math.round(age/60)+" min \u2014 check GCP VM",0,"",""); document.getElementById("dot").className="dot r"; }}
+    else if (age>warnThresh) {{ setStatus("warn","Last update "+Math.round(age/60)+" min ago",0,"",""); document.getElementById("dot").className="dot a"; }}
   }}, 15000);
 }}
 
-try {{ firebase.initializeApp(CFG); }} catch(e) {{ setStatus("err","ERR","Firebase init: "+e.message); }}
+try {{ firebase.initializeApp(CFG); }} catch(e) {{ setStatus("err","Firebase init failed: "+e.message); }}
 var fdb = firebase.database();
 
 fdb.ref(".info/connected").on("value", function(snap) {{
   connected = snap.val();
-  if (connected) {{ setStatus("ok","Connected \u2014 waiting for scanner data..."); document.getElementById("dot").className="dot g"; }}
-  else {{ setStatus("err","Lost Firebase connection"); document.getElementById("dot").className="dot r"; }}
+  if (connected) {{ setStatus("ok","Connected \u2014 waiting for scanner data...",0,"",""); document.getElementById("dot").className="dot g"; }}
+  else {{ setStatus("err","Lost Firebase connection",0,"",""); document.getElementById("dot").className="dot r"; }}
 }});
 
 fdb.ref("/scanner").on("value", function(snap) {{
   var d = snap.val();
   lastDataTime = Date.now();
-  if (!d) {{ setStatus("warn","No scanner data in Firebase yet"); return; }}
+  if (!d) {{ setStatus("warn","No scanner data in Firebase yet",0,"",""); return; }}
 
   if (d.scanner_version) {{
     document.getElementById("verspan").textContent = d.scanner_version;
@@ -497,7 +497,7 @@ fdb.ref("/scanner").on("value", function(snap) {{
   }}
   // Always render — even during download, show last known data
   render();
-}}, function(err) {{ setStatus("err","ERR","Firebase error: "+err.message); }});
+}}, function(err) {{ setStatus("err","Firebase error: "+err.message,0,"",""); }});
 
 startWatchdog();
 
