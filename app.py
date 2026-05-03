@@ -173,6 +173,18 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
   <div class="metric"><div class="mlabel">Last scan</div><div class="mval" style="font-size:13px" id="m-time">&#8212;</div><div class="msub" id="m-sess">&#8212;</div></div>
 </div>
 
+<!-- ── Ticker lookup ── -->
+<div class="searchbar">
+  <input type="text" id="lookup-input" placeholder="Type any ticker... e.g. NVDA" maxlength="6"
+    onkeydown="if(event.key==='Enter')lookupTicker()"
+    oninput="this.value=this.value.toUpperCase()">
+  <button onclick="lookupTicker()">Look up</button>
+  <span class="search-hint">Get full analysis on any stock — even outside top 200</span>
+</div>
+<div class="lookup-wrap" id="lookup-wrap" style="display:none">
+  <div id="lookup-result"></div>
+</div>
+
 <!-- ── Multi-select filter panel ── -->
 <div class="filterpanel">
 
@@ -467,6 +479,130 @@ fdb.ref("/scanner").on("value", function(snap) {{
 }}, function(err) {{ setStatus("err","ERR","Firebase error: "+err.message); }});
 
 startWatchdog();
+
+// ── Ticker lookup ─────────────────────────────────────────────────────────────
+async function lookupTicker() {{
+  var ticker = document.getElementById("lookup-input").value.trim().toUpperCase();
+  if (!ticker) return;
+
+  var wrap = document.getElementById("lookup-wrap");
+  var result = document.getElementById("lookup-result");
+  wrap.style.display = "block";
+  result.innerHTML = '<div class="lookup-loading">⏳ Fetching data for '+ticker+'...</div>';
+
+  // Check if we already have it in our scanned universe
+  if (allStockData && allStockData[ticker]) {{
+    result.innerHTML = '<div style="margin-bottom:8px;font-size:12px;color:var(--green)">✓ Found in scanner universe — showing live data</div>' + makeCard(allStockData[ticker], "—");
+    return;
+  }}
+  if (stockData && stockData[ticker]) {{
+    result.innerHTML = '<div style="margin-bottom:8px;font-size:12px;color:var(--green)">✓ Found in top 10</div>' + makeCard(stockData[ticker], "—");
+    return;
+  }}
+
+  // Not in universe — fetch from Yahoo Finance
+  try {{
+    var url = "https://query1.finance.yahoo.com/v8/finance/chart/"+ticker+"?interval=1d&range=60d";
+    var resp = await fetch(url, {{headers:{{"Accept":"application/json"}}}});
+    if (!resp.ok) throw new Error("HTTP "+resp.status);
+    var data = await resp.json();
+    var res  = data.chart.result;
+    if (!res || !res[0]) throw new Error("No data returned");
+
+    var r       = res[0];
+    var meta    = r.meta;
+    var quotes  = r.indicators.quote[0];
+    var closes  = quotes.close;
+    var highs   = quotes.high;
+    var lows    = quotes.low;
+    var vols    = quotes.volume;
+    var price   = meta.regularMarketPrice || closes[closes.length-1];
+    var prev    = closes[closes.length-2] || closes[closes.length-1];
+    var chg     = ((price-prev)/prev*100);
+
+    // ATR (14)
+    var trs = [];
+    for (var i=1;i<closes.length;i++) {{
+      trs.push(Math.max(highs[i]-lows[i], Math.abs(highs[i]-closes[i-1]), Math.abs(lows[i]-closes[i-1])));
+    }}
+    var atr14 = trs.slice(-14).reduce((a,b)=>a+b,0)/14;
+    var atrPct = atr14/price;
+
+    // EMA 10/20/50
+    function ema(arr,n) {{
+      var k=2/(n+1), e=arr[0];
+      for(var i=1;i<arr.length;i++) e=arr[i]*k+e*(1-k);
+      return e;
+    }}
+    var validC = closes.filter(Boolean);
+    var ema10 = ema(validC,10), ema20 = ema(validC,20), ema50 = ema(validC.slice(-60),50);
+    var emaStack = (ema10>ema20&&ema20>ema50&&price>ema10)?"full":(price>ema20?"partial":"none");
+
+    // HH/HL over last 20 bars
+    var hhhl=0;
+    for(var i=closes.length-20;i<closes.length-1;i++) {{
+      if(highs[i+1]>highs[i]&&lows[i+1]>lows[i]) hhhl++;
+    }}
+    var hhhlPct = hhhl/19;
+
+    // Volume contraction (last 5 vs prior 15)
+    var avgVolRecent = vols.slice(-5).reduce((a,b)=>a+(b||0),0)/5;
+    var avgVolBase   = vols.slice(-20,-5).reduce((a,b)=>a+(b||0),0)/15;
+    var volContr     = avgVolBase>0?avgVolRecent/avgVolBase:1;
+
+    // 52w high
+    var high52 = Math.max(...highs.filter(Boolean));
+    var distToHigh = ((high52-price)/price*100);
+    var level = distToHigh<1?"ATH":distToHigh<5?"52-week":"prior resistance";
+
+    // Momentum 1m
+    var mom1m = closes.length>=21?((price-closes[closes.length-21])/closes[closes.length-21]*100):0;
+
+    // Avg volume
+    var avgVol = vols.slice(-20).reduce((a,b)=>a+(b||0),0)/20;
+
+    // Build synthetic stock object
+    var s = {{
+      ticker:          ticker,
+      name:            meta.shortName||ticker,
+      sector:          meta.instrumentType||"",
+      price:           price,
+      change_pct:      chg,
+      score:           null,
+      status:          "LOOKUP",
+      ema_stack:       emaStack,
+      atr:             atrPct,
+      hh_hl:           hhhlPct,
+      vol_contraction: volContr,
+      vol_ratio:       avgVolBase>0?avgVolRecent/avgVolBase:1,
+      level:           level,
+      dist_to_level:   distToHigh,
+      pre_breakout:    (atrPct<=0.03&&volContr<=0.7&&distToHigh<=5&&emaStack!=="none"),
+      bull_flag:       (atrPct<=0.025&&volContr<=0.65&&mom1m>=8&&emaStack!=="none"),
+      earnings_soon:   false,
+      days_to_earnings:null,
+      analyst_buy_pct: null,
+      revenue_growth:  null,
+      analyst_upside:  null,
+      breakout_score:  null,
+      catalyst_score:  null,
+      rs_percentile:   null,
+      rsi:             null,
+      momentum_1m:     mom1m,
+      momentum_3m:     null,
+      pe_ratio:        null,
+      analyst_target:  null,
+      track:           "BREAKOUT",
+    }};
+
+    result.innerHTML =
+      '<div style="margin-bottom:8px;font-size:12px;color:var(--amber)">⚡ Live lookup — calculated client-side from Yahoo Finance (60d history)</div>'
+      + makeCard(s, "—");
+
+  }} catch(e) {{
+    result.innerHTML = '<div class="lookup-error">Could not fetch data for <strong>'+ticker+'</strong>. Check the ticker symbol and try again.<br><small>'+e.message+'</small></div>';
+  }}
+}}
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function render() {{
