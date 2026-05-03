@@ -608,6 +608,7 @@ if not history:
 
 log.info(f"Ready: {len(history)} stocks. Starting 60s scan loop.")
 last_download_date = date.today()
+last_premarket_download = None  # tracks whether 7:30am download happened today
 
 # Pre-load fundamentals for the full universe from file cache
 full_fund_data = {}
@@ -623,14 +624,38 @@ while True:
         now_et = datetime.now(ET)
         sess   = get_session()
 
-        if date.today() != last_download_date:
-            if now_et.hour==9 and now_et.minute>=25:
-                log.info("=== New trading day — refreshing caches ===")
-                history = download_history(universe)
-                load_fund_file_cache()
-                full_fund_data = {t:_fund_file_cache[t] for t in history
-                    if t in _fund_file_cache and isinstance(_fund_file_cache[t],dict)}
-                last_download_date = date.today()
+        # Two full downloads per trading day:
+        #   7:30am ET — pre-market prep (finishes ~8:00am, ready before open)
+        #   9:25am ET — market open refresh (fresh data with overnight gaps)
+        is_weekday = now_et.weekday() < 5
+        premarket_trigger  = is_weekday and now_et.hour == 7 and now_et.minute >= 30
+        marketopen_trigger = is_weekday and now_et.hour == 9 and now_et.minute >= 25
+
+        if premarket_trigger and last_download_date != date.today():
+            log.info("=== Pre-market download (7:30am ET) — building watchlist ===")
+            history = download_history(universe)
+            load_fund_file_cache()
+            full_fund_data = {t:_fund_file_cache[t] for t in history
+                if t in _fund_file_cache and isinstance(_fund_file_cache[t],dict)}
+            last_download_date = date.today()
+            last_premarket_download = date.today()
+
+        elif marketopen_trigger and last_premarket_download == date.today():
+            # Second download of the day — market open refresh after pre-market run
+            log.info("=== Market open refresh (9:25am ET) — updating with overnight data ===")
+            history = download_history(universe)
+            load_fund_file_cache()
+            full_fund_data = {t:_fund_file_cache[t] for t in history
+                if t in _fund_file_cache and isinstance(_fund_file_cache[t],dict)}
+
+        elif marketopen_trigger and last_download_date != date.today():
+            # Fallback: pre-market download was missed, do it now at open
+            log.info("=== New trading day — refreshing caches (pre-market download missed) ===")
+            history = download_history(universe)
+            load_fund_file_cache()
+            full_fund_data = {t:_fund_file_cache[t] for t in history
+                if t in _fund_file_cache and isinstance(_fund_file_cache[t],dict)}
+            last_download_date = date.today()
 
         live    = alpaca_prices(list(history.keys()))
         results = fast_rescore(history, live, full_fund_data)
