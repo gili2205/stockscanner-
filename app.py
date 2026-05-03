@@ -419,12 +419,15 @@ function startWatchdog() {{
   watchdogTimer = setInterval(function() {{
     if (!lastDataTime) return;
     var age = (Date.now()-lastDataTime)/1000;
-    if (age>300) {{ setStatus("err","No data for "+Math.round(age/60)+" min \u2014 check GCP VM"); document.getElementById("dot").className="dot r"; }}
-    else if (age>120) {{ setStatus("warn","Last update "+Math.round(age)+"s ago"); document.getElementById("dot").className="dot a"; }}
+    var _n2=new Date(),_h2=(_n2.getUTCHours()-4+24)%24,_d2=_n2.getUTCDay();
+    var mktOpen2=_d2>=1&&_d2<=5&&_h2>=9&&_h2<16;
+    var errT=mktOpen2?600:86400,warnT=mktOpen2?180:3600;
+    if (age>errT) {{ setStatus("err","No data for "+Math.round(age/60)+" min \u2014 check GCP VM"); document.getElementById("dot").className="dot r"; }}
+    else if (age>120) {{ setStatus("warn","Last update "+Math.round(age/60)+" min ago",0,"",""); document.getElementById("dot").className="dot a"; }}
   }}, 15000);
 }}
 
-try {{ firebase.initializeApp(CFG); }} catch(e) {{ setStatus("err","Firebase init: "+e.message); }}
+try {{ firebase.initializeApp(CFG); }} catch(e) {{ setStatus("err","Firebase init: "+e.message,0,"",""); }}
 var fdb = firebase.database();
 
 fdb.ref(".info/connected").on("value", function(snap) {{
@@ -436,11 +439,15 @@ fdb.ref(".info/connected").on("value", function(snap) {{
 fdb.ref("/scanner").on("value", function(snap) {{
   var d = snap.val();
   lastDataTime = Date.now();
-  if (!d) {{ setStatus("warn","No scanner data yet"); return; }}
+  if (!d) {{ setStatus("warn","No scanner data yet",0,"",""); return; }}
 
   if (d.scanner_version) document.getElementById("verspan").textContent = d.scanner_version;
 
-  var age = d.last_updated ? Math.round((Date.now()-new Date(d.last_updated))/1000) : 0;
+  var _n=new Date(),_h=(_n.getUTCHours()-4+24)%24,_d=_n.getUTCDay();
+  var mktOpen=_d>=1&&_d<=5&&_h>=9&&_h<16;
+  var warnThresh=mktOpen?180:3600;
+  var dlPct=d.download_progress?d.download_progress.pct||0:0;
+  var age = d.last_updated_ts ? Math.round((Date.now()/1000-d.last_updated_ts)) : (d.last_updated ? Math.round((Date.now()-new Date(d.last_updated))/1000) : 0);
   var scanTime = d.last_scan_time ? " \u00b7 "+d.last_scan_time : "";
   var duration = d.scan_duration_sec ? " ("+d.scan_duration_sec+"s)" : "";
   var scanned  = d.stocks_scanned||0;
@@ -486,7 +493,7 @@ fdb.ref("/scanner").on("value", function(snap) {{
     stockData = d.stocks;
   }}
   render();
-}}, function(err) {{ setStatus("err","Firebase error: "+err.message); }});
+}}, function(err) {{ setStatus("err","Firebase error: "+err.message,0,"",""); }});
 
 startWatchdog();
 
