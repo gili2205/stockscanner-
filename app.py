@@ -455,7 +455,7 @@ fdb.ref("/scanner").on("value", function(snap) {{
   var scanned  = d.stocks_scanned||0;
 
   var dlPct = d.download_progress ? d.download_progress.pct||0 : 0;
-  if (scanned===0) setStatus("dl","Downloading market data\u2026 "+dlPct+"% complete", dlPct, "", "");
+  if (scanned===0) setStatus("dl","Downloading market data\u2026 "+dlPct+"% complete \u2014 showing last scan below", dlPct, "", "");
   else if (age>warnThresh) setStatus("warn","Data is "+Math.round(age/60)+" min old"+scanTime, 100, "", "");
   else setStatus("ok","LIVE \u00b7 "+scanned.toLocaleString()+" stocks scanned", 100, "updated "+age+"s ago", duration ? "scan took "+duration : "");
 
@@ -476,10 +476,10 @@ fdb.ref("/scanner").on("value", function(snap) {{
   else if (sess.indexOf("After-Hours")>=0)  {{ r.textContent="\u25d1 After-Hours";  r.className="regime after";  dot.className="dot a"; }}
   else                                       {{ r.textContent="\u25cb Market Closed"; r.className="regime closed"; dot.className="dot x"; }}
 
-  if (d.all_stocks) allStockData = d.all_stocks;
-  else if (d.stocks) allStockData = d.stocks;
+  if (d.all_stocks && Object.keys(d.all_stocks).length > 0) allStockData = d.all_stocks;
+  else if (d.stocks && Object.keys(d.stocks).length > 0) allStockData = d.stocks;
 
-  if (d.stocks) {{
+  if (d.stocks && Object.keys(d.stocks).length > 0) {{
     var nr = [];
     Object.keys(d.stocks).forEach(function(t) {{
       var s = d.stocks[t];
@@ -495,6 +495,7 @@ fdb.ref("/scanner").on("value", function(snap) {{
     prevData = JSON.parse(JSON.stringify(d.stocks));
     stockData = d.stocks;
   }}
+  // Always render — even during download, show last known data
   render();
 }}, function(err) {{ setStatus("err","ERR","Firebase error: "+err.message); }});
 
