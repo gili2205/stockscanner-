@@ -3,7 +3,7 @@ from flask import Flask
 
 app = Flask(__name__)
 
-VERSION = "v2.0.2"
+VERSION = "v2.1.0"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -140,6 +140,13 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .cdn{{color:var(--red);}}
 .tvlink{{color:var(--blue);font-size:11px;text-decoration:none;}}
 .tvlink:hover{{text-decoration:underline;}}
+.chart-btn{{background:var(--blue);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:11px;font-weight:600;cursor:pointer;transition:background .15s;}}
+.chart-btn:hover{{background:#2980b9;}}
+.chart-btn.open{{background:var(--bg3);color:var(--blue);border:1px solid var(--blue);}}
+.chart-panel{{height:320px;background:#000;position:relative;border-top:1px solid var(--border);display:none;}}
+.chart-panel iframe{{width:100%;height:100%;border:none;display:block;}}
+.chart-close{{position:absolute;top:8px;right:8px;background:#1a1d26dd;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;z-index:10;}}
+.chart-close:hover{{color:var(--text);}}
 .empty{{text-align:center;padding:60px;color:var(--muted);width:100%;font-size:15px;line-height:2;}}
 .pgfoot{{padding:14px 24px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);text-align:center;margin-top:8px;}}
 @media(max-width:750px){{.card{{width:100%;}}.grid{{padding:10px;gap:10px;}}.filterrow{{gap:12px;}}.filterpanel{{padding:10px 14px;}}}}
@@ -733,7 +740,7 @@ function makeCard(s, rank) {{
     +(rsi!=null?'<span style="color:'+rc+';font-weight:600">'+rsi.toFixed(0)+' \u2014 '+rsiL(rsi)+'</span>':'<span style="color:#8892a4">Not yet loaded</span>')
     +'</div><div class="rsitrack"><div class="rsifill" style="width:'+(rsiW!=null?rsiW:0)+'%;background:'+(rsi!=null?rc:'#2a2f42')+'"></div></div>'
     +'<div class="rsizones"><span style="color:#9b59b6">Oversold 30</span><span>50</span><span style="color:#e67e22">Overbought 70</span></div></div>';
-  var targetHTML=target?'<div class="trow"><span class="tl">Analyst 1Y target</span><span class="tv" style="color:var(--green)">$'+target.toFixed(0)+' (+'+upside+'%)</span></div>':"";
+  var targetHTML="";
 
   return '<div class="card '+(s.pre_breakout?"pre":s.status==="WATCH"?"watch":"")+'">'
         +'<div class="rank '+(isTop?"top":"")+'">' +rank+ '</div>'
@@ -741,7 +748,7 @@ function makeCard(s, rank) {{
         +'<div class="srow"><div class="snum" style="color:'+color+'">'+s.score+'</div><div class="smeta"><div class="slbl" style="color:'+color+'">'+s.status+'</div><div class="sbar2"><div class="sfill" style="width:'+Math.min(100,s.score||0)+'%;background:'+color+'"></div></div></div></div>'
         +'<div class="funds"><div class="fbox"><div class="flbl">P/E Ratio</div><div class="fval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):"&mdash;")+'</div><div class="fsub">'+(pe&&pe>0?(pe<20?"Cheap":pe<40?"Fair":"Pricey"):"N/A")+'</div></div>'
         +'<div class="fbox"><div class="flbl">RSI (14)</div><div class="fval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):"&mdash;")+'</div><div class="fsub">'+rsiL(rsi)+'</div></div>'
-        +'<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upside&&parseFloat(upside)>0?"#27ae60":"#8892a4")+'">'+(target?"$"+target.toFixed(0):"&mdash;")+'</div><div class="fsub" style="color:'+(upside&&parseFloat(upside)>0?"#27ae60":"#8892a4")+'">'+(upside?"+"+upside+"%":"N/A")+'</div></div></div>'
+        +'<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upside&&parseFloat(upside)>0?"#27ae60":"#8892a4")+'">'+(target?"$"+target.toFixed(0):"&mdash;")+'</div><div class="fsub" style="color:'+(upside&&parseFloat(upside)>0?"#27ae60":"#8892a4")+'">'+(upside?(parseFloat(upside)>=0?"+":"")+upside+"%":"N/A")+'</div></div></div>'
         +rsiHTML
         +'<div class="prox"><div class="ptop"><span>Distance to breakout trigger</span><span style="color:'+pc+';font-weight:600">'+dist.toFixed(1)+'% away</span></div><div class="ptrack"><div class="pfill" style="width:'+prox+'%;background:'+pc+'"></div></div></div>'
         +'<div class="sigs">'+sigs+'</div>'
@@ -770,7 +777,34 @@ function makeCard(s, rank) {{
         +targetHTML
         +'</div>'
         +'<div class="cfoot"><div><span class="price">$'+price.toLocaleString()+'</span><span class="chg '+chgCls+'">'+chgStr+'</span></div>'
-        +'<a class="tvlink" href="https://www.tradingview.com/chart/?symbol=NASDAQ:'+s.ticker+'" target="_blank">TradingView &rarr;</a></div></div>';
+        +'</div>'
+        +'<button class="chart-btn" id="cbtn-'+s.ticker+'" onclick="toggleChart(this,\'cpanel-'+s.ticker+'\',\'cframe-'+s.ticker+'\')">&#128202; Chart</button>'        +'</div>'        +'<div class="chart-panel" id="cpanel-'+s.ticker+'">'        +'<button class="chart-close" onclick="closeChart(\''+s.ticker+'\')">&times; Close</button>'        +'<iframe id="cframe-'+s.ticker+'" src="" scrolling="no" allowtransparency="true"></iframe>'        +'</div>'        +'</div>';
+}}
+
+function toggleChart(btn, panelId, frameId) {{
+  var panel = document.getElementById(panelId);
+  var frame = document.getElementById(frameId);
+  var open  = panel.style.display === 'block';
+  if (open) {{
+    panel.style.display = 'none';
+    frame.src = '';
+    btn.className = 'chart-btn';
+    btn.innerHTML = '&#128202; Chart';
+  }} else {{
+    panel.style.display = 'block';
+    var ticker = frameId.replace('cframe-','');
+    frame.src = 'https://s.tradingview.com/widgetembed/?symbol=NASDAQ%3A'+ticker+'&interval=D&theme=dark&style=1&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&toolbarbg=1a1d26&show_popup_button=0';
+    btn.className = 'chart-btn open';
+    btn.innerHTML = '&times; Close';
+  }}
+}}
+
+function closeChart(ticker) {{
+  document.getElementById('cpanel-'+ticker).style.display='none';
+  document.getElementById('cframe-'+ticker).src='';
+  var btn = document.getElementById('cbtn-'+ticker);
+  btn.className='chart-btn';
+  btn.innerHTML='&#128202; Chart';
 }}
 </script>
 </body>
