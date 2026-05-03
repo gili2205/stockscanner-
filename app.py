@@ -40,10 +40,10 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .regime.pre{{background:#1a2a3d;color:var(--blue);border:1px solid #3498db55;}}
 .regime.after{{background:#2d1a3d;color:var(--purple);border:1px solid #9b59b655;}}
 .regime.closed{{background:var(--bg3);color:var(--muted);border:1px solid var(--border);}}
-.sbar{{padding:0 24px;font-size:12px;display:flex;align-items:center;gap:10px;transition:background .4s,color .4s;border-bottom:1px solid var(--border);min-height:36px;position:relative;overflow:hidden;}}
+.sbar{{padding:0 24px;font-size:12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);min-height:34px;position:relative;overflow:hidden;}}
 .sbar.ok{{background:#1a3d2b33;color:var(--green);}}
 .sbar.warn{{background:#3d2e1033;color:var(--amber);}}
-.sbar.err{{background:#3d1a1a;color:var(--red);border-color:var(--red);}}
+.sbar.err{{background:#3d1a1a;color:var(--red);}}
 .sbar.conn{{background:var(--bg2);color:var(--muted);}}
 .sbar.dl{{background:#1a2a3d55;color:var(--blue);}}
 .sbar-progress{{position:absolute;left:0;top:0;height:100%;background:currentColor;opacity:.07;transition:width 2s ease;pointer-events:none;}}
@@ -84,7 +84,8 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 
 .alertbox{{background:#1a3d2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin:8px 24px;font-size:12px;color:var(--green);display:none;}}
 .grid{{display:flex;flex-wrap:wrap;gap:14px;padding:16px 24px;}}
-.card{{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;width:360px;border-left:3px solid var(--border);position:relative;}}
+.card{{background:var(--bg2);border:1px solid var(--border);border-radius:14px;width:460px;border-left:3px solid var(--border);position:relative;overflow:hidden;transition:box-shadow .2s;}}
+.card:hover{{box-shadow:0 4px 20px rgba(0,0,0,.3);}}
 .card.pre{{border-left-color:var(--green);}}
 .card.watch{{border-left-color:var(--amber);}}
 .rank{{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--muted);}}
@@ -140,6 +141,17 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .cdn{{color:var(--red);}}
 .tvlink{{color:var(--blue);font-size:11px;text-decoration:none;}}
 .tvlink:hover{{text-decoration:underline;}}
+.lookup-panel{{background:var(--bg2);border-bottom:2px solid var(--blue);padding:14px 24px;display:flex;align-items:center;gap:12px;}}
+.lookup-icon{{font-size:18px;opacity:.6;}}
+.lookup-panel input{{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:15px;font-weight:700;letter-spacing:2px;outline:none;width:160px;transition:border-color .2s,box-shadow .2s;text-transform:uppercase;}}
+.lookup-panel input::placeholder{{font-weight:400;letter-spacing:0;font-size:13px;}}
+.lookup-panel input:focus{{border-color:var(--blue);box-shadow:0 0 0 3px #3498db22;}}
+.lookup-btn{{background:var(--blue);color:#fff;border:none;border-radius:8px;padding:10px 22px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;}}
+.lookup-btn:hover{{background:#2980b9;}}
+.lookup-divider{{width:1px;height:28px;background:var(--border);flex-shrink:0;}}
+.lookup-hint{{font-size:12px;color:var(--muted);}}
+.lookup-hint strong{{color:var(--text);}}
+.lookup-result{{padding:16px 24px 0;}}
 .chart-btn{{background:var(--blue);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:11px;font-weight:600;cursor:pointer;transition:background .15s;}}
 .chart-btn:hover{{background:#2980b9;}}
 .chart-btn.open{{background:var(--bg3);color:var(--blue);border:1px solid var(--blue);}}
@@ -166,9 +178,9 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 
 <div class="sbar conn" id="sbar">
   <div class="sbar-progress" id="sbar-progress" style="width:0%"></div>
-  <span class="sbar-dot" id="sbar-dot"></span>
+  <span class="sbar-dot"></span>
   <span id="smsg">Connecting to Firebase...</span>
-  <span class="sbar-right"><span id="sbar-age"></span><span id="sbar-dur"></span><span id="sbar-ver"></span></span>
+  <span class="sbar-right"><span id="sbar-age"></span>&nbsp;<span id="sbar-dur"></span></span>
 </div>
 
 <div class="metrics">
@@ -180,19 +192,19 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
   <div class="metric"><div class="mlabel">Last scan</div><div class="mval" style="font-size:13px" id="m-time">&#8212;</div><div class="msub" id="m-sess">&#8212;</div></div>
 </div>
 
-<!-- ── Ticker lookup ── -->
-<div class="searchbar">
-  <input type="text" id="lookup-input" placeholder="Type any ticker... e.g. NVDA" maxlength="6"
+<!-- __ Ticker lookup __ -->
+<div class="lookup-panel">
+  <div class="lookup-icon">&#128269;</div>
+  <input type="text" id="lookup-input" placeholder="e.g. NVDA" maxlength="6"
     onkeydown="if(event.key==='Enter')lookupTicker()"
     oninput="this.value=this.value.toUpperCase()">
-  <button onclick="lookupTicker()">Look up</button>
-  <span class="search-hint">Get full analysis on any stock — even outside top 200</span>
+  <button class="lookup-btn" onclick="lookupTicker()">Analyze</button>
+  <div class="lookup-divider"></div>
+  <span class="lookup-hint">&#9889; Full analysis on <strong>any stock</strong> &mdash; even outside top 200</span>
 </div>
-<div class="lookup-wrap" id="lookup-wrap" style="display:none">
-  <div id="lookup-result"></div>
-</div>
+<div id="lookup-wrap" style="display:none"><div class="lookup-result" id="lookup-result"></div></div>
 
-<!-- ── Multi-select filter panel ── -->
+<!-- __ Multi-select filter panel __ -->
 <div class="filterpanel">
 
   <div class="filterrow">
@@ -395,15 +407,11 @@ function getActiveDesc() {{
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 function setStatus(type, msg, progress, age, dur) {{
-  var b = document.getElementById("sbar");
-  b.className = "sbar " + type;
-  document.getElementById("smsg").textContent = msg;
-  var pg = document.getElementById("sbar-progress");
-  if (pg) pg.style.width = (progress||0) + "%";
-  var ael = document.getElementById("sbar-age");
-  if (ael) ael.textContent = age||"";
-  var del2 = document.getElementById("sbar-dur");
-  if (del2) del2.textContent = dur||"";
+  var b=document.getElementById("sbar"); b.className="sbar "+type;
+  document.getElementById("smsg").textContent=msg;
+  var pg=document.getElementById("sbar-progress"); if(pg)pg.style.width=(progress||0)+"%";
+  var ael=document.getElementById("sbar-age"); if(ael)ael.textContent=age||"";
+  var del2=document.getElementById("sbar-dur"); if(del2)del2.textContent=dur||"";
 }}
 
 function startWatchdog() {{
@@ -411,53 +419,35 @@ function startWatchdog() {{
   watchdogTimer = setInterval(function() {{
     if (!lastDataTime) return;
     var age = (Date.now()-lastDataTime)/1000;
-    // During market hours (9:30-16:00 ET Mon-Fri) be strict; otherwise be relaxed
-  var now = new Date();
-  var etOffset = -4; // EDT; adjust to -5 for EST in winter
-  var etHour = (now.getUTCHours() + etOffset + 24) % 24;
-  var etDay = now.getUTCDay();
-  var marketHours = etDay>=1 && etDay<=5 && etHour>=9 && etHour<16;
-  var warnThresh  = marketHours ? 180  : 3600;   // 3min live, 60min closed
-  var errThresh   = marketHours ? 600  : 86400;  // 10min live, 24h closed
-  if (age>errThresh) {{ setStatus("err","No data for "+Math.round(age/60)+" min \u2014 check GCP VM",0,"",""); document.getElementById("dot").className="dot r"; }}
-    else if (age>warnThresh) {{ setStatus("warn","Last update "+Math.round(age/60)+" min ago",0,"",""); document.getElementById("dot").className="dot a"; }}
+    if (age>300) {{ setStatus("err","No data for "+Math.round(age/60)+" min \u2014 check GCP VM"); document.getElementById("dot").className="dot r"; }}
+    else if (age>120) {{ setStatus("warn","Last update "+Math.round(age)+"s ago"); document.getElementById("dot").className="dot a"; }}
   }}, 15000);
 }}
 
-try {{ firebase.initializeApp(CFG); }} catch(e) {{ setStatus("err","Firebase init failed: "+e.message); }}
+try {{ firebase.initializeApp(CFG); }} catch(e) {{ setStatus("err","Firebase init: "+e.message); }}
 var fdb = firebase.database();
 
 fdb.ref(".info/connected").on("value", function(snap) {{
   connected = snap.val();
-  if (connected) {{ setStatus("ok","Connected \u2014 waiting for scanner data...",0,"",""); document.getElementById("dot").className="dot g"; }}
+  if (connected) {{ setStatus("ok","Connected \u2014 waiting for scanner data..."); document.getElementById("dot").className="dot g"; }}
   else {{ setStatus("err","Lost Firebase connection",0,"",""); document.getElementById("dot").className="dot r"; }}
 }});
 
 fdb.ref("/scanner").on("value", function(snap) {{
   var d = snap.val();
   lastDataTime = Date.now();
-  if (!d) {{ setStatus("warn","No scanner data in Firebase yet",0,"",""); return; }}
+  if (!d) {{ setStatus("warn","No scanner data yet"); return; }}
 
-  if (d.scanner_version) {{
-    document.getElementById("verspan").textContent = d.scanner_version;
-    var sv = document.getElementById("sbar-ver");
-    if (sv) sv.textContent = d.scanner_version;
-  }}
+  if (d.scanner_version) document.getElementById("verspan").textContent = d.scanner_version;
 
-  var now2 = new Date();
-  var etHour2 = (now2.getUTCHours() - 4 + 24) % 24;
-  var etDay2  = now2.getUTCDay();
-  var mktOpen = etDay2>=1 && etDay2<=5 && etHour2>=9 && etHour2<16;
-  var warnThresh = mktOpen ? 180 : 3600;
-  var age = d.last_updated_ts ? Math.round((Date.now()/1000 - d.last_updated_ts)) : (d.last_updated ? Math.round((Date.now()-new Date(d.last_updated))/1000) : 0);
+  var age = d.last_updated ? Math.round((Date.now()-new Date(d.last_updated))/1000) : 0;
   var scanTime = d.last_scan_time ? " \u00b7 "+d.last_scan_time : "";
   var duration = d.scan_duration_sec ? " ("+d.scan_duration_sec+"s)" : "";
   var scanned  = d.stocks_scanned||0;
 
-  var dlPct = d.download_progress ? d.download_progress.pct||0 : 0;
-  if (scanned===0) setStatus("dl","Downloading market data\u2026 "+dlPct+"% complete \u2014 showing last scan below", dlPct, "", "");
-  else if (age>warnThresh) setStatus("warn","Data is "+Math.round(age/60)+" min old"+scanTime, 100, "", "");
-  else setStatus("ok","LIVE \u00b7 "+scanned.toLocaleString()+" stocks scanned", 100, "updated "+age+"s ago", duration ? "scan took "+duration : "");
+  if (scanned===0) setStatus("dl","Downloading market data\u2026");
+  else if (age>warnThresh) setStatus("warn","Data is "+Math.round(age/60)+" min old"+scanTime,100,"","");
+  else setStatus("ok","LIVE \u00b7 "+scanned.toLocaleString()+" stocks \u00b7 Updated "+age+"s ago"+scanTime+duration);
 
   document.getElementById("m-total").textContent = scanned.toLocaleString();
   document.getElementById("m-pre").textContent    = d.pre_breakout_count||0;
@@ -476,10 +466,10 @@ fdb.ref("/scanner").on("value", function(snap) {{
   else if (sess.indexOf("After-Hours")>=0)  {{ r.textContent="\u25d1 After-Hours";  r.className="regime after";  dot.className="dot a"; }}
   else                                       {{ r.textContent="\u25cb Market Closed"; r.className="regime closed"; dot.className="dot x"; }}
 
-  if (d.all_stocks && Object.keys(d.all_stocks).length > 0) allStockData = d.all_stocks;
-  else if (d.stocks && Object.keys(d.stocks).length > 0) allStockData = d.stocks;
+  if (d.all_stocks&&Object.keys(d.all_stocks).length>0) allStockData=d.all_stocks;
+  else if (d.stocks&&Object.keys(d.stocks).length>0) allStockData=d.stocks;
 
-  if (d.stocks && Object.keys(d.stocks).length > 0) {{
+  if (d.stocks) {{
     var nr = [];
     Object.keys(d.stocks).forEach(function(t) {{
       var s = d.stocks[t];
@@ -495,135 +485,10 @@ fdb.ref("/scanner").on("value", function(snap) {{
     prevData = JSON.parse(JSON.stringify(d.stocks));
     stockData = d.stocks;
   }}
-  // Always render — even during download, show last known data
   render();
-}}, function(err) {{ setStatus("err","Firebase error: "+err.message,0,"",""); }});
+}}, function(err) {{ setStatus("err","Firebase error: "+err.message); }});
 
 startWatchdog();
-
-// ── Ticker lookup ─────────────────────────────────────────────────────────────
-async function lookupTicker() {{
-  var ticker = document.getElementById("lookup-input").value.trim().toUpperCase();
-  if (!ticker) return;
-
-  var wrap = document.getElementById("lookup-wrap");
-  var result = document.getElementById("lookup-result");
-  wrap.style.display = "block";
-  result.innerHTML = '<div class="lookup-loading">⏳ Fetching data for '+ticker+'...</div>';
-
-  // Check if we already have it in our scanned universe
-  if (allStockData && allStockData[ticker]) {{
-    result.innerHTML = '<div style="margin-bottom:8px;font-size:12px;color:var(--green)">✓ Found in scanner universe — showing live data</div>' + makeCard(allStockData[ticker], "—");
-    return;
-  }}
-  if (stockData && stockData[ticker]) {{
-    result.innerHTML = '<div style="margin-bottom:8px;font-size:12px;color:var(--green)">✓ Found in top 10</div>' + makeCard(stockData[ticker], "—");
-    return;
-  }}
-
-  // Not in universe — fetch from Yahoo Finance
-  try {{
-    var url = "https://query1.finance.yahoo.com/v8/finance/chart/"+ticker+"?interval=1d&range=60d";
-    var resp = await fetch(url, {{headers:{{"Accept":"application/json"}}}});
-    if (!resp.ok) throw new Error("HTTP "+resp.status);
-    var data = await resp.json();
-    var res  = data.chart.result;
-    if (!res || !res[0]) throw new Error("No data returned");
-
-    var r       = res[0];
-    var meta    = r.meta;
-    var quotes  = r.indicators.quote[0];
-    var closes  = quotes.close;
-    var highs   = quotes.high;
-    var lows    = quotes.low;
-    var vols    = quotes.volume;
-    var price   = meta.regularMarketPrice || closes[closes.length-1];
-    var prev    = closes[closes.length-2] || closes[closes.length-1];
-    var chg     = ((price-prev)/prev*100);
-
-    // ATR (14)
-    var trs = [];
-    for (var i=1;i<closes.length;i++) {{
-      trs.push(Math.max(highs[i]-lows[i], Math.abs(highs[i]-closes[i-1]), Math.abs(lows[i]-closes[i-1])));
-    }}
-    var atr14 = trs.slice(-14).reduce((a,b)=>a+b,0)/14;
-    var atrPct = atr14/price;
-
-    // EMA 10/20/50
-    function ema(arr,n) {{
-      var k=2/(n+1), e=arr[0];
-      for(var i=1;i<arr.length;i++) e=arr[i]*k+e*(1-k);
-      return e;
-    }}
-    var validC = closes.filter(Boolean);
-    var ema10 = ema(validC,10), ema20 = ema(validC,20), ema50 = ema(validC.slice(-60),50);
-    var emaStack = (ema10>ema20&&ema20>ema50&&price>ema10)?"full":(price>ema20?"partial":"none");
-
-    // HH/HL over last 20 bars
-    var hhhl=0;
-    for(var i=closes.length-20;i<closes.length-1;i++) {{
-      if(highs[i+1]>highs[i]&&lows[i+1]>lows[i]) hhhl++;
-    }}
-    var hhhlPct = hhhl/19;
-
-    // Volume contraction (last 5 vs prior 15)
-    var avgVolRecent = vols.slice(-5).reduce((a,b)=>a+(b||0),0)/5;
-    var avgVolBase   = vols.slice(-20,-5).reduce((a,b)=>a+(b||0),0)/15;
-    var volContr     = avgVolBase>0?avgVolRecent/avgVolBase:1;
-
-    // 52w high
-    var high52 = Math.max(...highs.filter(Boolean));
-    var distToHigh = ((high52-price)/price*100);
-    var level = distToHigh<1?"ATH":distToHigh<5?"52-week":"prior resistance";
-
-    // Momentum 1m
-    var mom1m = closes.length>=21?((price-closes[closes.length-21])/closes[closes.length-21]*100):0;
-
-    // Avg volume
-    var avgVol = vols.slice(-20).reduce((a,b)=>a+(b||0),0)/20;
-
-    // Build synthetic stock object
-    var s = {{
-      ticker:          ticker,
-      name:            meta.shortName||ticker,
-      sector:          meta.instrumentType||"",
-      price:           price,
-      change_pct:      chg,
-      score:           null,
-      status:          "LOOKUP",
-      ema_stack:       emaStack,
-      atr:             atrPct,
-      hh_hl:           hhhlPct,
-      vol_contraction: volContr,
-      vol_ratio:       avgVolBase>0?avgVolRecent/avgVolBase:1,
-      level:           level,
-      dist_to_level:   distToHigh,
-      pre_breakout:    (atrPct<=0.03&&volContr<=0.7&&distToHigh<=5&&emaStack!=="none"),
-      bull_flag:       (atrPct<=0.025&&volContr<=0.65&&mom1m>=8&&emaStack!=="none"),
-      earnings_soon:   false,
-      days_to_earnings:null,
-      analyst_buy_pct: null,
-      revenue_growth:  null,
-      analyst_upside:  null,
-      breakout_score:  null,
-      catalyst_score:  null,
-      rs_percentile:   null,
-      rsi:             null,
-      momentum_1m:     mom1m,
-      momentum_3m:     null,
-      pe_ratio:        null,
-      analyst_target:  null,
-      track:           "BREAKOUT",
-    }};
-
-    result.innerHTML =
-      '<div style="margin-bottom:8px;font-size:12px;color:var(--amber)">⚡ Live lookup — calculated client-side from Yahoo Finance (60d history)</div>'
-      + makeCard(s, "—");
-
-  }} catch(e) {{
-    result.innerHTML = '<div class="lookup-error">Could not fetch data for <strong>'+ticker+'</strong>. Check the ticker symbol and try again.<br><small>'+e.message+'</small></div>';
-  }}
-}}
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function render() {{
@@ -677,52 +542,36 @@ function makeCard(s, rank) {{
   var isTop  = rank<=3;
   var pe=s.pe_ratio, rsi=s.rsi, target=s.analyst_target, price=s.price||0;
   var upside = (target&&price)?((target-price)/price*100).toFixed(1):null;
-  var rsiW   = rsi!=null?Math.min(100,Math.max(0,rsi)):null;
+  var rsiW   = rsi?Math.min(100,rsi):0;
   var rc     = rsiC(rsi);
   var mom    = s.momentum_1m||0;
   var track  = s.track||"BREAKOUT";
 
-  // ATR compression ratio → estimate actual daily ATR %
-  // Typical daily ATR for liquid stocks: 2-5% depending on price tier
-  var baseDailyAtr = price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
-  var atrComp      = s.atr||1.0;  // compression ratio vs base period
-  var dailyAtrPct  = Math.min(0.12, Math.max(0.01, baseDailyAtr * atrComp));
-  var entryNum     = price*1.0025;
-  var stopDist     = Math.min(0.10, Math.max(0.02, dailyAtrPct*1.5));
-  var stopNum      = entryNum*(1-stopDist);
-  var riskDollar   = entryNum-stopNum;
-  var tgt1Num      = entryNum+riskDollar*2.0;
-  var tgt2Num      = entryNum+riskDollar*3.5;
-  var stpPct       = (stopDist*100).toFixed(1);
-
-  // Risk category
-  var riskCat, riskColor, riskBg;
-  if (stopDist<=0.03)      {{ riskCat="Low";    riskColor="#27ae60"; riskBg="#1a3d2b"; }}
-  else if (stopDist<=0.06) {{ riskCat="Medium"; riskColor="#e67e22"; riskBg="#3d2e10"; }}
-  else                     {{ riskCat="High";   riskColor="#e74c3c"; riskBg="#3d1a1a"; }}
-
-  // Reward score (0-4 bonuses)
-  var rewardPts = 0;
-  if ((s.ema_stack||"")    ==="full") rewardPts++;
-  if ((s.hh_hl||0)         >= 0.8)   rewardPts++;
-  if ((s.vol_contraction||1)<= 0.7)  rewardPts++;
-  if ((s.level||"").indexOf("ATH")>=0||(s.level||"").indexOf("multi")>=0) rewardPts++;
-
-  var rewardCat, rewardColor, rewardBg;
-  if (rewardPts>=3)      {{ rewardCat="High";   rewardColor="#27ae60"; rewardBg="#1a3d2b"; }}
-  else if (rewardPts>=2) {{ rewardCat="Medium"; rewardColor="#e67e22"; rewardBg="#3d2e10"; }}
-  else                   {{ rewardCat="Low";    rewardColor="#e74c3c"; rewardBg="#3d1a1a"; }}
-
-  // Setup label combining risk + reward
-  var setupCat, setupColor, setupBg, setupIcon;
-  var rr = riskCat+"/"+rewardCat;
-  if      (rr==="Low/High")     {{ setupCat="Best setup";  setupColor="#27ae60"; setupBg="#1a3d2b"; setupIcon="⭐"; }}
-  else if (rr==="Low/Medium")   {{ setupCat="Good setup";  setupColor="#27ae60"; setupBg="#1a3d2b"; setupIcon="✅"; }}
-  else if (rr==="Medium/High")  {{ setupCat="High upside"; setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="🎯"; }}
-  else if (rr==="Medium/Medium"){{ setupCat="Balanced";    setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="📊"; }}
-  else if (rr==="High/High")    {{ setupCat="Aggressive";  setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="🎲"; }}
-  else if (rr==="Low/Low")      {{ setupCat="Weak upside"; setupColor="#8892a4"; setupBg="#22263a"; setupIcon="📉"; }}
-  else                          {{ setupCat="Skip";        setupColor="#e74c3c"; setupBg="#3d1a1a"; setupIcon="⚠️"; }}
+  var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
+  var dailyAtrPct=Math.min(0.12,Math.max(0.01,base*(s.atr||1)));
+  var entryNum=price*1.0025,stopDist=Math.min(0.10,Math.max(0.02,dailyAtrPct*1.5));
+  var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
+  var riskCat,riskColor,riskBg;
+  if(stopDist<=0.03){{riskCat='Low';riskColor='#27ae60';riskBg='#1a3d2b';}}
+  else if(stopDist<=0.06){{riskCat='Medium';riskColor='#e67e22';riskBg='#3d2e10';}}
+  else{{riskCat='High';riskColor='#e74c3c';riskBg='#3d1a1a';}}
+  var rp=0;
+  if((s.ema_stack||'')==='full')rp++;
+  if((s.hh_hl||0)>=0.8)rp++;
+  if((s.vol_contraction||1)<=0.7)rp++;
+  if((s.level||'').indexOf('ATH')>=0||(s.level||'').indexOf('multi')>=0)rp++;
+  var rewardCat,rewardColor,rewardBg;
+  if(rp>=3){{rewardCat='High';rewardColor='#27ae60';rewardBg='#1a3d2b';}}
+  else if(rp>=2){{rewardCat='Medium';rewardColor='#e67e22';rewardBg='#3d2e10';}}
+  else{{rewardCat='Low';rewardColor='#e74c3c';rewardBg='#3d1a1a';}}
+  var rr=riskCat+'/'+rewardCat,setupCat,setupColor,setupBg,setupIcon;
+  if(rr==='Low/High'){{setupCat='Best setup';setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#11088;';}}
+  else if(rr==='Low/Medium'){{setupCat='Good setup';setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#9989;';}}
+  else if(rr==='Medium/High'){{setupCat='High upside';setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127919;';}}
+  else if(rr==='Medium/Medium'){{setupCat='Balanced';setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#128202;';}}
+  else if(rr==='High/High'){{setupCat='Aggressive';setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127922;';}}
+  else if(rr==='Low/Low'){{setupCat='Weak upside';setupColor='#8892a4';setupBg='#22263a';setupIcon='&#128201;';}}
+  else{{setupCat='Skip';setupColor='#e74c3c';setupBg='#3d1a1a';setupIcon='&#9888;';}}
 
   var sigs = '<span class="sig sg">'+s.status+'</span>';
   sigs += track==="CATALYST"?'<span class="sig sp">&#128197; Catalyst</span>':'<span class="sig sb">&#128293; Breakout</span>';
@@ -737,92 +586,99 @@ function makeCard(s, rank) {{
   if(rsi&&rsi>=70)                 sigs+='<span class="sig sr">RSI overbought</span>';
   if(upside&&parseFloat(upside)>=20) sigs+='<span class="sig sg">+'+upside+'% analyst upside</span>';
 
-  var rsiHTML = '<div class="rsiwrap"><div class="rsitop"><span>RSI Momentum</span>'
-    +(rsi!=null?'<span style="color:'+rc+';font-weight:600">'+rsi.toFixed(0)+' \u2014 '+rsiL(rsi)+'</span>':'<span style="color:#8892a4">Not yet loaded</span>')
-    +'</div><div class="rsitrack"><div class="rsifill" style="width:'+(rsiW!=null?rsiW:0)+'%;background:'+(rsi!=null?rc:'#2a2f42')+'"></div></div>'
-    +'<div class="rsizones"><span style="color:#9b59b6">Oversold 30</span><span>50</span><span style="color:#e67e22">Overbought 70</span></div></div>';
+  var rsiHTML="";
+  if(rsi!=null){{rsiHTML='<div class="rsiwrap"><div class="rsitop"><span>RSI Momentum</span><span style="color:'+rc+';font-weight:600">'+rsi.toFixed(0)+' \u2014 '+rsiL(rsi)+'</span></div><div class="rsitrack"><div class="rsifill" style="width:'+rsiW+'%;background:'+rc+'"></div></div><div class="rsizones"><span style="color:#9b59b6">Oversold 30</span><span>50</span><span style="color:#e67e22">Overbought 70</span></div></div>';}}
   var targetHTML="";
 
-  var h = '';
-  h += '<div class="card '+(s.pre_breakout?"pre":s.status==="WATCH"?"watch":"")+'">';
-  h += '<div class="card-body">';
-  h += '<div class="rank '+(isTop?"top":"")+'">'+rank+'</div>';
-  h += '<div class="ctop"><div class="ticker">'+s.ticker+'</div>';
-  h += '<div class="co">'+(s.name&&s.name!==s.ticker?s.name+' &middot; ':'')+(s.sector||'NASDAQ')+'</div></div>';
-  h += '<div class="srow"><div class="snum" style="color:'+color+'">'+(s.score||'—')+'</div>';
-  h += '<div class="smeta"><div class="slbl" style="color:'+color+'">'+s.status+'</div>';
-  h += '<div class="sbar2"><div class="sfill" style="width:'+Math.min(100,s.score||0)+'%;background:'+color+'"></div></div></div></div>';
-  h += '<div class="funds">';
-  h += '<div class="fbox"><div class="flbl">P/E Ratio</div><div class="fval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div><div class="fsub">'+(pe&&pe>0?(pe<20?'Cheap':pe<40?'Fair':'Pricey'):'N/A')+'</div></div>';
-  h += '<div class="fbox"><div class="flbl">RSI (14)</div><div class="fval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div><div class="fsub">'+rsiL(rsi)+'</div></div>';
-  h += '<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upside&&parseFloat(upside)>0?'#27ae60':'#8892a4')+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div>';
-  h += '<div class="fsub" style="color:'+(upside&&parseFloat(upside)>0?'#27ae60':'#8892a4')+'">'+(upside?(parseFloat(upside)>=0?'+':'')+upside+'%':'N/A')+'</div></div>';
-  h += '</div>';
-  h += rsiHTML;
-  h += '<div class="prox"><div class="ptop"><span>Distance to breakout trigger</span><span style="color:'+pc+';font-weight:600">'+dist.toFixed(1)+'% away</span></div>';
-  h += '<div class="ptrack"><div class="pfill" style="width:'+prox+'%;background:'+pc+'"></div></div></div>';
-  h += '<div class="sigs">'+sigs+'</div>';
-  h += '<div class="stitle">Technical Factors</div>';
-  h += '<div class="factors">';
-  h += '<div class="factor"><span class="fn">ATR coil</span><span class="fv '+((s.atr||1)<=0.25?'fg':(s.atr||1)<=0.35?'fa':'fr')+'">'+(s.atr||0).toFixed(2)+'</span></div>';
-  h += '<div class="factor"><span class="fn">Vol contraction</span><span class="fv '+((s.vol_contraction||1)<=0.7?'fg':(s.vol_contraction||1)<=0.9?'fa':'fr')+'">'+Math.round((s.vol_contraction||1)*100)+'%</span></div>';
-  h += '<div class="factor"><span class="fn">RS percentile</span><span class="fv '+((s.rs_percentile||0)>=80?'fg':'')+'">'+(s.rs_percentile!=null?s.rs_percentile.toFixed(0):'—')+'th</span></div>';
-  h += '<div class="factor"><span class="fn">EMA stack</span><span class="fv '+ec(s.ema_stack)+'">'+(s.ema_stack||'&mdash;')+'</span></div>';
-  h += '<div class="factor"><span class="fn">HH/HL</span><span class="fv '+((s.hh_hl||0)>=0.8?'fg':'fa')+'">'+Math.round((s.hh_hl||0)*100)+'%</span></div>';
-  h += '<div class="factor"><span class="fn">Level</span><span class="fv" style="color:'+lc(s.level)+'">'+(s.level||'&mdash;')+'</span></div>';
-  h += '</div>';
-  h += '<div class="trade"><div class="ttitle">Risk / Reward</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
-  h += '<div style="background:'+riskBg+';border-radius:8px;padding:12px;text-align:center">';
-  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Risk</div>';
-  h += '<div style="font-size:20px;font-weight:700;color:'+riskColor+'">'+riskCat+'</div>';
-  h += '<div style="font-size:10px;color:'+riskColor+';margin-top:4px">stop '+stpPct+'%</div></div>';
-  h += '<div style="background:'+rewardBg+';border-radius:8px;padding:12px;text-align:center">';
-  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Reward</div>';
-  h += '<div style="font-size:20px;font-weight:700;color:'+rewardColor+'">'+rewardCat+'</div>';
-  h += '<div style="font-size:10px;color:'+rewardColor+';margin-top:4px">'+rewardPts+'/4 signals</div></div>';
-  h += '</div>';
-  h += '<div style="background:'+setupBg+';border:1px solid '+setupColor+'44;border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">';
-  h += '<div style="font-size:15px;font-weight:700;color:'+setupColor+'">'+setupIcon+' '+setupCat+'</div>';
-  h += '<div style="font-size:11px;color:var(--muted)">Entry $'+entryNum.toFixed(2)+'&nbsp;&nbsp;Stop $'+stopNum.toFixed(2)+'</div>';
-  h += '</div></div>';
-  h += '<div class="cfoot">';
-  h += '<div><span class="price">$'+price.toFixed(2)+'</span><span class="chg '+chgCls+'">'+chgStr+'</span></div>';
-  h += '<button class="chart-btn" id="cbtn-'+s.ticker+'" onclick="toggleChart(this,\'cpanel-'+s.ticker+'\',\'cframe-'+s.ticker+'\')">&#128202; Chart</button>';
-  h += '</div>';
-  h += '</div>';
-  h += '<div class="chart-panel" id="cpanel-'+s.ticker+'">';
-  h += '<button class="chart-close" onclick="closeChart(\''+s.ticker+'\')">&#10005; Close chart</button>';
-  h += '<iframe id="cframe-'+s.ticker+'" src="" scrolling="no" allowtransparency="true"></iframe>';
-  h += '</div>';
-  h += '</div>';
-  return h;
+  return '<div class="card '+(s.pre_breakout?"pre":s.status==="WATCH"?"watch":"")+'">'
+        +'<div class="rank '+(isTop?"top":"")+'">' +rank+ '</div>'
+        +'<div class="ctop"><div class="ticker">'+s.ticker+'</div><div class="co">'+(s.sector||"NASDAQ")+'</div></div>'
+        +'<div class="srow"><div class="snum" style="color:'+color+'">'+s.score+'</div><div class="smeta"><div class="slbl" style="color:'+color+'">'+s.status+'</div><div class="sbar2"><div class="sfill" style="width:'+Math.min(100,s.score||0)+'%;background:'+color+'"></div></div></div></div>'
+        +'<div class="funds"><div class="fbox"><div class="flbl">P/E Ratio</div><div class="fval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):"&mdash;")+'</div><div class="fsub">'+(pe&&pe>0?(pe<20?"Cheap":pe<40?"Fair":"Pricey"):"N/A")+'</div></div>'
+        +'<div class="fbox"><div class="flbl">RSI (14)</div><div class="fval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):"&mdash;")+'</div><div class="fsub">'+rsiL(rsi)+'</div></div>'
+        +'<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upside&&parseFloat(upside)>0?"#27ae60":"#8892a4")+'">'+(target?"$"+target.toFixed(0):"&mdash;")+'</div><div class="fsub" style="color:'+(upside&&parseFloat(upside)>0?"#27ae60":"#8892a4")+'">'+(upside?(parseFloat(upside)>=0?"+":"")+upside+"%":"N/A")+'</div></div></div>'
+        +rsiHTML
+        +'<div class="prox"><div class="ptop"><span>Distance to breakout trigger</span><span style="color:'+pc+';font-weight:600">'+dist.toFixed(1)+'% away</span></div><div class="ptrack"><div class="pfill" style="width:'+prox+'%;background:'+pc+'"></div></div></div>'
+        +'<div class="sigs">'+sigs+'</div>'
+        +'<div class="stitle">Technical Factors</div>'
+        +'<div class="factors">'
+        +'<div class="factor"><span class="fn">ATR coil</span><span class="fv '+((s.atr||1)<=0.25?"fg":(s.atr||1)<=0.35?"fa":"fr")+'">'+(s.atr||0).toFixed(2)+'</span></div>'
+        +'<div class="factor"><span class="fn">Vol contraction</span><span class="fv '+((s.vol_contraction||1)<=0.7?"fg":(s.vol_contraction||1)<=0.9?"fa":"fr")+'">'+Math.round((s.vol_contraction||1)*100)+'%</span></div>'
+        +'<div class="factor"><span class="fn">RS percentile</span><span class="fv '+((s.rs_percentile||50)>=80?"fg":"")+'">'+(s.rs_percentile||50).toFixed(0)+'th</span></div>'
+        +'<div class="factor"><span class="fn">EMA stack</span><span class="fv '+ec(s.ema_stack)+'">'+(s.ema_stack||"&mdash;")+'</span></div>'
+        +'<div class="factor"><span class="fn">HH/HL</span><span class="fv '+((s.hh_hl||0)>=0.8?"fg":"fa")+'">'+Math.round((s.hh_hl||0)*100)+'%</span></div>'
+        +'<div class="factor"><span class="fn">Level</span><span class="fv" style="color:'+lc(s.level)+'">'+(s.level||"&mdash;")+'</span></div></div>'
+        +'<div class="trade"><div class="ttitle">Risk / Reward</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+        +'<div style="background:'+riskBg+';border-radius:8px;padding:12px;text-align:center">'
+        +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Risk</div>'
+        +'<div style="font-size:20px;font-weight:700;color:'+riskColor+'">'+riskCat+'</div>'
+        +'<div style="font-size:10px;color:'+riskColor+';margin-top:4px">stop '+stpPct+'%</div></div>'
+        +'<div style="background:'+rewardBg+';border-radius:8px;padding:12px;text-align:center">'
+        +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Reward</div>'
+        +'<div style="font-size:20px;font-weight:700;color:'+rewardColor+'">'+rewardCat+'</div>'
+        +'<div style="font-size:10px;color:'+rewardColor+';margin-top:4px">'+rp+'/4 signals</div></div></div>'
+        +'<div style="background:'+setupBg+';border:1px solid '+setupColor+'44;border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">'
+        +'<div style="font-size:15px;font-weight:700;color:'+setupColor+'">'+setupIcon+' '+setupCat+'</div>'
+        +'<div style="font-size:11px;color:var(--muted)">Entry $'+entryNum.toFixed(2)+'&nbsp; Stop $'+stopNum.toFixed(2)+'</div></div>'
+        +targetHTML+'</div>'
+        +'<div class="cfoot"><div><span class="price">$'+price.toLocaleString()+'</span><span class="chg '+chgCls+'">'+chgStr+'</span></div>'
+        +'<button class="chart-btn" id="cbtn-'+s.ticker+'" onclick="toggleChart(this,\'cpanel-'+s.ticker+'\',\'cframe-'+s.ticker+'\')">&#128202; Chart</button></div>'
+        +'<div class="chart-panel" id="cpanel-'+s.ticker+'"><button class="chart-close" onclick="closeChart(\''+s.ticker+'\')">&times; Close</button><iframe id="cframe-'+s.ticker+'" src="" scrolling="no" allowtransparency="true"></iframe></div></div>';
 }}
 
-function toggleChart(btn, panelId, frameId) {{
-  var panel = document.getElementById(panelId);
-  var frame = document.getElementById(frameId);
-  var open  = panel.style.display === 'block';
-  if (open) {{
-    panel.style.display = 'none';
-    frame.src = '';
-    btn.className = 'chart-btn';
-    btn.innerHTML = '&#128202; Chart';
-  }} else {{
-    panel.style.display = 'block';
-    var ticker = frameId.replace('cframe-','');
-    frame.src = 'https://s.tradingview.com/widgetembed/?symbol=NASDAQ%3A'+ticker+'&interval=D&theme=dark&style=1&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&toolbarbg=1a1d26&show_popup_button=0';
-    btn.className = 'chart-btn open';
-    btn.innerHTML = '&times; Close';
+function toggleChart(btn,panelId,frameId) {{
+  var panel=document.getElementById(panelId),frame=document.getElementById(frameId);
+  var open=panel.style.display==='block';
+  if(open){{ panel.style.display='none'; frame.src=''; btn.className='chart-btn'; btn.innerHTML='&#128202; Chart'; }}
+  else {{
+    panel.style.display='block';
+    frame.src='https://s.tradingview.com/widgetembed/?symbol=NASDAQ%3A'+frameId.replace('cframe-','')+'&interval=D&theme=dark&style=1&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&toolbarbg=1a1d26&show_popup_button=0';
+    btn.className='chart-btn open'; btn.innerHTML='&times; Close';
   }}
 }}
-
-function closeChart(ticker) {{
-  document.getElementById('cpanel-'+ticker).style.display='none';
-  document.getElementById('cframe-'+ticker).src='';
-  var btn = document.getElementById('cbtn-'+ticker);
-  btn.className='chart-btn';
-  btn.innerHTML='&#128202; Chart';
+function closeChart(t) {{
+  var p=document.getElementById('cpanel-'+t),f=document.getElementById('cframe-'+t),b=document.getElementById('cbtn-'+t);
+  if(p)p.style.display='none'; if(f)f.src=''; if(b){{b.className='chart-btn';b.innerHTML='&#128202; Chart';}}
+}}
+async function lookupTicker() {{
+  var ticker=document.getElementById('lookup-input').value.trim().toUpperCase();
+  if(!ticker)return;
+  var wrap=document.getElementById('lookup-wrap'),result=document.getElementById('lookup-result');
+  wrap.style.display='block';
+  result.innerHTML='<div style="color:var(--muted);padding:12px 0">&#9203; Fetching '+ticker+'...</div>';
+  if(allStockData&&allStockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in scanner</div>'+makeCard(allStockData[ticker],'&mdash;');return;}}
+  if(stockData&&stockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in top 10</div>'+makeCard(stockData[ticker],'&mdash;');return;}}
+  try {{
+    var resp=await fetch('https://query1.finance.yahoo.com/v8/finance/chart/'+ticker+'?interval=1d&range=60d',{{headers:{{"Accept":"application/json"}}}});
+    if(!resp.ok)throw new Error('HTTP '+resp.status);
+    var data=await resp.json(),res=data.chart.result;
+    if(!res||!res[0])throw new Error('No data');
+    var r=res[0],meta=r.meta,q=r.indicators.quote[0];
+    var cl=q.close.map(function(v){{return v||0;}}),hi=q.high.map(function(v){{return v||0;}}),lo=q.low.map(function(v){{return v||0;}}),vo=q.volume.map(function(v){{return v||0;}});
+    var n=cl.length,price=meta.regularMarketPrice||cl[n-1],chg=cl[n-2]?((price-cl[n-2])/cl[n-2]*100):0;
+    var trs=[];for(var i=1;i<n;i++)trs.push(Math.max(hi[i]-lo[i],Math.abs(hi[i]-cl[i-1]),Math.abs(lo[i]-cl[i-1])));
+    var atr=trs.slice(-14).reduce(function(a,b){{return a+b;}},0)/14;
+    function ema(a,p){{var k=2/(p+1),e=a[0];for(var i=1;i<a.length;i++)e=(a[i]||e)*k+e*(1-k);return e;}}
+    var e10=ema(cl,10),e20=ema(cl,20),e50=ema(cl.slice(-60),50);
+    var es=(e10>e20&&e20>e50&&price>e10)?'full':(price>e20?'partial':'none');
+    var hh=0;for(var i=n-20;i<n-1;i++)if(hi[i+1]>hi[i]&&lo[i+1]>lo[i])hh++;
+    var vr=vo.slice(-5).reduce(function(a,b){{return a+b;}},0)/5;
+    var vb=vo.slice(-20,-5).reduce(function(a,b){{return a+b;}},0)/15;
+    var vh=hi.filter(function(v){{return v>0;}}),h52=vh.length?Math.max.apply(null,vh):price;
+    var dist=h52>0?((h52-price)/price*100):0,mom=n>=21?((price-cl[n-21])/cl[n-21]*100):0;
+    var s={{ticker:ticker,name:meta.shortName||ticker,sector:'',price:price,change_pct:chg,
+      score:null,status:'LOOKUP',ema_stack:es,atr:price>0?atr/price:0.03,
+      hh_hl:hh/19,vol_contraction:vb>0?vr/vb:1,vol_ratio:vb>0?vr/vb:1,
+      level:dist<1?'ATH':dist<5?'52-week':'prior resistance',dist_to_level:dist,
+      pre_breakout:(atr/price<=0.03&&vb>0&&vr/vb<=0.7&&dist<=5&&es!=='none'),
+      bull_flag:(atr/price<=0.025&&vb>0&&vr/vb<=0.65&&mom>=8&&es!=='none'),
+      earnings_soon:false,rs_percentile:null,rsi:null,momentum_1m:mom,
+      pe_ratio:null,analyst_target:null,track:'BREAKOUT'}};
+    result.innerHTML='<div style="color:var(--amber);font-size:12px;margin-bottom:8px">&#9889; Live lookup &mdash; Yahoo Finance 60d</div>'+makeCard(s,'&mdash;');
+  }} catch(e) {{
+    result.innerHTML='<div style="color:var(--red);padding:12px 0">Could not fetch <strong>'+ticker+'</strong>: '+e.message+'</div>';
+  }}
 }}
 </script>
 </body>
