@@ -537,7 +537,35 @@ function makeCard(s, rank) {{
   var tgt1Num      = entryNum+riskDollar*2.0;
   var tgt2Num      = entryNum+riskDollar*3.5;
   var stpPct       = (stopDist*100).toFixed(1);
-  var upPct1       = ((tgt1Num-entryNum)/entryNum*100).toFixed(1);
+
+  // Risk category
+  var riskCat, riskColor, riskBg;
+  if (stopDist<=0.03)      { riskCat="Low";    riskColor="#27ae60"; riskBg="#1a3d2b"; }
+  else if (stopDist<=0.06) { riskCat="Medium"; riskColor="#e67e22"; riskBg="#3d2e10"; }
+  else                     { riskCat="High";   riskColor="#e74c3c"; riskBg="#3d1a1a"; }
+
+  // Reward score (0-4 bonuses)
+  var rewardPts = 0;
+  if ((s.ema_stack||"")    ==="full") rewardPts++;
+  if ((s.hh_hl||0)         >= 0.8)   rewardPts++;
+  if ((s.vol_contraction||1)<= 0.7)  rewardPts++;
+  if ((s.level||"").indexOf("ATH")>=0||(s.level||"").indexOf("multi")>=0) rewardPts++;
+
+  var rewardCat, rewardColor, rewardBg;
+  if (rewardPts>=3)      { rewardCat="High";   rewardColor="#27ae60"; rewardBg="#1a3d2b"; }
+  else if (rewardPts>=2) { rewardCat="Medium"; rewardColor="#e67e22"; rewardBg="#3d2e10"; }
+  else                   { rewardCat="Low";    rewardColor="#e74c3c"; rewardBg="#3d1a1a"; }
+
+  // Setup label combining risk + reward
+  var setupCat, setupColor, setupBg, setupIcon;
+  var rr = riskCat+"/"+rewardCat;
+  if      (rr==="Low/High")     { setupCat="Best setup";  setupColor="#27ae60"; setupBg="#1a3d2b"; setupIcon="⭐"; }
+  else if (rr==="Low/Medium")   { setupCat="Good setup";  setupColor="#27ae60"; setupBg="#1a3d2b"; setupIcon="✅"; }
+  else if (rr==="Medium/High")  { setupCat="High upside"; setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="🎯"; }
+  else if (rr==="Medium/Medium"){ setupCat="Balanced";    setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="📊"; }
+  else if (rr==="High/High")    { setupCat="Aggressive";  setupColor="#e67e22"; setupBg="#3d2e10"; setupIcon="🎲"; }
+  else if (rr==="Low/Low")      { setupCat="Weak upside"; setupColor="#8892a4"; setupBg="#22263a"; setupIcon="📉"; }
+  else                          { setupCat="Skip";        setupColor="#e74c3c"; setupBg="#3d1a1a"; setupIcon="⚠️"; }
 
   var sigs = '<span class="sig sg">'+s.status+'</span>';
   sigs += track==="CATALYST"?'<span class="sig sp">&#128197; Catalyst</span>':'<span class="sig sb">&#128293; Breakout</span>';
@@ -576,13 +604,22 @@ function makeCard(s, rank) {{
         +'<div class="factor"><span class="fn">EMA stack</span><span class="fv '+ec(s.ema_stack)+'">'+(s.ema_stack||"&mdash;")+'</span></div>'
         +'<div class="factor"><span class="fn">HH/HL</span><span class="fv '+((s.hh_hl||0)>=0.8?"fg":"fa")+'">'+Math.round((s.hh_hl||0)*100)+'%</span></div>'
         +'<div class="factor"><span class="fn">Level</span><span class="fv" style="color:'+lc(s.level)+'">'+(s.level||"&mdash;")+'</span></div></div>'
-        +'<div class="trade"><div class="ttitle">Trade Setup</div>'
-        +'<div class="trow"><span class="tl">Buy above (breakout)</span><span class="tv" style="color:var(--green)">$'+entryNum.toFixed(2)+'</span></div>'
-        +'<div class="trow"><span class="tl">Stop loss</span><span class="tv" style="color:var(--red)">$'+stopNum.toFixed(2)+' (-'+stpPct+'%)</span></div>'
-        +'<div class="trow"><span class="tl">Target 1 (2:1 R/R)</span><span class="tv" style="color:var(--blue)">$'+tgt1Num.toFixed(2)+' (+'+upPct1+'%)</span></div>'
-        +'<div class="trow"><span class="tl">Target 2 (3.5:1 R/R)</span><span class="tv" style="color:var(--blue)">$'+tgt2Num.toFixed(2)+'</span></div>'
+        +'<div class="trade">'
+        +'<div class="ttitle">Risk / Reward</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">'
+        +'<div style="background:'+riskBg+';border-radius:6px;padding:8px;text-align:center">'
+        +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Risk</div>'
+        +'<div style="font-size:16px;font-weight:700;color:'+riskColor+'">'+riskCat+'</div>'
+        +'<div style="font-size:9px;color:'+riskColor+';margin-top:2px">stop '+stpPct+'%</div></div>'
+        +'<div style="background:'+rewardBg+';border-radius:6px;padding:8px;text-align:center">'
+        +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Reward</div>'
+        +'<div style="font-size:16px;font-weight:700;color:'+rewardColor+'">'+rewardCat+'</div>'
+        +'<div style="font-size:9px;color:'+rewardColor+';margin-top:2px">'+rewardPts+'/4 signals</div></div></div>'
+        +'<div style="background:'+setupBg+';border:1px solid '+setupColor+'55;border-radius:8px;padding:9px 12px;display:flex;justify-content:space-between;align-items:center">'
+        +'<div style="font-size:13px;font-weight:700;color:'+setupColor+'">'+setupIcon+' '+setupCat+'</div>'
+        +'<div style="font-size:10px;color:var(--muted)">Entry $'+entryNum.toFixed(2)+'&nbsp;&nbsp;Stop $'+stopNum.toFixed(2)+'</div></div>'
         +targetHTML
-        +'<div class="trow" style="margin-top:4px"><span class="tl">Risk / Reward</span><span class="rrbadge">2.0:1 → 3.5:1</span></div></div>'
+        +'</div>'
         +'<div class="cfoot"><div><span class="price">$'+price.toLocaleString()+'</span><span class="chg '+chgCls+'">'+chgStr+'</span></div>'
         +'<a class="tvlink" href="https://www.tradingview.com/chart/?symbol=NASDAQ:'+s.ticker+'" target="_blank">TradingView &rarr;</a></div></div>';
 }}
