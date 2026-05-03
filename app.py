@@ -520,20 +520,24 @@ function makeCard(s, rank) {{
   var isTop  = rank<=3;
   var pe=s.pe_ratio, rsi=s.rsi, target=s.analyst_target, price=s.price||0;
   var upside = (target&&price)?((target-price)/price*100).toFixed(1):null;
-  var rsiW   = rsi?Math.min(100,rsi):0;
+  var rsiW   = rsi!=null?Math.min(100,Math.max(0,rsi)):null;
   var rc     = rsiC(rsi);
   var mom    = s.momentum_1m||0;
   var track  = s.track||"BREAKOUT";
 
-  var dailyAtrPct = Math.max(0.02,s.atr||0.05);
-  var entryNum    = price*1.0025;
-  var stopDist    = Math.min(0.08,Math.max(0.03,dailyAtrPct*1.5));
-  var stopNum     = entryNum*(1-stopDist);
-  var riskDollar  = entryNum-stopNum;
-  var tgt1Num     = entryNum+riskDollar*2.0;
-  var tgt2Num     = entryNum+riskDollar*3.5;
-  var stpPct      = (stopDist*100).toFixed(1);
-  var upPct1      = ((tgt1Num-entryNum)/entryNum*100).toFixed(1);
+  // ATR compression ratio → estimate actual daily ATR %
+  // Typical daily ATR for liquid stocks: 2-5% depending on price tier
+  var baseDailyAtr = price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
+  var atrComp      = s.atr||1.0;  // compression ratio vs base period
+  var dailyAtrPct  = Math.min(0.12, Math.max(0.01, baseDailyAtr * atrComp));
+  var entryNum     = price*1.0025;
+  var stopDist     = Math.min(0.10, Math.max(0.02, dailyAtrPct*1.5));
+  var stopNum      = entryNum*(1-stopDist);
+  var riskDollar   = entryNum-stopNum;
+  var tgt1Num      = entryNum+riskDollar*2.0;
+  var tgt2Num      = entryNum+riskDollar*3.5;
+  var stpPct       = (stopDist*100).toFixed(1);
+  var upPct1       = ((tgt1Num-entryNum)/entryNum*100).toFixed(1);
 
   var sigs = '<span class="sig sg">'+s.status+'</span>';
   sigs += track==="CATALYST"?'<span class="sig sp">&#128197; Catalyst</span>':'<span class="sig sb">&#128293; Breakout</span>';
@@ -548,8 +552,10 @@ function makeCard(s, rank) {{
   if(rsi&&rsi>=70)                 sigs+='<span class="sig sr">RSI overbought</span>';
   if(upside&&parseFloat(upside)>=20) sigs+='<span class="sig sg">+'+upside+'% analyst upside</span>';
 
-  var rsiHTML="";
-  if(rsi!=null){{rsiHTML='<div class="rsiwrap"><div class="rsitop"><span>RSI Momentum</span><span style="color:'+rc+';font-weight:600">'+rsi.toFixed(0)+' \u2014 '+rsiL(rsi)+'</span></div><div class="rsitrack"><div class="rsifill" style="width:'+rsiW+'%;background:'+rc+'"></div></div><div class="rsizones"><span style="color:#9b59b6">Oversold 30</span><span>50</span><span style="color:#e67e22">Overbought 70</span></div></div>';}}
+  var rsiHTML = '<div class="rsiwrap"><div class="rsitop"><span>RSI Momentum</span>'
+    +(rsi!=null?'<span style="color:'+rc+';font-weight:600">'+rsi.toFixed(0)+' \u2014 '+rsiL(rsi)+'</span>':'<span style="color:#8892a4">Not yet loaded</span>')
+    +'</div><div class="rsitrack"><div class="rsifill" style="width:'+(rsiW!=null?rsiW:0)+'%;background:'+(rsi!=null?rc:'#2a2f42')+'"></div></div>'
+    +'<div class="rsizones"><span style="color:#9b59b6">Oversold 30</span><span>50</span><span style="color:#e67e22">Overbought 70</span></div></div>';
   var targetHTML=target?'<div class="trow"><span class="tl">Analyst 1Y target</span><span class="tv" style="color:var(--green)">$'+target.toFixed(0)+' (+'+upside+'%)</span></div>':"";
 
   return '<div class="card '+(s.pre_breakout?"pre":s.status==="WATCH"?"watch":"")+'">'
