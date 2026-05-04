@@ -642,7 +642,12 @@ function makeCard(s, rank) {{
   h += '<div style="background:'+rewardBg+';border-radius:8px;padding:12px;text-align:center">';
   h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Reward</div>';
   h += '<div style="font-size:20px;font-weight:700;color:'+rewardColor+'">'+rewardCat+'</div>';
-  h += '<div style="font-size:10px;color:'+rewardColor+';margin-top:4px">'+rp+'/4 signals</div></div></div>';
+  h += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;justify-content:center">';
+  h += '<span style="font-size:9px;padding:2px 6px;border-radius:10px;background:'+(sig_rs?'#1a3d2b':'#22263a')+';color:'+(sig_rs?'#27ae60':'#4a5568')+'">RS&gt;80</span>';
+  h += '<span style="font-size:9px;padding:2px 6px;border-radius:10px;background:'+(sig_vol?'#1a3d2b':'#22263a')+';color:'+(sig_vol?'#27ae60':'#4a5568')+'">Vol dry</span>';
+  h += '<span style="font-size:9px;padding:2px 6px;border-radius:10px;background:'+(sig_lvl?'#1a3d2b':'#22263a')+';color:'+(sig_lvl?'#27ae60':'#4a5568')+'">ATH/Multi</span>';
+  h += '<span style="font-size:9px;padding:2px 6px;border-radius:10px;background:'+(sig_ema?'#1a3d2b':'#22263a')+';color:'+(sig_ema?'#27ae60':'#4a5568')+'">EMA full</span>';
+  h += '</div></div></div>';
   h += '<div style="background:'+setupBg+';border:1px solid '+setupColor+'44;border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">';
   h += '<div style="font-size:15px;font-weight:700;color:'+setupColor+'">'+setupIcon+' '+setupCat+'</div>';
   h += '<div style="font-size:11px;color:var(--muted)">Entry $'+entryNum.toFixed(2)+'&nbsp; Stop $'+stopNum.toFixed(2)+'</div></div>';
