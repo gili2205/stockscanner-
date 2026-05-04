@@ -4,7 +4,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.3.0"
+VERSION = "v2.3.1"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -542,8 +542,24 @@ function render() {{
   // Apply combined filters — get best 10 from matching stocks
   var filtered = universe.filter(passesFilters);
 
+  filtered.forEach(function(s) {{
+    var tr=Math.min(16,Math.round((s.rs_percentile||0)/100*16));
+    var tv=(s.vol_contraction||1)<=0.5?12:(s.vol_contraction||1)<=0.7?8:(s.vol_contraction||1)<=0.9?4:0;
+    var ta=(s.atr||1)<=0.2?8:(s.atr||1)<=0.3?5:(s.atr||1)<=0.4?2:0;
+    var tl=(s.level||'').indexOf('ATH')>=0?4:(s.level||'').indexOf('multi')>=0?3:1;
+    var e=s.days_to_earnings;
+    var ce=e!=null&&e>=0&&e<=7?15:e!=null&&e>=0&&e<=14?10:e!=null&&e>=0&&e<=30?5:0;
+    var cv=(s.vol_ratio||1)>=3?10:(s.vol_ratio||1)>=2?6:(s.vol_ratio||1)>=1.5?3:0;
+    var cm=(s.momentum_1m||0)>=30?5:(s.momentum_1m||0)>=15?3:(s.momentum_1m||0)>=5?1:0;
+    var up=s.analyst_upside!=null?parseFloat(s.analyst_upside):0;
+    var bp=s.analyst_buy_pct||0,na=s.num_analysts||0;
+    var au=up>=40?12:up>=25?9:up>=10?5:up>0?2:up<-10?-5:0;
+    var ab=bp>=80?10:bp>=65?7:bp>=50?4:bp>0?1:0;
+    var ac=na>=10?8:na>=5?5:na>=2?2:0;
+    s._unified=Math.min(100,Math.round(tr+tv+ta+tl+Math.min(30,ce+cv+cm)+Math.min(30,Math.max(0,au+ab+ac))));
+  }});
   var fns = {{
-    score:    function(a,b){{ return (b.score||0)-(a.score||0); }},
+    score:    function(a,b){{ return (b._unified||0)-(a._unified||0); }},
     dist:     function(a,b){{ return (a.dist_to_level||99)-(b.dist_to_level||99); }},
     atr:      function(a,b){{ return (a.atr||1)-(b.atr||1); }},
     vol:      function(a,b){{ return (a.vol_contraction||1)-(b.vol_contraction||1); }},
@@ -678,7 +694,8 @@ function makeCard(s, rank) {{
   h += '<div class="fold-center">';
   h += '<div class="fold-metric"><div class="fold-mlbl">P/E</div><div class="fold-mval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div></div>';
   h += '<div class="fold-metric"><div class="fold-mlbl">RSI</div><div class="fold-mval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div></div>';
-  h += '<div class="fold-metric"><div class="fold-mlbl">1Y Target</div><div class="fold-mval" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':upsidePct!=null&&upsidePct<0?'#e74c3c':'#8892a4')+'">'+(target?'$'+target.toFixed(0)+'<span style="font-size:10px;margin-left:3px">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'')+'</span>':'&mdash;')+'</div></div>';
+  h += '<div class="fold-metric"><div class="fold-mlbl">1Y Target</div><div class="fold-mval" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':upsidePct!=null&&upsidePct<0?'#e74c3c':'#8892a4')+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div>'
+    +(upsidePct!=null?'<div style="font-size:10px;color:'+(upsidePct>5?'#27ae60':upsidePct<-5?'#e74c3c':'#8892a4')+';margin-top:1px">'+(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%</div>':'')+'</div>';
   h += '</div>';
   h += '<div class="fold-right">';
   h += '<div id="'+scoreId+'" class="fold-score" style="color:'+color+'" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
