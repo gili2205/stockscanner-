@@ -1,5 +1,6 @@
 import json
-from flask import Flask
+import yfinance as yf
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
@@ -83,8 +84,8 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .sortrow select{{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;outline:none;cursor:pointer;}}
 
 .alertbox{{background:#1a3d2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin:8px 24px;font-size:12px;color:var(--green);display:none;}}
-.grid{{display:flex;flex-wrap:wrap;gap:18px;padding:20px 24px;}}
-.card{{background:var(--bg2);border:1px solid var(--border);border-radius:14px;width:480px;border-left:3px solid var(--border);position:relative;overflow:hidden;transition:box-shadow .2s;}}
+.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;padding:20px 24px;}}
+.card{{background:var(--bg2);border:1px solid var(--border);border-radius:14px;width:100%;border-left:3px solid var(--border);position:relative;overflow:hidden;transition:box-shadow .2s;}}
 .card:hover{{box-shadow:0 4px 20px rgba(0,0,0,.3);}}
 .card-body{{padding:18px;}}
 .card.pre{{border-left-color:var(--green);}}
@@ -162,7 +163,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .chart-close:hover{{color:var(--text);}}
 .empty{{text-align:center;padding:60px;color:var(--muted);width:100%;font-size:15px;line-height:2;}}
 .pgfoot{{padding:14px 24px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);text-align:center;margin-top:8px;}}
-@media(max-width:750px){{.card{{width:100%;}}.grid{{padding:10px;gap:10px;}}.filterrow{{gap:12px;}}.filterpanel{{padding:10px 14px;}}}}
+@media(max-width:750px){{.grid{{grid-template-columns:1fr;padding:10px;gap:12px;}}.filterrow{{gap:12px;}}.filterpanel{{padding:10px 14px;}}}}
 </style>
 </head>
 <body>
@@ -557,12 +558,18 @@ function makeCard(s, rank) {{
 
   var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
   var dailyAtrPct=Math.min(0.12,Math.max(0.01,base*(s.atr||1)));
-  var entryNum=price*1.0025,stopDist=Math.min(0.10,Math.max(0.02,dailyAtrPct*1.5));
-  var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
+  var entryNum=price*1.0025;
+  // ATR-based stop as starting point
+  var atrStop=Math.min(0.12,Math.max(0.02,dailyAtrPct*1.5));
+  // Risk category based on ATR stop (before applying minimums)
   var riskCat,riskColor,riskBg;
-  if(stopDist<=0.03){{riskCat='Low';riskColor='#27ae60';riskBg='#1a3d2b';}}
-  else if(stopDist<=0.06){{riskCat='Medium';riskColor='#e67e22';riskBg='#3d2e10';}}
+  if(atrStop<=0.05){{riskCat='Low';riskColor='#27ae60';riskBg='#1a3d2b';}}
+  else if(atrStop<=0.08){{riskCat='Medium';riskColor='#e67e22';riskBg='#3d2e10';}}
   else{{riskCat='High';riskColor='#e74c3c';riskBg='#3d1a1a';}}
+  // Apply setup-aware minimum stop — breakout needs room to breathe
+  var minStop=riskCat==='Low'?0.05:riskCat==='Medium'?0.07:0.08;
+  var stopDist=Math.max(atrStop,minStop);
+  var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
   var rp=0;
   if((s.ema_stack||'')==='full')rp++;
   if((s.hh_hl||0)>=0.8)rp++;
@@ -684,13 +691,12 @@ async function lookupTicker() {{
   if(allStockData&&allStockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in scanner</div>'+makeCard(allStockData[ticker],'&mdash;');return;}}
   if(stockData&&stockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in top 10</div>'+makeCard(stockData[ticker],'&mdash;');return;}}
   try {{
-    var resp=await fetch('https://query1.finance.yahoo.com/v8/finance/chart/'+ticker+'?interval=1d&range=60d',{{headers:{{"Accept":"application/json"}}}});
+    var resp=await fetch('/lookup?t='+ticker);
     if(!resp.ok)throw new Error('HTTP '+resp.status);
-    var data=await resp.json(),res=data.chart.result;
-    if(!res||!res[0])throw new Error('No data');
-    var r=res[0],meta=r.meta,q=r.indicators.quote[0];
-    var cl=q.close.map(function(v){{return v||0;}}),hi=q.high.map(function(v){{return v||0;}}),lo=q.low.map(function(v){{return v||0;}}),vo=q.volume.map(function(v){{return v||0;}});
-    var n=cl.length,price=meta.regularMarketPrice||cl[n-1],chg=cl[n-2]?((price-cl[n-2])/cl[n-2]*100):0;
+    var data=await resp.json();
+    if(data.error)throw new Error(data.error);
+    var cl=data.closes,hi=data.highs,lo=data.lows,vo=data.vols;
+    var n=cl.length,price=data.price,chg=data.change_pct;
     var trs=[];for(var i=1;i<n;i++)trs.push(Math.max(hi[i]-lo[i],Math.abs(hi[i]-cl[i-1]),Math.abs(lo[i]-cl[i-1])));
     var atr=trs.slice(-14).reduce(function(a,b){{return a+b;}},0)/14;
     function ema(a,p){{var k=2/(p+1),e=a[0];for(var i=1;i<a.length;i++)e=(a[i]||e)*k+e*(1-k);return e;}}
@@ -701,14 +707,15 @@ async function lookupTicker() {{
     var vb=vo.slice(-20,-5).reduce(function(a,b){{return a+b;}},0)/15;
     var vh=hi.filter(function(v){{return v>0;}}),h52=vh.length?Math.max.apply(null,vh):price;
     var dist=h52>0?((h52-price)/price*100):0,mom=n>=21?((price-cl[n-21])/cl[n-21]*100):0;
-    var s={{ticker:ticker,name:meta.shortName||ticker,sector:'',price:price,change_pct:chg,
+    var s={{ticker:ticker,name:data.name||ticker,sector:'',price:price,change_pct:chg,
       score:null,status:'LOOKUP',ema_stack:es,atr:price>0?atr/price:0.03,
       hh_hl:hh/19,vol_contraction:vb>0?vr/vb:1,vol_ratio:vb>0?vr/vb:1,
       level:dist<1?'ATH':dist<5?'52-week':'prior resistance',dist_to_level:dist,
       pre_breakout:(atr/price<=0.03&&vb>0&&vr/vb<=0.7&&dist<=5&&es!=='none'),
       bull_flag:(atr/price<=0.025&&vb>0&&vr/vb<=0.65&&mom>=8&&es!=='none'),
       earnings_soon:false,rs_percentile:null,rsi:null,momentum_1m:mom,
-      pe_ratio:null,analyst_target:null,track:'BREAKOUT'}};
+      pe_ratio:data.pe_ratio||null,rsi:data.rsi||null,analyst_target:data.analyst_target||null,
+      analyst_upside:data.analyst_upside!=null?String(data.analyst_upside):null,track:'BREAKOUT'}};
     result.innerHTML='<div style="color:var(--amber);font-size:12px;margin-bottom:8px">&#9889; Live lookup &mdash; Yahoo Finance 60d</div>'+makeCard(s,'&mdash;');
   }} catch(e) {{
     result.innerHTML='<div style="color:var(--red);padding:12px 0">Could not fetch <strong>'+ticker+'</strong>: '+e.message+'</div>';
@@ -717,6 +724,59 @@ async function lookupTicker() {{
 </script>
 </body>
 </html>"""
+
+@app.route('/lookup')
+def lookup():
+    ticker = request.args.get('t','').upper().strip()
+    if not ticker or len(ticker) > 6:
+        return jsonify({'error': 'Invalid ticker'}), 400
+    try:
+        tk = yf.Ticker(ticker)
+        hist = tk.history(period='60d', interval='1d')
+        if hist.empty:
+            return jsonify({'error': 'No data found for '+ticker}), 404
+        info = tk.info or {}
+        fi   = tk.fast_info
+        closes = [round(x,2) for x in hist['Close'].tolist()]
+        highs  = [round(x,2) for x in hist['High'].tolist()]
+        lows   = [round(x,2) for x in hist['Low'].tolist()]
+        vols   = hist['Volume'].tolist()
+        price  = getattr(fi, 'last_price', None) or closes[-1]
+        chg    = round((price - closes[-2]) / closes[-2] * 100, 2) if len(closes) > 1 else 0
+        # Fundamentals
+        pe          = info.get('trailingPE') or info.get('forwardPE')
+        target      = info.get('targetMeanPrice')
+        name        = info.get('shortName') or info.get('longName') or ticker
+        sector      = info.get('sector','')
+        upside      = round((target - price) / price * 100, 1) if target and price else None
+        # RSI (14) calculated from closes
+        rsi = None
+        if len(closes) >= 15:
+            deltas = [closes[i]-closes[i-1] for i in range(1,len(closes))]
+            gains  = [max(d,0) for d in deltas[-14:]]
+            losses = [abs(min(d,0)) for d in deltas[-14:]]
+            avg_g  = sum(gains)/14
+            avg_l  = sum(losses)/14
+            if avg_l > 0:
+                rs  = avg_g / avg_l
+                rsi = round(100 - 100/(1+rs), 1)
+        return jsonify({
+            'ticker':     ticker,
+            'name':       name,
+            'sector':     sector,
+            'price':      round(price, 2),
+            'change_pct': chg,
+            'pe_ratio':   round(pe, 1) if pe else None,
+            'rsi':        rsi,
+            'analyst_target': round(target, 2) if target else None,
+            'analyst_upside': round(upside, 1) if upside is not None else None,
+            'closes':     closes,
+            'highs':      highs,
+            'lows':       lows,
+            'vols':       vols,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 def index():
