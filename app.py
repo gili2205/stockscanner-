@@ -4,7 +4,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.2.0"
+VERSION = "v2.3.0"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -88,6 +88,10 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .card-fold{{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;cursor:pointer;user-select:none;}}
 .card-fold:hover{{background:#ffffff06;}}
 .fold-left{{display:flex;align-items:center;gap:12px;flex:1;min-width:0;}}
+.fold-center{{display:flex;gap:16px;align-items:center;margin:0 16px;}}
+.fold-metric{{text-align:center;}}
+.fold-mlbl{{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;}}
+.fold-mval{{font-size:13px;font-weight:700;}}
 .fold-right{{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;margin-left:10px;}}
 .fold-rank{{width:26px;height:26px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--muted);flex-shrink:0;}}
 .fold-rank.top{{background:#1a3d2b;color:var(--green);}}
@@ -671,13 +675,18 @@ function makeCard(s, rank) {{
   h += '<div class="fold-meta">$'+price.toFixed(2)+'<span class="chg '+chgCls+'"> '+chgStr+'</span>';
   if(s.sector) h += '<span class="fold-sector"> &middot; '+s.sector+'</span>';
   h += '</div></div></div>';
+  h += '<div class="fold-center">';
+  h += '<div class="fold-metric"><div class="fold-mlbl">P/E</div><div class="fold-mval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div></div>';
+  h += '<div class="fold-metric"><div class="fold-mlbl">RSI</div><div class="fold-mval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div></div>';
+  h += '<div class="fold-metric"><div class="fold-mlbl">1Y Target</div><div class="fold-mval" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':upsidePct!=null&&upsidePct<0?'#e74c3c':'#8892a4')+'">'+(target?'$'+target.toFixed(0)+'<span style="font-size:10px;margin-left:3px">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'')+'</span>':'&mdash;')+'</div></div>';
+  h += '</div>';
   h += '<div class="fold-right">';
   h += '<div id="'+scoreId+'" class="fold-score" style="color:'+color+'" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
   h += '<div class="fold-status" style="color:'+color+'">'+s.status+'</div>';
   h += '</div></div>';
   h += '<div class="sbar2" style="margin:0;border-radius:0;height:3px"><div class="sfill" style="width:'+Math.min(100,unifiedScore)+'%;background:'+color+'"></div></div>';
   h += '<div class="card-body" id="card-'+s.ticker+'" style="display:none">';
-  h += '<div class="funds" style="margin-top:14px">';
+  h += '<div class="funds" style="margin-top:14px;display:none">';
   h += '<div class="fbox"><div class="flbl">P/E Ratio</div><div class="fval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div><div class="fsub">'+(pe&&pe>0?(pe<20?'Cheap':pe<40?'Fair':'Pricey'):'N/A')+'</div></div>';
   h += '<div class="fbox"><div class="flbl">RSI (14)</div><div class="fval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div><div class="fsub">'+rsiL(rsi)+'</div></div>';
   h += '<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':'#8892a4')+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div><div class="fsub" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':upsidePct!=null&&upsidePct<0?'#e74c3c':'#8892a4')+'">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'N/A')+'</div></div>';
