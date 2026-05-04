@@ -680,7 +680,7 @@ function makeCard(s, rank) {{
   h += '<div class="funds" style="margin-top:14px">';
   h += '<div class="fbox"><div class="flbl">P/E Ratio</div><div class="fval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div><div class="fsub">'+(pe&&pe>0?(pe<20?'Cheap':pe<40?'Fair':'Pricey'):'N/A')+'</div></div>';
   h += '<div class="fbox"><div class="flbl">RSI (14)</div><div class="fval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div><div class="fsub">'+rsiL(rsi)+'</div></div>';
-  h += '<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':'#8892a4')+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div><div class="fsub" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':upsidePct!=null&&upsidePct<0?'#e74c3c':'#8892a4')+'">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct+'%':'N/A')+'</div></div>';
+  h += '<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':'#8892a4')+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div><div class="fsub" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':upsidePct!=null&&upsidePct<0?'#e74c3c':'#8892a4')+'">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'N/A')+'</div></div>';
   h += '</div>';
   if(buyPct>0||numAna>0) {{
     h += '<div style="font-size:11px;color:var(--muted);padding:6px 0;display:flex;gap:14px;flex-wrap:wrap">';
