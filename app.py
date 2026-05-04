@@ -1,5 +1,6 @@
 import json
-from flask import Flask
+import yfinance as yf
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
@@ -684,13 +685,12 @@ async function lookupTicker() {{
   if(allStockData&&allStockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in scanner</div>'+makeCard(allStockData[ticker],'&mdash;');return;}}
   if(stockData&&stockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in top 10</div>'+makeCard(stockData[ticker],'&mdash;');return;}}
   try {{
-    var resp=await fetch('https://query1.finance.yahoo.com/v8/finance/chart/'+ticker+'?interval=1d&range=60d',{{headers:{{"Accept":"application/json"}}}});
+    var resp=await fetch('/lookup?t='+ticker);
     if(!resp.ok)throw new Error('HTTP '+resp.status);
-    var data=await resp.json(),res=data.chart.result;
-    if(!res||!res[0])throw new Error('No data');
-    var r=res[0],meta=r.meta,q=r.indicators.quote[0];
-    var cl=q.close.map(function(v){{return v||0;}}),hi=q.high.map(function(v){{return v||0;}}),lo=q.low.map(function(v){{return v||0;}}),vo=q.volume.map(function(v){{return v||0;}});
-    var n=cl.length,price=meta.regularMarketPrice||cl[n-1],chg=cl[n-2]?((price-cl[n-2])/cl[n-2]*100):0;
+    var data=await resp.json();
+    if(data.error)throw new Error(data.error);
+    var cl=data.closes,hi=data.highs,lo=data.lows,vo=data.vols;
+    var n=cl.length,price=data.price,chg=data.change_pct;
     var trs=[];for(var i=1;i<n;i++)trs.push(Math.max(hi[i]-lo[i],Math.abs(hi[i]-cl[i-1]),Math.abs(lo[i]-cl[i-1])));
     var atr=trs.slice(-14).reduce(function(a,b){{return a+b;}},0)/14;
     function ema(a,p){{var k=2/(p+1),e=a[0];for(var i=1;i<a.length;i++)e=(a[i]||e)*k+e*(1-k);return e;}}
@@ -717,6 +717,35 @@ async function lookupTicker() {{
 </script>
 </body>
 </html>"""
+
+@app.route('/lookup')
+def lookup():
+    ticker = request.args.get('t','').upper().strip()
+    if not ticker or len(ticker) > 6:
+        return jsonify({'error': 'Invalid ticker'}), 400
+    try:
+        tk = yf.Ticker(ticker)
+        hist = tk.history(period='60d', interval='1d')
+        info = tk.fast_info
+        if hist.empty:
+            return jsonify({'error': 'No data found'}), 404
+        closes = hist['Close'].tolist()
+        highs  = hist['High'].tolist()
+        lows   = hist['Low'].tolist()
+        vols   = hist['Volume'].tolist()
+        price  = info.last_price or closes[-1]
+        return jsonify({
+            'ticker': ticker,
+            'name':   getattr(info, 'description', ticker),
+            'price':  round(price, 2),
+            'change_pct': round((price - closes[-2]) / closes[-2] * 100, 2) if len(closes) > 1 else 0,
+            'closes': [round(x,2) for x in closes],
+            'highs':  [round(x,2) for x in highs],
+            'lows':   [round(x,2) for x in lows],
+            'vols':   vols,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 def index():
