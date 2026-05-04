@@ -83,9 +83,10 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .sortrow select{{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;outline:none;cursor:pointer;}}
 
 .alertbox{{background:#1a3d2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin:8px 24px;font-size:12px;color:var(--green);display:none;}}
-.grid{{display:flex;flex-wrap:wrap;gap:14px;padding:16px 24px;}}
-.card{{background:var(--bg2);border:1px solid var(--border);border-radius:14px;width:460px;border-left:3px solid var(--border);position:relative;overflow:hidden;transition:box-shadow .2s;}}
+.grid{{display:flex;flex-wrap:wrap;gap:18px;padding:20px 24px;}}
+.card{{background:var(--bg2);border:1px solid var(--border);border-radius:14px;width:480px;border-left:3px solid var(--border);position:relative;overflow:hidden;transition:box-shadow .2s;}}
 .card:hover{{box-shadow:0 4px 20px rgba(0,0,0,.3);}}
+.card-body{{padding:18px;}}
 .card.pre{{border-left-color:var(--green);}}
 .card.watch{{border-left-color:var(--amber);}}
 .rank{{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--muted);}}
@@ -99,8 +100,8 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .slbl{{font-size:11px;font-weight:600;letter-spacing:.5px;}}
 .sbar2{{height:5px;background:var(--bg3);border-radius:3px;overflow:hidden;margin-top:4px;}}
 .sfill{{height:100%;border-radius:3px;}}
-.funds{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;}}
-.fbox{{background:var(--bg3);border-radius:6px;padding:7px 8px;text-align:center;}}
+.funds{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;}}
+.fbox{{background:var(--bg3);border-radius:7px;padding:10px 8px;text-align:center;}}
 .flbl{{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}}
 .fval{{font-size:14px;font-weight:700;}}
 .fsub{{font-size:9px;color:var(--muted);margin-top:1px;}}
@@ -128,13 +129,13 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .fg{{color:var(--green);}}
 .fa{{color:var(--amber);}}
 .fr{{color:var(--red);}}
-.trade{{background:var(--bg3);border-radius:8px;padding:10px;margin-bottom:8px;border:1px solid #27ae6033;}}
+.trade{{background:var(--bg3);border-radius:10px;padding:14px;margin-bottom:12px;border:1px solid #27ae6033;}}
 .ttitle{{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--green);margin-bottom:6px;font-weight:600;}}
 .trow{{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;}}
 .tl{{color:var(--muted);}}
 .tv{{font-weight:600;}}
 .rrbadge{{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;background:#1a3d2b;color:var(--green);}}
-.cfoot{{display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--border);}}
+.cfoot{{display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-top:1px solid var(--border);}}
 .price{{font-size:14px;font-weight:600;}}
 .chg{{font-size:11px;margin-left:5px;}}
 .cup{{color:var(--green);}}
