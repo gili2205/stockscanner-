@@ -630,10 +630,18 @@ function makeCard(s, rank) {{
         +'<div style="font-size:11px;color:var(--muted)">Entry $'+entryNum.toFixed(2)+'&nbsp; Stop $'+stopNum.toFixed(2)+'</div></div>'
         +targetHTML+'</div>'
         +'<div class="cfoot"><div><span class="price">$'+price.toLocaleString()+'</span><span class="chg '+chgCls+'">'+chgStr+'</span></div>'
-        +'<button class="chart-btn" id="cbtn-'+s.ticker+'" onclick="toggleChart(this,\'cpanel-'+s.ticker+'\',\'cframe-'+s.ticker+'\')">&#128202; Chart</button></div>'
-        +'<div class="chart-panel" id="cpanel-'+s.ticker+'"><button class="chart-close" onclick="closeChart(\''+s.ticker+'\')">&times; Close</button><iframe id="cframe-'+s.ticker+'" src="" scrolling="no" allowtransparency="true"></iframe></div></div>';
+        +'<button class="chart-btn" id="cbtn-'+s.ticker+'" onclick="doChart(this)" data-ticker="'+s.ticker+'">&#128202; Chart</button></div>'
+        +'<div class="chart-panel" id="cpanel-'+s.ticker+'"><button class="chart-close" data-ticker="'+s.ticker+'" onclick="doClose(this)">&times; Close</button><iframe id="cframe-'+s.ticker+'" src="" scrolling="no" allowtransparency="true"></iframe></div></div>';
 }}
 
+function doChart(btn) {{
+  var t=btn.getAttribute('data-ticker');
+  toggleChart(btn,'cpanel-'+t,'cframe-'+t);
+}}
+function doClose(btn) {{
+  var t=btn.getAttribute('data-ticker');
+  closeChart(t);
+}}
 function toggleChart(btn,panelId,frameId) {{
   var panel=document.getElementById(panelId),frame=document.getElementById(frameId);
   var open=panel.style.display==='block';
