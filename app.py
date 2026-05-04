@@ -492,9 +492,9 @@ fdb.ref("/scanner").on("value", function(snap) {{
       setTimeout(function(){{ab.style.display="none";}},30000);
     }}
     prevData = JSON.parse(JSON.stringify(d.stocks));
-    stockData = d.stocks;
+    if (Object.keys(d.stocks).length>0) stockData = d.stocks;
   }}
-  render();
+  if (Object.keys(allStockData).length>0 || Object.keys(stockData).length>0) render();
 }}, function(err) {{ setStatus("err","Firebase error: "+err.message,0,"",""); }});
 
 startWatchdog();
@@ -570,11 +570,11 @@ function makeCard(s, rank) {{
   var minStop=riskCat==='Low'?0.05:riskCat==='Medium'?0.07:0.08;
   var stopDist=Math.max(atrStop,minStop);
   var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
-  var rp=0;
-  if((s.ema_stack||'')==='full')rp++;
-  if((s.hh_hl||0)>=0.8)rp++;
-  if((s.vol_contraction||1)<=0.7)rp++;
-  if((s.level||'').indexOf('ATH')>=0||(s.level||'').indexOf('multi')>=0)rp++;
+  var sig_rs  = (s.rs_percentile||0)>=80;
+  var sig_vol = (s.vol_contraction||1)<=0.7;
+  var sig_lvl = (s.level||'').indexOf('ATH')>=0||(s.level||'').indexOf('multi')>=0;
+  var sig_ema = (s.ema_stack||'')==='full';
+  var rp = (sig_rs?1:0)+(sig_vol?1:0)+(sig_lvl?1:0)+(sig_ema?1:0);
   var rewardCat,rewardColor,rewardBg;
   if(rp>=3){{rewardCat='High';rewardColor='#27ae60';rewardBg='#1a3d2b';}}
   else if(rp>=2){{rewardCat='Medium';rewardColor='#e67e22';rewardBg='#3d2e10';}}
