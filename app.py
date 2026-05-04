@@ -143,6 +143,15 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .cdn{{color:var(--red);}}
 .tvlink{{color:var(--blue);font-size:11px;text-decoration:none;}}
 .tvlink:hover{{text-decoration:underline;}}
+.breakdown-popup{{position:fixed;z-index:1000;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,.5);display:none;}}
+.breakdown-popup.show{{display:block;}}
+.bp-title{{font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text);}}
+.bp-row{{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);}}
+.bp-label{{font-size:12px;color:var(--muted);}}
+.bp-bar{{flex:1;margin:0 10px;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;}}
+.bp-fill{{height:100%;border-radius:3px;}}
+.bp-val{{font-size:12px;font-weight:700;min-width:40px;text-align:right;}}
+.bp-close{{position:absolute;top:8px;right:12px;cursor:pointer;color:var(--muted);font-size:16px;}}
 .lookup-panel{{background:var(--bg2);border-bottom:2px solid var(--blue);padding:14px 24px;display:flex;align-items:center;gap:12px;}}
 .lookup-icon{{font-size:18px;opacity:.6;}}
 .lookup-panel input{{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:15px;font-weight:700;letter-spacing:2px;outline:none;width:160px;transition:border-color .2s,box-shadow .2s;text-transform:uppercase;}}
@@ -556,29 +565,55 @@ function makeCard(s, rank) {{
   var mom    = s.momentum_1m||0;
   var track  = s.track||"BREAKOUT";
 
+  // ── Unified score: Technical 40% + Catalyst 30% + Analyst 30% ──────────
+  // Technical (0-40)
+  var t_rs  = Math.min(40, Math.round((s.rs_percentile||0)/100*16));  // 0-16
+  var t_vol = (s.vol_contraction||1)<=0.5?12:(s.vol_contraction||1)<=0.7?8:(s.vol_contraction||1)<=0.9?4:0; // 0-12
+  var t_atr = (s.atr||1)<=0.2?8:(s.atr||1)<=0.3?5:(s.atr||1)<=0.4?2:0; // 0-8 ATR compression
+  var t_lvl = (s.level||'').indexOf('ATH')>=0?4:(s.level||'').indexOf('multi')>=0?3:(s.level||'').indexOf('52')>=0?1:0; // 0-4
+  var techScore = t_rs + t_vol + t_atr + t_lvl; // 0-40
+  // Catalyst (0-30)
+  var earn = s.days_to_earnings;
+  var c_earn = earn!=null&&earn>=0&&earn<=7?15:earn!=null&&earn>=0&&earn<=14?10:earn!=null&&earn>=0&&earn<=30?5:0;
+  var c_vol  = (s.vol_ratio||1)>=3?10:(s.vol_ratio||1)>=2?6:(s.vol_ratio||1)>=1.5?3:0;
+  var c_mom  = (s.momentum_1m||0)>=30?5:(s.momentum_1m||0)>=15?3:(s.momentum_1m||0)>=5?1:0;
+  var catalystScore = Math.min(30, c_earn + c_vol + c_mom); // 0-30
+  // Analyst (0-30)
+  var upsidePct = upside ? parseFloat(upside) : 0;
+  var buyPct    = s.analyst_buy_pct||0;
+  var numAna    = s.num_analysts||0;
+  var a_upside  = upsidePct>=40?12:upsidePct>=25?9:upsidePct>=10?5:upsidePct>0?2:upsidePct<-10?-5:0;
+  var a_buy     = buyPct>=80?10:buyPct>=65?7:buyPct>=50?4:buyPct>0?1:0;
+  var a_cov     = numAna>=10?8:numAna>=5?5:numAna>=2?2:0;
+  var analystScore = Math.min(30, Math.max(0, a_upside + a_buy + a_cov)); // 0-30
+  var unifiedScore = Math.min(100, Math.round(techScore + catalystScore + analystScore));
+  // ── Stop/entry ────────────────────────────────────────────────────────────
   var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
   var dailyAtrPct=Math.min(0.12,Math.max(0.01,base*(s.atr||1)));
   var entryNum=price*1.0025;
-  // ATR-based stop as starting point
   var atrStop=Math.min(0.12,Math.max(0.02,dailyAtrPct*1.5));
-  // Risk category based on ATR stop (before applying minimums)
-  var riskCat,riskColor,riskBg;
-  if(atrStop<=0.05){{riskCat='Low';riskColor='#27ae60';riskBg='#1a3d2b';}}
-  else if(atrStop<=0.08){{riskCat='Medium';riskColor='#e67e22';riskBg='#3d2e10';}}
-  else{{riskCat='High';riskColor='#e74c3c';riskBg='#3d1a1a';}}
-  // Apply setup-aware minimum stop — breakout needs room to breathe
-  var minStop=riskCat==='Low'?0.05:riskCat==='Medium'?0.07:0.08;
+  var minStop=atrStop<=0.05?0.05:atrStop<=0.08?0.07:0.08;
   var stopDist=Math.max(atrStop,minStop);
   var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
+  // ── Risk category ─────────────────────────────────────────────────────────
+  var riskCat,riskColor,riskBg;
+  if(stopDist<=0.05){{riskCat='Low';riskColor='#27ae60';riskBg='#1a3d2b';}}
+  else if(stopDist<=0.08){{riskCat='Medium';riskColor='#e67e22';riskBg='#3d2e10';}}
+  else{{riskCat='High';riskColor='#e74c3c';riskBg='#3d1a1a';}}
+  // ── Reward signals ────────────────────────────────────────────────────────
   var sig_rs  = (s.rs_percentile||0)>=80;
   var sig_vol = (s.vol_contraction||1)<=0.7;
   var sig_lvl = (s.level||'').indexOf('ATH')>=0||(s.level||'').indexOf('multi')>=0;
   var sig_ema = (s.ema_stack||'')==='full';
   var rp = (sig_rs?1:0)+(sig_vol?1:0)+(sig_lvl?1:0)+(sig_ema?1:0);
-  var rewardCat,rewardColor,rewardBg;
-  if(rp>=3){{rewardCat='High';rewardColor='#27ae60';rewardBg='#1a3d2b';}}
-  else if(rp>=2){{rewardCat='Medium';rewardColor='#e67e22';rewardBg='#3d2e10';}}
-  else{{rewardCat='Low';rewardColor='#e74c3c';rewardBg='#3d1a1a';}}
+  var rewardCat=rp>=3?'High':rp>=2?'Medium':'Low';
+  var rewardColor=rp>=3?'#27ae60':rp>=2?'#e67e22':'#e74c3c';
+  var rewardBg=rp>=3?'#1a3d2b':rp>=2?'#3d2e10':'#3d1a1a';
+  // ── Timeframe ─────────────────────────────────────────────────────────────
+  var tf = s.timeframe||'mid';
+  var tfLabel = tf==='short'?'&#9889; Short term (1-2 weeks)':tf==='long'?'&#128336; Long term (3-12 months)':'&#128197; Mid term (1-3 months)';
+  var tfColor = tf==='short'?'#e74c3c':tf==='long'?'#3498db':'#e67e22';
+  // ── Setup label ───────────────────────────────────────────────────────────
   var rr=riskCat+'/'+rewardCat,setupCat,setupColor,setupBg,setupIcon;
   if(rr==='Low/High'){{setupCat='Best setup';setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#11088;';}}
   else if(rr==='Low/Medium'){{setupCat='Good setup';setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#9989;';}}
@@ -611,7 +646,7 @@ function makeCard(s, rank) {{
   h += '<div class="rank '+(isTop?"top":"")+'">' +rank+'</div>';
   h += '<div class="ctop"><div class="ticker">'+s.ticker+'</div>';
   h += '<div class="co">'+(s.name&&s.name!==s.ticker?s.name+' &middot; ':'')+(s.sector||'NASDAQ')+'</div></div>';
-  h += '<div class="srow"><div class="snum" style="color:'+color+'">'+(s.score||'&mdash;')+'</div>';
+  h += '<div class="srow"><div class="snum" style="color:'+color+';cursor:pointer" onclick="showBreakdown(this,event)" data-tech="'+techScore+'" data-cat="'+catalystScore+'" data-ana="'+analystScore+'" data-entry="'+entryNum.toFixed(2)+'" data-stop="'+stopNum.toFixed(2)+'" data-tf="'+tf+'" data-tflabel="'+tfLabel+'" data-tfcolor="'+tfColor+'">'+unifiedScore+'</div>';
   h += '<div class="smeta"><div class="slbl" style="color:'+color+'">'+s.status+'</div>';
   h += '<div class="sbar2"><div class="sfill" style="width:'+Math.min(100,s.score||0)+'%;background:'+color+'"></div></div></div></div>';
   h += '<div class="funds">';
@@ -648,9 +683,21 @@ function makeCard(s, rank) {{
   h += '<span style="font-size:9px;padding:2px 6px;border-radius:10px;background:'+(sig_lvl?'#1a3d2b':'#22263a')+';color:'+(sig_lvl?'#27ae60':'#4a5568')+'">ATH/Multi</span>';
   h += '<span style="font-size:9px;padding:2px 6px;border-radius:10px;background:'+(sig_ema?'#1a3d2b':'#22263a')+';color:'+(sig_ema?'#27ae60':'#4a5568')+'">EMA full</span>';
   h += '</div></div></div>';
-  h += '<div style="background:'+setupBg+';border:1px solid '+setupColor+'44;border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">';
+  h += '<div style="background:'+setupBg+';border:1px solid '+setupColor+'44;border-radius:10px;padding:12px 16px;margin-bottom:8px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
   h += '<div style="font-size:15px;font-weight:700;color:'+setupColor+'">'+setupIcon+' '+setupCat+'</div>';
-  h += '<div style="font-size:11px;color:var(--muted)">Entry $'+entryNum.toFixed(2)+'&nbsp; Stop $'+stopNum.toFixed(2)+'</div></div>';
+  h += '<div style="font-size:11px;color:'+tfColor+';font-weight:600">'+tfLabel+'</div>';
+  h += '</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+  h += '<div style="background:var(--bg2);border-radius:7px;padding:8px 12px">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Buy above</div>';
+  h += '<div style="font-size:16px;font-weight:700;color:#27ae60">$'+entryNum.toFixed(2)+'</div>';
+  h += '</div>';
+  h += '<div style="background:var(--bg2);border-radius:7px;padding:8px 12px">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Stop loss</div>';
+  h += '<div style="font-size:16px;font-weight:700;color:#e74c3c">$'+stopNum.toFixed(2)+'</div>';
+  h += '<div style="font-size:10px;color:#e74c3c;margin-top:1px">-'+stpPct+'%</div>';
+  h += '</div></div></div>';
   h += '</div>';
   h += '</div>';
   h += '<div class="cfoot">';
@@ -727,6 +774,39 @@ async function lookupTicker() {{
   }}
 }}
 </script>
+
+<div class="breakdown-popup" id="breakdown-popup">
+  <div class="bp-close" onclick="document.getElementById('breakdown-popup').classList.remove('show')">&#10005;</div>
+  <div class="bp-title">Score Breakdown</div>
+  <div class="bp-row">
+    <span class="bp-label">&#128202; Technical</span>
+    <div class="bp-bar"><div class="bp-fill" id="bp-tech-bar" style="background:#3498db"></div></div>
+    <span class="bp-val" id="bp-tech"></span>
+  </div>
+  <div class="bp-row">
+    <span class="bp-label">&#9889; Catalyst</span>
+    <div class="bp-bar"><div class="bp-fill" id="bp-cat-bar" style="background:#e67e22"></div></div>
+    <span class="bp-val" id="bp-cat"></span>
+  </div>
+  <div class="bp-row">
+    <span class="bp-label">&#128101; Analyst</span>
+    <div class="bp-bar"><div class="bp-fill" id="bp-ana-bar" style="background:#27ae60"></div></div>
+    <span class="bp-val" id="bp-ana"></span>
+  </div>
+  <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="background:var(--bg3);border-radius:7px;padding:8px 10px">
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Buy above</div>
+        <div style="font-size:15px;font-weight:700;color:#27ae60" id="bp-entry"></div>
+      </div>
+      <div style="background:var(--bg3);border-radius:7px;padding:8px 10px">
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Stop loss</div>
+        <div style="font-size:15px;font-weight:700;color:#e74c3c" id="bp-stop"></div>
+      </div>
+    </div>
+    <div style="margin-top:8px;font-size:12px;font-weight:600" id="bp-tf"></div>
+  </div>
+</div>
 </body>
 </html>"""
 
