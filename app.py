@@ -701,7 +701,7 @@ async function lookupTicker() {{
     var vb=vo.slice(-20,-5).reduce(function(a,b){{return a+b;}},0)/15;
     var vh=hi.filter(function(v){{return v>0;}}),h52=vh.length?Math.max.apply(null,vh):price;
     var dist=h52>0?((h52-price)/price*100):0,mom=n>=21?((price-cl[n-21])/cl[n-21]*100):0;
-    var s={{ticker:ticker,name:meta.shortName||ticker,sector:'',price:price,change_pct:chg,
+    var s={{ticker:ticker,name:data.name||ticker,sector:'',price:price,change_pct:chg,
       score:null,status:'LOOKUP',ema_stack:es,atr:price>0?atr/price:0.03,
       hh_hl:hh/19,vol_contraction:vb>0?vr/vb:1,vol_ratio:vb>0?vr/vb:1,
       level:dist<1?'ATH':dist<5?'52-week':'prior resistance',dist_to_level:dist,
