@@ -442,7 +442,7 @@ fdb.ref("/scanner").on("value", function(snap) {{
   lastDataTime = Date.now();
   if (!d) {{ setStatus("warn","No scanner data yet",0,"",""); return; }}
 
-  if (d.scanner_version) document.getElementById("verspan").textContent = d.scanner_version;
+  // Keep app version in header; show scanner version in status bar only
 
   var _n=new Date(),_h=(_n.getUTCHours()-4+24)%24,_d=_n.getUTCDay();
   var mktOpen=_d>=1&&_d<=5&&_h>=9&&_h<16;
