@@ -558,12 +558,18 @@ function makeCard(s, rank) {{
 
   var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
   var dailyAtrPct=Math.min(0.12,Math.max(0.01,base*(s.atr||1)));
-  var entryNum=price*1.0025,stopDist=Math.min(0.10,Math.max(0.02,dailyAtrPct*1.5));
-  var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
+  var entryNum=price*1.0025;
+  // ATR-based stop as starting point
+  var atrStop=Math.min(0.12,Math.max(0.02,dailyAtrPct*1.5));
+  // Risk category based on ATR stop (before applying minimums)
   var riskCat,riskColor,riskBg;
-  if(stopDist<=0.03){{riskCat='Low';riskColor='#27ae60';riskBg='#1a3d2b';}}
-  else if(stopDist<=0.06){{riskCat='Medium';riskColor='#e67e22';riskBg='#3d2e10';}}
+  if(atrStop<=0.05){{riskCat='Low';riskColor='#27ae60';riskBg='#1a3d2b';}}
+  else if(atrStop<=0.08){{riskCat='Medium';riskColor='#e67e22';riskBg='#3d2e10';}}
   else{{riskCat='High';riskColor='#e74c3c';riskBg='#3d1a1a';}}
+  // Apply setup-aware minimum stop — breakout needs room to breathe
+  var minStop=riskCat==='Low'?0.05:riskCat==='Medium'?0.07:0.08;
+  var stopDist=Math.max(atrStop,minStop);
+  var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
   var rp=0;
   if((s.ema_stack||'')==='full')rp++;
   if((s.hh_hl||0)>=0.8)rp++;
