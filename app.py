@@ -726,23 +726,47 @@ def lookup():
     try:
         tk = yf.Ticker(ticker)
         hist = tk.history(period='60d', interval='1d')
-        info = tk.fast_info
         if hist.empty:
-            return jsonify({'error': 'No data found'}), 404
-        closes = hist['Close'].tolist()
-        highs  = hist['High'].tolist()
-        lows   = hist['Low'].tolist()
+            return jsonify({'error': 'No data found for '+ticker}), 404
+        info = tk.info or {}
+        fi   = tk.fast_info
+        closes = [round(x,2) for x in hist['Close'].tolist()]
+        highs  = [round(x,2) for x in hist['High'].tolist()]
+        lows   = [round(x,2) for x in hist['Low'].tolist()]
         vols   = hist['Volume'].tolist()
-        price  = info.last_price or closes[-1]
+        price  = getattr(fi, 'last_price', None) or closes[-1]
+        chg    = round((price - closes[-2]) / closes[-2] * 100, 2) if len(closes) > 1 else 0
+        # Fundamentals
+        pe          = info.get('trailingPE') or info.get('forwardPE')
+        target      = info.get('targetMeanPrice')
+        name        = info.get('shortName') or info.get('longName') or ticker
+        sector      = info.get('sector','')
+        upside      = round((target - price) / price * 100, 1) if target and price else None
+        # RSI (14) calculated from closes
+        rsi = None
+        if len(closes) >= 15:
+            deltas = [closes[i]-closes[i-1] for i in range(1,len(closes))]
+            gains  = [max(d,0) for d in deltas[-14:]]
+            losses = [abs(min(d,0)) for d in deltas[-14:]]
+            avg_g  = sum(gains)/14
+            avg_l  = sum(losses)/14
+            if avg_l > 0:
+                rs  = avg_g / avg_l
+                rsi = round(100 - 100/(1+rs), 1)
         return jsonify({
-            'ticker': ticker,
-            'name':   getattr(info, 'description', ticker),
-            'price':  round(price, 2),
-            'change_pct': round((price - closes[-2]) / closes[-2] * 100, 2) if len(closes) > 1 else 0,
-            'closes': [round(x,2) for x in closes],
-            'highs':  [round(x,2) for x in highs],
-            'lows':   [round(x,2) for x in lows],
-            'vols':   vols,
+            'ticker':     ticker,
+            'name':       name,
+            'sector':     sector,
+            'price':      round(price, 2),
+            'change_pct': chg,
+            'pe_ratio':   round(pe, 1) if pe else None,
+            'rsi':        rsi,
+            'analyst_target': round(target, 2) if target else None,
+            'analyst_upside': round(upside, 1) if upside is not None else None,
+            'closes':     closes,
+            'highs':      highs,
+            'lows':       lows,
+            'vols':       vols,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
