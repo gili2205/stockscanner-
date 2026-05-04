@@ -84,8 +84,8 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .sortrow select{{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;outline:none;cursor:pointer;}}
 
 .alertbox{{background:#1a3d2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin:8px 24px;font-size:12px;color:var(--green);display:none;}}
-.grid{{display:flex;flex-wrap:wrap;gap:18px;padding:20px 24px;}}
-.card{{background:var(--bg2);border:1px solid var(--border);border-radius:14px;width:480px;border-left:3px solid var(--border);position:relative;overflow:hidden;transition:box-shadow .2s;}}
+.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;padding:20px 24px;}}
+.card{{background:var(--bg2);border:1px solid var(--border);border-radius:14px;width:100%;border-left:3px solid var(--border);position:relative;overflow:hidden;transition:box-shadow .2s;}}
 .card:hover{{box-shadow:0 4px 20px rgba(0,0,0,.3);}}
 .card-body{{padding:18px;}}
 .card.pre{{border-left-color:var(--green);}}
@@ -163,7 +163,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .chart-close:hover{{color:var(--text);}}
 .empty{{text-align:center;padding:60px;color:var(--muted);width:100%;font-size:15px;line-height:2;}}
 .pgfoot{{padding:14px 24px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);text-align:center;margin-top:8px;}}
-@media(max-width:750px){{.card{{width:100%;}}.grid{{padding:10px;gap:10px;}}.filterrow{{gap:12px;}}.filterpanel{{padding:10px 14px;}}}}
+@media(max-width:750px){{.grid{{grid-template-columns:1fr;padding:10px;gap:12px;}}.filterrow{{gap:12px;}}.filterpanel{{padding:10px 14px;}}}}
 </style>
 </head>
 <body>
