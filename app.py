@@ -514,6 +514,11 @@ function render() {{
   var grid     = document.getElementById("grid");
   var universe = Object.values(allStockData);
   if (!universe.length) universe = Object.values(stockData);
+  // Filter out stocks with significantly negative analyst upside
+  universe = universe.filter(function(s) {{
+    var up = s.analyst_upside!=null?parseFloat(s.analyst_upside):null;
+    return up===null || up>-10;
+  }});
   if (!universe.length) return;
 
   // Apply combined filters — get best 10 from matching stocks
@@ -550,6 +555,7 @@ function rsiC(v) {{ if(!v||isNaN(v)) return "#8892a4"; return v>=70?"#e74c3c":v>
 function rsiL(v) {{ if(!v||isNaN(v)) return "N/A"; return v>=70?"Overbought":v>=60?"Hot":v<=30?"Oversold":"Healthy"; }}
 function peC(v)  {{ if(!v||isNaN(v)||v<=0) return "#8892a4"; return v<20?"#27ae60":v<40?"#e67e22":"#e74c3c"; }}
 
+var cardBreakdowns = {{}};
 function makeCard(s, rank) {{
   var color  = sc(s.status);
   var dist   = s.dist_to_level||0;
@@ -646,7 +652,9 @@ function makeCard(s, rank) {{
   h += '<div class="rank '+(isTop?"top":"")+'">' +rank+'</div>';
   h += '<div class="ctop"><div class="ticker">'+s.ticker+'</div>';
   h += '<div class="co">'+(s.name&&s.name!==s.ticker?s.name+' &middot; ':'')+(s.sector||'NASDAQ')+'</div></div>';
-  h += '<div class="srow"><div class="snum" style="color:'+color+';cursor:pointer" onclick="showBreakdown(this,event)" data-tech="'+techScore+'" data-cat="'+catalystScore+'" data-ana="'+analystScore+'" data-entry="'+entryNum.toFixed(2)+'" data-stop="'+stopNum.toFixed(2)+'" data-tf="'+tf+'" data-tflabel="'+tfLabel+'" data-tfcolor="'+tfColor+'">'+unifiedScore+'</div>';
+  var scoreId='sc-'+s.ticker;
+  cardBreakdowns[scoreId]={{tech:techScore,cat:catalystScore,ana:analystScore,entry:entryNum.toFixed(2),stop:stopNum.toFixed(2),tf:tf,tfLabel:tfLabel,tfColor:tfColor}};
+  h += '<div class="srow"><div class="snum" style="color:'+color+';cursor:pointer" id="'+scoreId+'" onclick="showBreakdown(this)">'+unifiedScore+'</div>';
   h += '<div class="smeta"><div class="slbl" style="color:'+color+'">'+s.status+'</div>';
   h += '<div class="sbar2"><div class="sfill" style="width:'+Math.min(100,s.score||0)+'%;background:'+color+'"></div></div></div></div>';
   h += '<div class="funds">';
@@ -655,7 +663,7 @@ function makeCard(s, rank) {{
   h += '<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upside&&parseFloat(upside)>0?'#27ae60':'#8892a4')+'\">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div>';
   h += '<div class="fsub" style="color:'+(upside&&parseFloat(upside)>0?'#27ae60':'#8892a4')+'\">'+(upside?(parseFloat(upside)>=0?'+':'')+upside+'%':'N/A')+'</div></div>';
   h += '</div>';
-  h += rsiHTML;
+  // rsiHTML removed — RSI already shown in fundamentals box
   h += '<div class="prox"><div class="ptop"><span>Distance to breakout trigger</span><span style="color:'+pc+';font-weight:600">'+dist.toFixed(1)+'% away</span></div>';
   h += '<div class="ptrack"><div class="pfill" style="width:'+prox+'%;background:'+pc+'"></div></div></div>';
   h += '<div class="sigs">'+sigs+'</div>';
