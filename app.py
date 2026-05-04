@@ -606,9 +606,9 @@ function makeCard(s, rank) {{
   var targetHTML="";
 
   var h = '';
-  h += '<div class="card '+(s.pre_breakout?"pre":s.status==="WATCH"?"watch":"\")+'">';
+  h += '<div class="card '+(s.pre_breakout?"pre":s.status==="WATCH"?"watch":"")+'">';
   h += '<div class="card-body">';
-  h += '<div class="rank '+(isTop?"top":"\")+'">' +rank+'</div>';
+  h += '<div class="rank '+(isTop?"top":"")+'">' +rank+'</div>';
   h += '<div class="ctop"><div class="ticker">'+s.ticker+'</div>';
   h += '<div class="co">'+(s.name&&s.name!==s.ticker?s.name+' &middot; ':'')+(s.sector||'NASDAQ')+'</div></div>';
   h += '<div class="srow"><div class="snum" style="color:'+color+'">'+(s.score||'&mdash;')+'</div>';
