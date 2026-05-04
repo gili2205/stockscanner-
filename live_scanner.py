@@ -202,6 +202,8 @@ def get_fundamentals_fast(tickers):
             pe      = info.get("trailingPE") or info.get("forwardPE")
             target  = info.get("targetMeanPrice")
             rec     = info.get("recommendationMean")
+            rec_key = info.get("recommendationKey","")  # "buy","hold","sell" etc
+            num_ana = info.get("numberOfAnalystOpinions") or info.get("numAnalystOpinions")
             rev_g   = info.get("revenueGrowth")
             eps_g   = info.get("earningsGrowth")
             short   = info.get("shortPercentOfFloat")
@@ -223,6 +225,8 @@ def get_fundamentals_fast(tickers):
                 "pe_ratio":           round(float(pe),1) if pe and pe>0 else None,
                 "analyst_target":     round(float(target),2) if target else None,
                 "analyst_buy_pct":    buy_pct,
+                "num_analysts":       int(num_ana) if num_ana else None,
+                "recommendation":     rec_key,
                 "revenue_growth_yoy": round(float(rev_g)*100,1) if rev_g else None,
                 "eps_growth_yoy":     round(float(eps_g)*100,1) if eps_g else None,
                 "short_interest_pct": round(float(short)*100,1) if short else None,
@@ -495,11 +499,13 @@ def score_stock(ticker, df, live_price=None, fund=None):
             "earnings_soon":    earnings_soon,
             "days_to_earnings": days_earn,
             "analyst_buy_pct":  buy_pct,
+            "num_analysts":     fund.get("num_analysts"),
+            "recommendation":   fund.get("recommendation",""),
             "revenue_growth":   rev_growth,
             "analyst_upside":   upside,
             "breakout_score":   breakout_score,
             "catalyst_score":   catalyst_score,
-            "rs_percentile":    None,  # filled in by fast_rescore() after full universe scoring
+            "rs_percentile":    None,
             "rank":             0,
             "name":             ticker,
             "sector":           fund.get("sector",""),
@@ -508,6 +514,7 @@ def score_stock(ticker, df, live_price=None, fund=None):
             "rsi":              None,
             "momentum_1m":      mom1m,
             "momentum_3m":      mom3m,
+            "timeframe":        "short" if (days_earn and 0<days_earn<=14) or (vr>=3) else "mid" if pre or bull_flag else "long",
         }
     except Exception as e:
         log.debug(f"score_stock {ticker}: {e}")
@@ -570,7 +577,6 @@ def push_results(results, sess, scan_time, elapsed):
         "market_open":        sess=="Market Open",
         "session":            sess,
         "last_updated":       now_et.isoformat(),
-        "last_updated_ts":    int(now_et.timestamp()),  # Unix epoch — timezone-safe age calc
         "last_scan_time":     scan_time,
         "scan_duration_sec":  elapsed,
         "scanner_version":    "v2.0.2",
@@ -580,12 +586,12 @@ def push_results(results, sess, scan_time, elapsed):
     # Also push all scored stocks so dashboard filters work across full universe
     # Send as a dict keyed by ticker for fast lookup
     try:
-        all_stocks = {r["ticker"]: r for r in results[:200]}  # top 200 by score
+        all_stocks = {{r["ticker"]: r for r in results[:200]}}  # top 200 by score
         ref.child("all_stocks").set(all_stocks)
     except Exception as e:
-        log.debug(f"all_stocks push failed: {e}")
+        log.debug(f"all_stocks push failed: {{e}}")
 
-    log.info(f"Pushed: top10={top10_tickers} | READY={payload['ready_count']} | [{sess}] | {elapsed}s")
+    log.info(f"Pushed: top10={{top10_tickers}} | READY={{payload['ready_count']}} | [{{sess}}] | {{elapsed}}s")
 
 # ── Session helper ────────────────────────────────────────────────────────────
 def get_session():
@@ -608,7 +614,6 @@ if not history:
 
 log.info(f"Ready: {len(history)} stocks. Starting 60s scan loop.")
 last_download_date = date.today()
-last_premarket_download = None  # tracks whether 7:30am download happened today
 
 # Pre-load fundamentals for the full universe from file cache
 full_fund_data = {}
@@ -624,38 +629,14 @@ while True:
         now_et = datetime.now(ET)
         sess   = get_session()
 
-        # Two full downloads per trading day:
-        #   7:30am ET — pre-market prep (finishes ~8:00am, ready before open)
-        #   9:25am ET — market open refresh (fresh data with overnight gaps)
-        is_weekday = now_et.weekday() < 5
-        premarket_trigger  = is_weekday and now_et.hour == 7 and now_et.minute >= 30
-        marketopen_trigger = is_weekday and now_et.hour == 9 and now_et.minute >= 25
-
-        if premarket_trigger and last_download_date != date.today():
-            log.info("=== Pre-market download (7:30am ET) — building watchlist ===")
-            history = download_history(universe)
-            load_fund_file_cache()
-            full_fund_data = {t:_fund_file_cache[t] for t in history
-                if t in _fund_file_cache and isinstance(_fund_file_cache[t],dict)}
-            last_download_date = date.today()
-            last_premarket_download = date.today()
-
-        elif marketopen_trigger and last_premarket_download == date.today():
-            # Second download of the day — market open refresh after pre-market run
-            log.info("=== Market open refresh (9:25am ET) — updating with overnight data ===")
-            history = download_history(universe)
-            load_fund_file_cache()
-            full_fund_data = {t:_fund_file_cache[t] for t in history
-                if t in _fund_file_cache and isinstance(_fund_file_cache[t],dict)}
-
-        elif marketopen_trigger and last_download_date != date.today():
-            # Fallback: pre-market download was missed, do it now at open
-            log.info("=== New trading day — refreshing caches (pre-market download missed) ===")
-            history = download_history(universe)
-            load_fund_file_cache()
-            full_fund_data = {t:_fund_file_cache[t] for t in history
-                if t in _fund_file_cache and isinstance(_fund_file_cache[t],dict)}
-            last_download_date = date.today()
+        if date.today() != last_download_date:
+            if now_et.hour==9 and now_et.minute>=25:
+                log.info("=== New trading day — refreshing caches ===")
+                history = download_history(universe)
+                load_fund_file_cache()
+                full_fund_data = {t:_fund_file_cache[t] for t in history
+                    if t in _fund_file_cache and isinstance(_fund_file_cache[t],dict)}
+                last_download_date = date.today()
 
         live    = alpaca_prices(list(history.keys()))
         results = fast_rescore(history, live, full_fund_data)
@@ -664,15 +645,8 @@ while True:
         scan_time = now_et.strftime("%Y-%m-%d %H:%M:%S ET")
 
         push_results(results, sess, scan_time, elapsed)
-
-        # Dynamic sleep — active sessions scan every 60s, closed market hourly heartbeat
-        if sess in ("Market Open", "Pre-Market", "After-Hours"):
-            sleep_secs = 60
-        else:
-            sleep_secs = 3600  # Market Closed — 1 hour heartbeat to confirm scanner is alive
-
-        log.info(f"Next scan in {sleep_secs}s... [{sess}]")
-        time.sleep(sleep_secs)
+        log.info("Next scan in 60s...")
+        time.sleep(60)
 
     except KeyboardInterrupt:
         log.info("Stopped."); break
