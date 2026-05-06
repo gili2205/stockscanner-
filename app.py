@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.4.9"
+VERSION = "v2.5.0"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -721,7 +721,7 @@ function toggleCard(ticker) {{
   if (!body) return;
   var isOpen = body.style.display === 'block';
   body.style.display = isOpen ? 'none' : 'block';
-  if (!isOpen) fetchFundamentals(ticker, body);
+  if (!isOpen) fetchFundamentals(ticker);
 }}
 
 function showBreakdown(el) {{
@@ -748,52 +748,69 @@ document.addEventListener('click', function(e) {{
   if(p && !p.contains(e.target)) p.style.display = 'none';
 }});
 
+// _fundData stores fetched data persistently across re-renders
+// _fundCache tracks which tickers are currently being fetched
+var _fundData  = {{}};
 var _fundCache = {{}};
-async function fetchFundamentals(ticker, container) {{
+
+function applyFundamentals(ticker) {{
+  var d = _fundData[ticker];
+  if (!d) return;
+  var card = document.getElementById('card-'+ticker);
+  if (!card) return;
+  if(d.pe_ratio) {{
+    var pe=d.pe_ratio;
+    var peEl=card.querySelector('.fund-pe-val'), peSub=card.querySelector('.fund-pe-sub');
+    if(peEl){{peEl.textContent=pe.toFixed(1);peEl.style.color=pe<20?'var(--green)':pe<40?'var(--amber)':'var(--red)';}}
+    if(peSub) peSub.textContent=pe<20?'Cheap':pe<40?'Fair':'Pricey';
+  }}
+  if(d.rsi!=null) {{
+    var rsi=d.rsi;
+    var rsiEl=card.querySelector('.fund-rsi-val'), rsiSub=card.querySelector('.fund-rsi-sub');
+    if(rsiEl){{rsiEl.textContent=rsi.toFixed(0);rsiEl.style.color=rsi>=70?'var(--red)':rsi<=30?'var(--blue)':'var(--green)';}}
+    if(rsiSub) rsiSub.textContent=rsi>=70?'Overbought':rsi<=30?'Oversold':'Healthy';
+  }}
+  if(d.pe_ratio||d.rsi!=null) {{
+    var upEl=card.querySelector('.fund-tgt-val'), subEl=card.querySelector('.fund-tgt-sub');
+    var tgt=d.analyst_target, up=d.analyst_upside!=null?parseFloat(d.analyst_upside):null;
+    var col=up!=null&&up>5?'var(--green)':up!=null&&up<-5?'var(--red)':'var(--muted)';
+    if(upEl&&tgt){{upEl.textContent='$'+tgt.toFixed(0);upEl.style.color=col;}}
+    if(subEl){{subEl.textContent=up!=null?(up>=0?'+':'')+up.toFixed(1)+'%':'';subEl.style.color=col;}}
+  }}
+}}
+
+async function fetchFundamentals(ticker) {{
+  // If already have data, just apply it to current DOM
+  if(_fundData[ticker]) {{ applyFundamentals(ticker); return; }}
+  // If currently fetching, skip
   if(_fundCache[ticker]) return;
+  _fundCache[ticker] = true;
   try {{
     var resp = await fetch('/lookup?t='+ticker);
-    if(!resp.ok) return;
+    if(!resp.ok) {{ _fundCache[ticker]=false; return; }}
     var d = await resp.json();
-    if(d.error) return;
-    _fundCache[ticker] = true; // only cache on success
-    // Update all matching elements in this container AND across the whole card
-    var card = document.getElementById('card-'+ticker);
-    var targets = card ? [card] : [container];
-    targets.forEach(function(el) {{
-      if(d.pe_ratio) {{
-        var pe=d.pe_ratio, peEl=el.querySelector('.fund-pe-val'), peSub=el.querySelector('.fund-pe-sub');
-        if(peEl){{peEl.textContent=pe.toFixed(1);peEl.style.color=pe<20?'var(--green)':pe<40?'var(--amber)':'var(--red)';}}
-        if(peSub) peSub.textContent=pe<20?'Cheap':pe<40?'Fair':'Pricey';
-      }}
-      if(d.rsi!=null) {{
-        var rsi=d.rsi, rsiEl=el.querySelector('.fund-rsi-val'), rsiSub=el.querySelector('.fund-rsi-sub');
-        if(rsiEl){{rsiEl.textContent=rsi.toFixed(0);rsiEl.style.color=rsi>=70?'var(--red)':rsi<=30?'var(--blue)':'var(--green)';}}
-        if(rsiSub) rsiSub.textContent=rsi>=70?'Overbought':rsi<=30?'Oversold':'Healthy';
-      }}
-      if(d.analyst_target) {{
-        var tgt=d.analyst_target;
-        var up=d.analyst_upside!=null?parseFloat(d.analyst_upside):null;
-        var col=up!=null&&up>5?'var(--green)':up!=null&&up<-5?'var(--red)':'var(--muted)';
-        var tEl=el.querySelector('.fund-tgt-val'), sEl=el.querySelector('.fund-tgt-sub');
-        if(tEl){{tEl.textContent='$'+tgt.toFixed(0);tEl.style.color=col;}}
-        if(sEl){{sEl.textContent=up!=null?(up>=0?'+':'')+up.toFixed(1)+'%':'';sEl.style.color=col;}}
-      }}
-    }});
-  }} catch(e) {{}}
+    if(d.error) {{ _fundCache[ticker]=false; return; }}
+    _fundData[ticker] = d; // persist data
+    applyFundamentals(ticker);
+  }} catch(e) {{ _fundCache[ticker]=false; }}
 }}
 
 function prefetchAllFundamentals() {{
+  // First apply cached data immediately (no delay)
   var headers = document.querySelectorAll('.card-header');
-  var delay = 0;
+  var needFetch = [];
   headers.forEach(function(hdr) {{
     var ticker = hdr.getAttribute('data-ticker');
     if(!ticker) return;
-    setTimeout(function() {{
-      var card = document.getElementById('card-'+ticker);
-      if(card) fetchFundamentals(ticker, card);
-    }}, delay);
-    delay += 400;
+    if(_fundData[ticker]) {{
+      applyFundamentals(ticker); // instant - from cache
+    }} else {{
+      needFetch.push(ticker);
+    }}
+  }});
+  // Then fetch missing ones with small stagger
+  needFetch.forEach(function(ticker, i) {{
+    setTimeout(function() {{ fetchFundamentals(ticker); }}, i * 150);
   }});
 }}
 
