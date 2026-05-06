@@ -1,10 +1,11 @@
 import json
+import requests
 import yfinance as yf
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.4.2"
+VERSION = "v2.4.3"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -1870,11 +1871,17 @@ def analytics_page():
 
 @app.route('/api/analytics')
 def api_analytics():
-    """Return flat list of all historical picks with returns."""
-    import firebase_admin
-    from firebase_admin import db as fdb
+    """Return flat list of all historical picks with returns via Firebase REST."""
     try:
-        history = fdb.reference('/scanner/history').get() or {}
+        db_url = FIREBASE_CONFIG.get('databaseURL','')
+        resp = requests.get(
+            f"{db_url}/scanner/history.json",
+            params={'orderBy': '"$key"', 'limitToLast': '60'},
+            timeout=30
+        )
+        if not resp.ok:
+            return jsonify({'error': f'Firebase error {resp.status_code}'}), 500
+        history = resp.json() or {}
         picks = []
         for day_str, day_data in history.items():
             if not isinstance(day_data, dict):
