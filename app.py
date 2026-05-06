@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.5.0"
+VERSION = "v2.5.1"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -1979,7 +1979,6 @@ def api_analytics():
         db_url = FIREBASE_CONFIG.get('databaseURL','')
         resp = requests.get(
             f"{db_url}/scanner/history.json",
-            params={'orderBy': '"$key"', 'limitToLast': '60'},
             timeout=30
         )
         if not resp.ok:
