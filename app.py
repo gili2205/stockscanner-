@@ -4,7 +4,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.4.1"
+VERSION = "v2.4.2"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -114,7 +114,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <p>Scans 2,000+ stocks &middot; Multi-filter &middot; P/E &middot; RSI &middot; Analyst Target &middot; Updates every 60s</p>
   </div>
   <div class="hright">
-    <span class="ver" id="verspan">{ver}</span>
+    <a href="/analytics" style="font-size:11px;color:var(--blue);text-decoration:none;margin-right:8px">📊 Analytics</a><span class="ver" id="verspan">{ver}</span>
     <span class="regime closed" id="regime">&#9679; Connecting...</span>
   </div>
 </div>
@@ -861,6 +861,1000 @@ def lookup():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+ANALYTICS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scanner Analytics</title>
+<style>
+:root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;--purple:#9b59b6;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
+a{color:var(--blue);text-decoration:none;}
+a:hover{text-decoration:underline;}
+
+/* Header */
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+.header h1{font-size:16px;font-weight:600;}
+.header-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+.nav{display:flex;gap:12px;align-items:center;}
+.nav a{font-size:12px;color:var(--muted);padding:5px 12px;border-radius:6px;border:1px solid var(--border);}
+.nav a:hover{color:var(--text);border-color:var(--text);text-decoration:none;}
+.nav a.active{color:var(--blue);border-color:var(--blue);}
+
+/* Controls */
+.controls{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;}
+.ctrl-group{display:flex;align-items:center;gap:8px;}
+.ctrl-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+select,input[type=range]{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;outline:none;cursor:pointer;}
+.btn{background:var(--blue);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;}
+.btn:hover{background:#2980b9;}
+.btn.secondary{background:var(--bg3);color:var(--text);border:1px solid var(--border);}
+.btn.secondary:hover{border-color:var(--blue);color:var(--blue);}
+
+/* Loading */
+.loading{text-align:center;padding:80px;color:var(--muted);}
+.spinner{font-size:32px;animation:spin 1s linear infinite;display:inline-block;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* Overview cards */
+.overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;padding:20px 24px;}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px 20px;}
+.stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.stat-value{font-size:28px;font-weight:700;line-height:1;}
+.stat-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+.stat-card.green{border-left:3px solid var(--green);}
+.stat-card.red{border-left:3px solid var(--red);}
+.stat-card.blue{border-left:3px solid var(--blue);}
+.stat-card.amber{border-left:3px solid var(--amber);}
+
+/* Section */
+.section{padding:0 24px 20px;}
+.section-title{font-size:13px;font-weight:600;color:var(--text);margin:20px 0 12px;display:flex;align-items:center;gap:8px;}
+.section-title::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* Performance table */
+.perf-table{width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.perf-table th{background:var(--bg3);padding:10px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:600;}
+.perf-table td{padding:10px 14px;border-top:1px solid var(--border);font-size:13px;}
+.perf-table tr:hover td{background:#ffffff05;}
+.win{color:var(--green);font-weight:600;}
+.lose{color:var(--red);font-weight:600;}
+.neutral{color:var(--muted);}
+
+/* Signal impact */
+.signals-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;}
+.signal-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}
+.signal-name{font-size:12px;font-weight:600;margin-bottom:10px;}
+.signal-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px;}
+.signal-bar-label{width:80px;color:var(--muted);flex-shrink:0;}
+.signal-bar-track{flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden;}
+.signal-bar-fill{height:100%;border-radius:4px;transition:width .5s;}
+.signal-bar-val{width:40px;text-align:right;font-weight:600;}
+
+/* Ticker detail table */
+.detail-table-wrap{overflow-x:auto;}
+.detail-table{width:100%;border-collapse:collapse;font-size:12px;}
+.detail-table th{background:var(--bg3);padding:9px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:600;position:sticky;top:0;white-space:nowrap;}
+.detail-table td{padding:8px 12px;border-top:1px solid var(--border);white-space:nowrap;}
+.detail-table tr:hover td{background:#ffffff05;cursor:pointer;}
+.badge{display:inline-block;padding:2px 7px;border-radius:20px;font-size:9px;font-weight:700;letter-spacing:.5px;}
+.badge-ready{background:#1a3d2b;color:var(--green);}
+.badge-watch{background:#3d2e10;color:var(--amber);}
+.badge-build{background:#22263a;color:var(--muted);}
+.ret-cell{font-weight:600;}
+.spark{display:inline-block;width:60px;height:20px;vertical-align:middle;}
+
+/* Trend chart */
+.chart-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;}
+.chart-canvas{width:100%;height:300px;}
+
+/* Empty / error */
+.empty-state{text-align:center;padding:60px;color:var(--muted);}
+.empty-icon{font-size:40px;margin-bottom:12px;}
+
+/* Pagination */
+.pagination{display:flex;gap:6px;align-items:center;justify-content:center;padding:16px;}
+.page-btn{background:var(--bg3);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;}
+.page-btn:hover,.page-btn.active{border-color:var(--blue);color:var(--blue);}
+
+@media(max-width:700px){.overview{grid-template-columns:1fr 1fr;}.controls{padding:10px 14px;}.section{padding:0 14px 16px;}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>&#128202; Scanner Analytics</h1>
+    <div class="header-sub">How well are the scanner's picks performing?</div>
+  </div>
+  <div class="nav">
+    <a href="/">&#8592; Dashboard</a>
+    <a href="/analytics" class="active">Analytics</a>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="ctrl-group">
+    <span class="ctrl-label">Timeframe</span>
+    <select id="tf-select" onchange="applyFilters()">
+      <option value="1w">1 Week</option>
+      <option value="2w">2 Weeks</option>
+      <option value="1m" selected>1 Month</option>
+      <option value="2m">2 Months</option>
+      <option value="3m">3 Months</option>
+      <option value="6m">6 Months</option>
+      <option value="1y">1 Year</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Status</span>
+    <select id="status-select" onchange="applyFilters()">
+      <option value="all">All</option>
+      <option value="READY">Ready only</option>
+      <option value="WATCH">Watch only</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Setup</span>
+    <select id="setup-select" onchange="applyFilters()">
+      <option value="all">All</option>
+      <option value="breakout">Breakout</option>
+      <option value="bull_flag">Bull Flag</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Min Score</span>
+    <select id="score-select" onchange="applyFilters()">
+      <option value="0">Any</option>
+      <option value="30">30+</option>
+      <option value="40">40+</option>
+      <option value="50">50+</option>
+    </select>
+  </div>
+  <div class="ctrl-group" style="margin-left:auto">
+    <span id="data-count" style="font-size:11px;color:var(--muted)"></span>
+    <button class="btn secondary" onclick="exportCSV()">&#8681; Export CSV</button>
+  </div>
+</div>
+
+<div id="app">
+  <div class="loading">
+    <div class="spinner">&#9203;</div>
+    <div style="margin-top:12px;font-size:13px">Loading analytics data...</div>
+  </div>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<script>
+const CFG = {cfg};
+firebase.initializeApp(CFG);
+const fdb = firebase.database();
+
+var allPicks = [];      // flat array of all pick records
+var filtered = [];      // after filters applied
+var currentPage = 1;
+var pageSize = 50;
+
+// ── Load data from Firebase ───────────────────────────────────────────────────
+fdb.ref('scanner/history').once('value', function(snap) {{
+  var data = snap.val();
+  if (!data) {{
+    showEmpty('No analytics data yet. Run the backtest on the VM to populate.');
+    return;
+  }}
+
+  // Flatten: {{date: {{ticker: record}}}} → flat array
+  allPicks = [];
+  Object.keys(data).sort().forEach(function(date) {{
+    var day = data[date];
+    if (!day || typeof day !== 'object') return;
+    Object.keys(day).forEach(function(ticker) {{
+      var r = day[ticker];
+      if (r && r.price_at_scan) {{
+        allPicks.push(Object.assign({{scan_date: date}}, r));
+      }}
+    }});
+  }});
+
+  if (!allPicks.length) {{
+    showEmpty('No pick records found in history data.');
+    return;
+  }}
+
+  document.getElementById('data-count').textContent =
+    allPicks.length.toLocaleString() + ' picks loaded';
+
+  applyFilters();
+}}, function(err) {{
+  showEmpty('Firebase error: ' + err.message);
+}});
+
+// ── Filters ───────────────────────────────────────────────────────────────────
+function applyFilters() {{
+  var tf     = document.getElementById('tf-select').value;
+  var status = document.getElementById('status-select').value;
+  var setup  = document.getElementById('setup-select').value;
+  var minSc  = parseInt(document.getElementById('score-select').value) || 0;
+
+  filtered = allPicks.filter(function(p) {{
+    if (status !== 'all' && p.status !== status) return false;
+    if (setup  !== 'all' && p.setup_type !== setup) return false;
+    if ((p.unified_score || 0) < minSc) return false;
+    return true;
+  }});
+
+  currentPage = 1;
+  render(tf);
+}}
+
+// ── Main render ───────────────────────────────────────────────────────────────
+function render(tf) {{
+  if (!filtered.length) {{
+    showEmpty('No picks match the current filters.');
+    return;
+  }}
+
+  var picks = filtered.filter(function(p) {{
+    return p.returns && p.returns[tf] !== null && p.returns[tf] !== undefined;
+  }});
+
+  var html = '';
+
+  // ── Overview stats ─────────────────────────────────────────────────────────
+  var stats = computeStats(picks, tf);
+  html += '<div class="overview">';
+  html += statCard('Total Picks', picks.length.toLocaleString(), 'With ' + tf + ' return data', 'blue');
+  html += statCard('Win Rate', stats.winRate + '%', stats.wins + ' winners', 'green');
+  html += statCard('Lose Rate', stats.loseRate + '%', stats.losses + ' losers', 'red');
+  html += statCard('Avg Win', '+' + stats.avgWin + '%', 'When positive', 'green');
+  html += statCard('Avg Loss', stats.avgLoss + '%', 'When negative', 'red');
+  html += statCard('Best Pick', '+' + stats.best.ret + '%', stats.best.ticker + ' ' + stats.best.date, 'green');
+  html += statCard('Worst Pick', stats.worst.ret + '%', stats.worst.ticker + ' ' + stats.worst.date, 'red');
+  html += statCard('Avg Return', (stats.avgReturn >= 0 ? '+' : '') + stats.avgReturn + '%', 'All picks combined', stats.avgReturn >= 0 ? 'green' : 'red');
+  html += '</div>';
+
+  // ── Performance by timeframe ───────────────────────────────────────────────
+  html += '<div class="section">';
+  html += '<div class="section-title">Performance across all timeframes</div>';
+  html += buildTimeframeTable();
+  html += '</div>';
+
+  // ── Signal impact ──────────────────────────────────────────────────────────
+  html += '<div class="section">';
+  html += '<div class="section-title">What signals predict success?</div>';
+  html += '<div class="signals-grid">';
+  html += buildSignalCard('RS > 80', tf,
+    filtered.filter(function(p){{return (p.rs_percentile||0)>=80;}}),
+    filtered.filter(function(p){{return (p.rs_percentile||0)<80;}}),
+    'With RS>80', 'Without');
+  html += buildSignalCard('Vol dry < 70%', tf,
+    filtered.filter(function(p){{return (p.vol_contraction||1)<=0.7;}}),
+    filtered.filter(function(p){{return (p.vol_contraction||1)>0.7;}}),
+    'Vol dry', 'Vol heavy');
+  html += buildSignalCard('ATH / Multi-year', tf,
+    filtered.filter(function(p){{return (p.level||'').indexOf('ATH')>=0||(p.level||'').indexOf('multi')>=0;}}),
+    filtered.filter(function(p){{return (p.level||'').indexOf('ATH')<0&&(p.level||'').indexOf('multi')<0;}}),
+    'At ATH/Multi', 'Below');
+  html += buildSignalCard('EMA full stack', tf,
+    filtered.filter(function(p){{return p.ema_stack==='full';}}),
+    filtered.filter(function(p){{return p.ema_stack!=='full';}}),
+    'Full stack', 'Partial/none');
+  html += buildSignalCard('Score 40+', tf,
+    filtered.filter(function(p){{return (p.unified_score||0)>=40;}}),
+    filtered.filter(function(p){{return (p.unified_score||0)<40;}}),
+    'Score ≥ 40', 'Score < 40');
+  html += buildSignalCard('Pre-breakout', tf,
+    filtered.filter(function(p){{return p.pre_breakout;}}),
+    filtered.filter(function(p){{return !p.pre_breakout;}}),
+    'Pre-breakout', 'Not pre-bo');
+  html += '</div></div>';
+
+  // ── Trend chart ────────────────────────────────────────────────────────────
+  html += '<div class="section">';
+  html += '<div class="section-title">Win rate over time</div>';
+  html += '<div class="chart-wrap"><canvas id="trend-chart" class="chart-canvas"></canvas></div>';
+  html += '</div>';
+
+  // ── Detail table ───────────────────────────────────────────────────────────
+  html += '<div class="section">';
+  html += '<div class="section-title">All picks — detail</div>';
+  html += buildDetailTable(tf);
+  html += '</div>';
+
+  document.getElementById('app').innerHTML = html;
+
+  // Draw trend chart
+  drawTrendChart(tf);
+}}
+
+// ── Stats computation ─────────────────────────────────────────────────────────
+function computeStats(picks, tf) {{
+  if (!picks.length) return {{winRate:0,loseRate:0,wins:0,losses:0,avgWin:0,avgLoss:0,avgReturn:0,best:{{ret:0,ticker:'',date:''}},worst:{{ret:0,ticker:'',date:''}}}};
+  var rets = picks.map(function(p){{return p.returns[tf];}}).filter(function(r){{return r!==null&&r!==undefined;}});
+  var wins  = rets.filter(function(r){{return r>0;}});
+  var loses = rets.filter(function(r){{return r<=0;}});
+  var winRate  = rets.length ? Math.round(wins.length/rets.length*100) : 0;
+  var loseRate = 100 - winRate;
+  var avgWin   = wins.length  ? +(wins.reduce(function(a,b){{return a+b;}},0)/wins.length).toFixed(1) : 0;
+  var avgLoss  = loses.length ? +(loses.reduce(function(a,b){{return a+b;}},0)/loses.length).toFixed(1) : 0;
+  var avgReturn = rets.length ? +(rets.reduce(function(a,b){{return a+b;}},0)/rets.length).toFixed(1) : 0;
+  var best  = picks.reduce(function(a,b){{return (b.returns[tf]||0)>(a.returns[tf]||0)?b:a;}}, picks[0]);
+  var worst = picks.reduce(function(a,b){{return (b.returns[tf]||0)<(a.returns[tf]||0)?b:a;}}, picks[0]);
+  return {{winRate, loseRate, wins:wins.length, losses:loses.length,
+    avgWin, avgLoss, avgReturn,
+    best:{{ret:+(best.returns[tf]||0).toFixed(1), ticker:best.ticker, date:best.scan_date}},
+    worst:{{ret:+(worst.returns[tf]||0).toFixed(1), ticker:worst.ticker, date:worst.scan_date}}}};
+}}
+
+function statCard(label, value, sub, color) {{
+  return '<div class="stat-card ' + color + '">' +
+    '<div class="stat-label">' + label + '</div>' +
+    '<div class="stat-value" style="color:var(--' + color + ')">' + value + '</div>' +
+    '<div class="stat-sub">' + sub + '</div>' +
+    '</div>';
+}}
+
+// ── Timeframe table ───────────────────────────────────────────────────────────
+function buildTimeframeTable() {{
+  var periods = ['1w','2w','1m','2m','3m','6m','1y'];
+  var labels  = ['1 Week','2 Weeks','1 Month','2 Months','3 Months','6 Months','1 Year'];
+  var html = '<table class="perf-table"><thead><tr>';
+  html += '<th>Period</th><th>Picks</th><th>Win Rate</th><th>Lose Rate</th><th>Avg Win</th><th>Avg Loss</th><th>Avg Return</th></tr></thead><tbody>';
+  periods.forEach(function(tf, i) {{
+    var picks = filtered.filter(function(p){{return p.returns&&p.returns[tf]!==null&&p.returns[tf]!==undefined;}});
+    if (!picks.length) {{
+      html += '<tr><td>' + labels[i] + '</td><td colspan="6" class="neutral">No data</td></tr>';
+      return;
+    }}
+    var s = computeStats(picks, tf);
+    html += '<tr>';
+    html += '<td>' + labels[i] + '</td>';
+    html += '<td>' + picks.length + '</td>';
+    html += '<td class="win">' + s.winRate + '%</td>';
+    html += '<td class="lose">' + s.loseRate + '%</td>';
+    html += '<td class="win">+' + s.avgWin + '%</td>';
+    html += '<td class="lose">' + s.avgLoss + '%</td>';
+    html += '<td class="' + (s.avgReturn>=0?'win':'lose') + '">' + (s.avgReturn>=0?'+':'') + s.avgReturn + '%</td>';
+    html += '</tr>';
+  }});
+  html += '</tbody></table>';
+  return html;
+}}
+
+// ── Signal impact card ────────────────────────────────────────────────────────
+function buildSignalCard(name, tf, withSignal, withoutSignal, labelWith, labelWithout) {{
+  var w = computeStats(withSignal.filter(function(p){{return p.returns&&p.returns[tf]!=null;}}), tf);
+  var wo = computeStats(withoutSignal.filter(function(p){{return p.returns&&p.returns[tf]!=null;}}), tf);
+  var diff = w.winRate - wo.winRate;
+  var diffColor = diff > 0 ? 'var(--green)' : 'var(--red)';
+
+  return '<div class="signal-card">' +
+    '<div class="signal-name">' + name +
+    '<span style="margin-left:8px;font-size:10px;font-weight:400;color:' + diffColor + '">' +
+    (diff>0?'+':'') + diff + '% win rate</span></div>' +
+    '<div class="signal-bar-row">' +
+    '<span class="signal-bar-label">' + labelWith + '</span>' +
+    '<div class="signal-bar-track"><div class="signal-bar-fill" style="width:' + w.winRate + '%;background:var(--green)"></div></div>' +
+    '<span class="signal-bar-val win">' + w.winRate + '%</span>' +
+    '</div>' +
+    '<div class="signal-bar-row">' +
+    '<span class="signal-bar-label">' + labelWithout + '</span>' +
+    '<div class="signal-bar-track"><div class="signal-bar-fill" style="width:' + wo.winRate + '%;background:var(--muted)"></div></div>' +
+    '<span class="signal-bar-val neutral">' + wo.winRate + '%</span>' +
+    '</div>' +
+    '<div style="font-size:10px;color:var(--muted);margin-top:6px">' +
+    withSignal.length + ' picks with / ' + withoutSignal.length + ' without</div>' +
+    '</div>';
+}}
+
+// ── Trend chart ───────────────────────────────────────────────────────────────
+var trendChart = null;
+function drawTrendChart(tf) {{
+  // Group by week, compute win rate per week
+  var byWeek = {{}};
+  filtered.forEach(function(p) {{
+    if (!p.returns||p.returns[tf]===null||p.returns[tf]===undefined) return;
+    var week = p.scan_date.substring(0, 7); // YYYY-MM
+    if (!byWeek[week]) byWeek[week] = [];
+    byWeek[week].push(p.returns[tf]);
+  }});
+
+  var labels = Object.keys(byWeek).sort();
+  var winRates = labels.map(function(w) {{
+    var rets = byWeek[w];
+    return Math.round(rets.filter(function(r){{return r>0;}}).length / rets.length * 100);
+  }});
+  var avgRets = labels.map(function(w) {{
+    var rets = byWeek[w];
+    return +(rets.reduce(function(a,b){{return a+b;}},0)/rets.length).toFixed(1);
+  }});
+
+  var ctx = document.getElementById('trend-chart');
+  if (!ctx) return;
+
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(ctx, {{
+    type: 'bar',
+    data: {{
+      labels: labels,
+      datasets: [
+        {{
+          label: 'Win Rate %',
+          data: winRates,
+          backgroundColor: winRates.map(function(v){{return v>=60?'rgba(39,174,96,.7)':v>=50?'rgba(230,126,34,.7)':'rgba(231,76,60,.7)'}}),
+          borderRadius: 4,
+          yAxisID: 'y'
+        }},
+        {{
+          label: 'Avg Return %',
+          data: avgRets,
+          type: 'line',
+          borderColor: 'rgba(52,152,219,.8)',
+          backgroundColor: 'transparent',
+          pointBackgroundColor: 'rgba(52,152,219,1)',
+          tension: 0.3,
+          yAxisID: 'y2'
+        }}
+      ]
+    }},
+    options: {{
+      responsive: true, maintainAspectRatio: false,
+      plugins: {{ legend: {{ labels: {{ color: '#8892a4', font: {{ size: 11 }} }} }} }},
+      scales: {{
+        x: {{ ticks: {{ color: '#8892a4' }}, grid: {{ color: '#2a2f42' }} }},
+        y: {{ ticks: {{ color: '#8892a4', callback: function(v){{return v+'%';}} }},
+              grid: {{ color: '#2a2f42' }}, title: {{ display: true, text: 'Win Rate', color: '#8892a4' }} }},
+        y2: {{ position: 'right', ticks: {{ color: '#3498db', callback: function(v){{return v+'%';}} }},
+               grid: {{ display: false }}, title: {{ display: true, text: 'Avg Return', color: '#3498db' }} }}
+      }}
+    }}
+  }});
+}}
+
+// ── Detail table ──────────────────────────────────────────────────────────────
+function buildDetailTable(tf) {{
+  var page = filtered.slice((currentPage-1)*pageSize, currentPage*pageSize);
+  var html = '<div class="detail-table-wrap"><table class="detail-table"><thead><tr>';
+  html += '<th>Date</th><th>Ticker</th><th>Price</th><th>Score</th><th>Status</th>';
+  html += '<th>RS%</th><th>Vol</th><th>EMA</th><th>Level</th><th>Setup</th>';
+  html += '<th>1W</th><th>2W</th><th>1M</th><th>3M</th><th>6M</th>';
+  html += '</tr></thead><tbody>';
+
+  page.forEach(function(p) {{
+    var rets = p.returns || {{}};
+    html += '<tr>';
+    html += '<td>' + p.scan_date + '</td>';
+    html += '<td style="font-weight:700">' + p.ticker + '</td>';
+    html += '<td>$' + (p.price_at_scan||0).toFixed(2) + '</td>';
+    html += '<td>' + (p.unified_score||'—') + '</td>';
+    html += '<td><span class="badge badge-' + (p.status||'build').toLowerCase() + '">' + (p.status||'—') + '</span></td>';
+    html += '<td>' + (p.rs_percentile!=null?p.rs_percentile.toFixed(0)+'th':'—') + '</td>';
+    html += '<td>' + (p.vol_contraction!=null?Math.round(p.vol_contraction*100)+'%':'—') + '</td>';
+    html += '<td>' + (p.ema_stack||'—') + '</td>';
+    html += '<td>' + (p.level||'—') + '</td>';
+    html += '<td>' + (p.setup_type||'—') + '</td>';
+    ['1w','2w','1m','3m','6m'].forEach(function(period) {{
+      var r = rets[period];
+      if (r===null||r===undefined) {{
+        html += '<td class="neutral">—</td>';
+      }} else {{
+        html += '<td class="ret-cell ' + (r>0?'win':'lose') + '">' + (r>0?'+':'') + r.toFixed(1) + '%</td>';
+      }}
+    }});
+    html += '</tr>';
+  }});
+
+  html += '</tbody></table></div>';
+
+  // Pagination
+  var pages = Math.ceil(filtered.length / pageSize);
+  if (pages > 1) {{
+    html += '<div class="pagination">';
+    html += '<span style="font-size:11px;color:var(--muted);margin-right:8px">' +
+      filtered.length + ' picks · page ' + currentPage + ' of ' + pages + '</span>';
+    for (var i = 1; i <= Math.min(pages, 10); i++) {{
+      html += '<button class="page-btn' + (i===currentPage?' active':'') + '" onclick="goPage(' + i + ')">' + i + '</button>';
+    }}
+    html += '</div>';
+  }}
+  return html;
+}}
+
+function goPage(n) {{
+  currentPage = n;
+  var tf = document.getElementById('tf-select').value;
+  render(tf);
+}}
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+function exportCSV() {{
+  var tf = document.getElementById('tf-select').value;
+  var cols = ['scan_date','ticker','price_at_scan','unified_score','status',
+    'rs_percentile','vol_contraction','ema_stack','level','setup_type',
+    'pre_breakout','momentum_1m','returns_1w','returns_2w','returns_1m',
+    'returns_2m','returns_3m','returns_6m','returns_1y'];
+  var rows = [cols.join(',')];
+  filtered.forEach(function(p) {{
+    var r = p.returns||{{}};
+    rows.push([
+      p.scan_date, p.ticker, p.price_at_scan, p.unified_score, p.status,
+      p.rs_percentile, p.vol_contraction, p.ema_stack, p.level, p.setup_type,
+      p.pre_breakout, p.momentum_1m,
+      r['1w'],r['2w'],r['1m'],r['2m'],r['3m'],r['6m'],r['1y']
+    ].map(function(v){{return v===null||v===undefined?'':v;}}).join(','));
+  }});
+  var blob = new Blob([rows.join('\\n')], {{type:'text/csv'}});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'scanner_analytics_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}}
+
+function showEmpty(msg) {{
+  document.getElementById('app').innerHTML =
+    '<div class="empty-state"><div class="empty-icon">&#128202;</div>' +
+    '<div style="font-size:14px;margin-bottom:6px">No data yet</div>' +
+    '<div style="font-size:12px;color:var(--muted)">' + msg + '</div></div>';
+}}
+</script>
+</body>
+</html>"""
+
+@app.route('/analytics')
+def analytics():
+    cfg = json.dumps(FIREBASE_CONFIG)
+    return render_template_string(ANALYTICS_HTML, cfg=cfg)
+
+
+"""
+Analytics page — add this to app.py as a new route.
+Serves /analytics with full historical performance data from Firebase.
+"""
+
+ANALYTICS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scanner Analytics</title>
+<style>
+:root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;}
+.header h1{font-size:18px;font-weight:700;}
+.header p{font-size:11px;color:var(--muted);margin-top:2px;}
+.nav-link{color:var(--blue);text-decoration:none;font-size:12px;font-weight:600;}
+.nav-link:hover{text-decoration:underline;}
+.page{padding:24px;}
+.loading{text-align:center;padding:80px;color:var(--muted);font-size:16px;}
+.error{color:var(--red);padding:20px;text-align:center;}
+
+/* Controls */
+.controls{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;align-items:center;}
+.ctrl-group{display:flex;align-items:center;gap:8px;}
+.ctrl-group label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+select,input[type=number]{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;outline:none;}
+.btn{background:var(--blue);color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;}
+.btn:hover{background:#2980b9;}
+.btn.sec{background:var(--bg3);color:var(--text);border:1px solid var(--border);}
+
+/* KPI cards */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:28px;}
+.kpi{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px 18px;}
+.kpi-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.kpi-val{font-size:28px;font-weight:700;line-height:1;}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+.kpi.green{border-left:3px solid var(--green);}
+.kpi.red{border-left:3px solid var(--red);}
+.kpi.blue{border-left:3px solid var(--blue);}
+.kpi.amber{border-left:3px solid var(--amber);}
+
+/* Timeframe table */
+.section{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;}
+.section h2{font-size:14px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.tf-table{width:100%;border-collapse:collapse;}
+.tf-table th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;text-align:center;border-bottom:1px solid var(--border);}
+.tf-table th:first-child{text-align:left;}
+.tf-table td{padding:10px 12px;text-align:center;border-bottom:1px solid var(--border)44;font-size:13px;}
+.tf-table td:first-child{text-align:left;font-weight:600;color:var(--muted);}
+.tf-table tr:last-child td{border-bottom:none;}
+.tf-table .pos{color:var(--green);font-weight:600;}
+.tf-table .neg{color:var(--red);font-weight:600;}
+.tf-table .na{color:var(--muted);}
+
+/* Signal analysis */
+.signal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;}
+.signal-card{background:var(--bg3);border-radius:10px;padding:14px;}
+.signal-name{font-size:12px;font-weight:600;margin-bottom:10px;}
+.signal-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.signal-bar-label{font-size:11px;color:var(--muted);width:80px;flex-shrink:0;}
+.signal-bar-track{flex:1;height:8px;background:var(--bg2);border-radius:4px;overflow:hidden;}
+.signal-bar-fill{height:100%;border-radius:4px;}
+.signal-bar-val{font-size:11px;font-weight:600;width:40px;text-align:right;flex-shrink:0;}
+.signal-diff{font-size:11px;color:var(--muted);margin-top:4px;}
+
+/* Picks table */
+.picks-table{width:100%;border-collapse:collapse;font-size:12px;}
+.picks-table th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;}
+.picks-table th:hover{color:var(--text);}
+.picks-table td{padding:8px 10px;border-bottom:1px solid var(--border)22;}
+.picks-table tr:hover td{background:#ffffff05;}
+.ret-pos{color:var(--green);font-weight:600;}
+.ret-neg{color:var(--red);font-weight:600;}
+.ret-na{color:var(--muted);}
+.badge{font-size:9px;padding:2px 7px;border-radius:20px;font-weight:600;}
+.badge.READY{background:#1a3d2b;color:var(--green);}
+.badge.WATCH{background:#3d2e10;color:var(--amber);}
+.badge.BUILDING{background:var(--bg3);color:var(--muted);}
+.sparkline{display:inline-block;vertical-align:middle;}
+.pg{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:12px;color:var(--muted);}
+.pg button{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:3px 10px;cursor:pointer;font-size:11px;}
+.pg button:disabled{opacity:.4;cursor:default;}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>📊 Scanner Analytics</h1>
+    <p>Historical performance of scanner picks — does the logic actually find winners?</p>
+  </div>
+  <a class="nav-link" href="/">← Back to Scanner</a>
+</div>
+
+<div class="page">
+  <div id="loading" class="loading">⏳ Loading historical data...</div>
+  <div id="content" style="display:none">
+
+    <!-- Controls -->
+    <div class="controls">
+      <div class="ctrl-group">
+        <label>Window</label>
+        <select id="tf-select" onchange="render()">
+          <option value="1w">1 Week</option>
+          <option value="2w">2 Weeks</option>
+          <option value="1m" selected>1 Month</option>
+          <option value="2m">2 Months</option>
+          <option value="3m">3 Months</option>
+          <option value="6m">6 Months</option>
+          <option value="1y">1 Year</option>
+        </select>
+      </div>
+      <div class="ctrl-group">
+        <label>Status</label>
+        <select id="status-filter" onchange="render()">
+          <option value="all">All</option>
+          <option value="READY">Ready only</option>
+          <option value="WATCH">Watch only</option>
+        </select>
+      </div>
+      <div class="ctrl-group">
+        <label>Min score</label>
+        <input type="number" id="min-score" value="0" min="0" max="100" style="width:70px" onchange="render()">
+      </div>
+      <div class="ctrl-group">
+        <label>Setup</label>
+        <select id="setup-filter" onchange="render()">
+          <option value="all">All setups</option>
+          <option value="pre_breakout">Pre-breakout</option>
+          <option value="bull_flag">Bull flag</option>
+        </select>
+      </div>
+      <button class="btn" onclick="loadData()">🔄 Refresh</button>
+      <span id="data-info" style="font-size:11px;color:var(--muted)"></span>
+    </div>
+
+    <!-- KPI row -->
+    <div class="kpi-grid" id="kpi-grid"></div>
+
+    <!-- Timeframe performance table -->
+    <div class="section">
+      <h2>📅 Performance by Timeframe</h2>
+      <table class="tf-table" id="tf-table">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>1W</th><th>2W</th><th>1M</th><th>2M</th><th>3M</th><th>6M</th><th>1Y</th>
+          </tr>
+        </thead>
+        <tbody id="tf-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Signal analysis -->
+    <div class="section">
+      <h2>🔬 What signals predict success?
+        <span style="font-size:11px;color:var(--muted);font-weight:400">
+          (win = positive return in selected window)
+        </span>
+      </h2>
+      <div class="signal-grid" id="signal-grid"></div>
+    </div>
+
+    <!-- Per-pick detail table -->
+    <div class="section">
+      <h2>📋 All Picks
+        <span id="picks-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
+      </h2>
+      <table class="picks-table">
+        <thead>
+          <tr>
+            <th onclick="sortBy('scan_date')">Date ↕</th>
+            <th onclick="sortBy('ticker')">Ticker ↕</th>
+            <th onclick="sortBy('price_at_scan')">Entry $</th>
+            <th onclick="sortBy('score')">Score ↕</th>
+            <th>Status</th>
+            <th>Setup</th>
+            <th onclick="sortBy('rs_percentile')">RS %ile</th>
+            <th onclick="sortBy('vol_contraction')">Vol dry</th>
+            <th onclick="sortBy('atr')">ATR</th>
+            <th>Level</th>
+            <th onclick="sortBy('ret_1w')">1W</th>
+            <th onclick="sortBy('ret_1m')">1M</th>
+            <th onclick="sortBy('ret_3m')">3M</th>
+          </tr>
+        </thead>
+        <tbody id="picks-body"></tbody>
+      </table>
+      <div class="pg">
+        <button id="pg-prev" onclick="prevPage()" disabled>← Prev</button>
+        <span id="pg-info"></span>
+        <button id="pg-next" onclick="nextPage()">Next →</button>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div>
+
+<script>
+var allPicks = [];
+var filtered = [];
+var sortCol  = 'scan_date';
+var sortAsc  = false;
+var page     = 0;
+var pageSize = 50;
+
+async function loadData() {
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('content').style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/analytics');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    allPicks = await resp.json();
+    document.getElementById('data-info').textContent =
+      allPicks.length + ' picks loaded from ' +
+      new Set(allPicks.map(p=>p.scan_date)).size + ' scan days';
+    render();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  } catch(e) {
+    document.getElementById('loading').innerHTML =
+      '<div class="error">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+function getFiltered() {
+  var tf        = document.getElementById('tf-select').value;
+  var status    = document.getElementById('status-filter').value;
+  var minScore  = parseInt(document.getElementById('min-score').value) || 0;
+  var setup     = document.getElementById('setup-filter').value;
+
+  return allPicks.filter(function(p) {
+    if (status !== 'all' && p.status !== status) return false;
+    if (p.score < minScore) return false;
+    if (setup === 'pre_breakout' && !p.pre_breakout) return false;
+    if (setup === 'bull_flag'    && !p.bull_flag)    return false;
+    return true;
+  });
+}
+
+function render() {
+  var tf   = document.getElementById('tf-select').value;
+  filtered = getFiltered();
+  filtered.sort(function(a,b) {
+    var va = a[sortCol] != null ? a[sortCol] : (sortAsc ? Infinity : -Infinity);
+    var vb = b[sortCol] != null ? b[sortCol] : (sortAsc ? Infinity : -Infinity);
+    if (sortCol.startsWith('ret_')) {
+      var key = sortCol.replace('ret_','');
+      va = a.returns && a.returns[key] != null ? a.returns[key] : (sortAsc?Infinity:-Infinity);
+      vb = b.returns && b.returns[key] != null ? b.returns[key] : (sortAsc?Infinity:-Infinity);
+    }
+    return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+  });
+
+  renderKPIs(tf);
+  renderTFTable();
+  renderSignals(tf);
+  renderPicks(tf);
+}
+
+function renderKPIs(tf) {
+  var picks = filtered.filter(function(p) {
+    return p.returns && p.returns[tf] != null;
+  });
+  if (!picks.length) {
+    document.getElementById('kpi-grid').innerHTML =
+      '<div style="color:var(--muted);grid-column:1/-1">No data with returns for this window yet.</div>';
+    return;
+  }
+  var rets = picks.map(function(p) { return p.returns[tf]; });
+  var wins = rets.filter(function(r) { return r > 0; });
+  var loss = rets.filter(function(r) { return r < 0; });
+  var winRate = Math.round(wins.length / rets.length * 100);
+  var lossRate= Math.round(loss.length / rets.length * 100);
+  var avgRet  = round1(rets.reduce(function(a,b){return a+b;},0)/rets.length);
+  var avgWin  = wins.length ? round1(wins.reduce(function(a,b){return a+b;},0)/wins.length) : 0;
+  var avgLoss = loss.length ? round1(loss.reduce(function(a,b){return a+b;},0)/loss.length) : 0;
+  var best    = Math.max.apply(null, rets);
+  var worst   = Math.min.apply(null, rets);
+  var bestTkr = picks[rets.indexOf(best)].ticker;
+  var worstTkr= picks[rets.indexOf(worst)].ticker;
+
+  document.getElementById('kpi-grid').innerHTML = [
+    kpi('Win rate', winRate+'%', picks.length+' picks · '+tf+' window', 'green'),
+    kpi('Avg return', fmtRet(avgRet), 'all picks', avgRet>=0?'green':'red'),
+    kpi('Avg win',  fmtRet(avgWin),  wins.length+' winners', 'green'),
+    kpi('Avg loss', fmtRet(avgLoss), loss.length+' losers', 'red'),
+    kpi('Best pick', fmtRet(best), bestTkr, 'green'),
+    kpi('Worst pick', fmtRet(worst), worstTkr, 'red'),
+    kpi('Picks analyzed', picks.length, 'with '+tf+' returns available', 'blue'),
+    kpi('Expectancy', fmtRet(winRate/100*avgWin + lossRate/100*avgLoss), 'per trade', avgRet>=0?'green':'red'),
+  ].join('');
+}
+
+function kpi(label, val, sub, cls) {
+  var color = cls==='green'?'var(--green)':cls==='red'?'var(--red)':cls==='amber'?'var(--amber)':'var(--blue)';
+  return '<div class="kpi '+cls+'"><div class="kpi-label">'+label+'</div>'
+    +'<div class="kpi-val" style="color:'+color+'">'+val+'</div>'
+    +'<div class="kpi-sub">'+sub+'</div></div>';
+}
+
+function renderTFTable() {
+  var windows = ['1w','2w','1m','2m','3m','6m','1y'];
+  var rows = {
+    'Win rate':  function(w) { return winRateForWindow(w); },
+    'Avg return':function(w) { return avgRetForWindow(w); },
+    'Avg win':   function(w) { return avgWinForWindow(w); },
+    'Avg loss':  function(w) { return avgLossForWindow(w); },
+    'Picks w/data': function(w) { return picsWithWindow(w); },
+  };
+  var html = '';
+  for (var label in rows) {
+    html += '<tr><td>'+label+'</td>';
+    for (var i=0; i<windows.length; i++) {
+      var val = rows[label](windows[i]);
+      var cls = (label==='Win rate'||label==='Avg win') ? (parseFloat(val)>=50||parseFloat(val)>=0?'pos':'neg')
+              : label==='Avg loss' ? 'neg'
+              : label==='Avg return' ? (parseFloat(val)>=0?'pos':'neg') : 'na';
+      html += '<td class="'+cls+'">'+val+'</td>';
+    }
+    html += '</tr>';
+  }
+  document.getElementById('tf-body').innerHTML = html;
+}
+
+function picksForWindow(w) {
+  return filtered.filter(function(p){return p.returns&&p.returns[w]!=null;});
+}
+function picsWithWindow(w)  { return picksForWindow(w).length||'—'; }
+function winRateForWindow(w) {
+  var ps=picksForWindow(w); if(!ps.length)return'—';
+  return Math.round(ps.filter(function(p){return p.returns[w]>0;}).length/ps.length*100)+'%';
+}
+function avgRetForWindow(w) {
+  var ps=picksForWindow(w); if(!ps.length)return'—';
+  return fmtRet(round1(ps.reduce(function(a,p){return a+p.returns[w];},0)/ps.length));
+}
+function avgWinForWindow(w) {
+  var ps=picksForWindow(w).filter(function(p){return p.returns[w]>0;}); if(!ps.length)return'—';
+  return fmtRet(round1(ps.reduce(function(a,p){return a+p.returns[w];},0)/ps.length));
+}
+function avgLossForWindow(w) {
+  var ps=picksForWindow(w).filter(function(p){return p.returns[w]<0;}); if(!ps.length)return'—';
+  return fmtRet(round1(ps.reduce(function(a,p){return a+p.returns[w];},0)/ps.length));
+}
+
+function renderSignals(tf) {
+  var ps = filtered.filter(function(p){return p.returns&&p.returns[tf]!=null;});
+  if (!ps.length) { document.getElementById('signal-grid').innerHTML='<div style="color:var(--muted)">Not enough data yet</div>'; return; }
+
+  var signals = [
+    {name:'RS percentile > 80', with_fn: function(p){return (p.rs_percentile||0)>=80;}},
+    {name:'Vol contraction ≤ 70%', with_fn: function(p){return (p.vol_contraction||1)<=0.7;}},
+    {name:'Level = ATH/multi-year', with_fn: function(p){return (p.level||'').indexOf('ATH')>=0||(p.level||'').indexOf('multi')>=0;}},
+    {name:'EMA stack = full', with_fn: function(p){return p.ema_stack==='full';}},
+    {name:'Pre-breakout', with_fn: function(p){return !!p.pre_breakout;}},
+    {name:'Bull flag', with_fn: function(p){return !!p.bull_flag;}},
+    {name:'Score ≥ 50', with_fn: function(p){return (p.score||0)>=50;}},
+    {name:'Analyst upside > 10%', with_fn: function(p){return (p.analyst_upside||0)>10;}},
+    {name:'Analyst buy ≥ 70%', with_fn: function(p){return (p.analyst_buy_pct||0)>=70;}},
+    {name:'Earnings in ≤ 14d', with_fn: function(p){return p.days_to_earnings!=null&&p.days_to_earnings>=0&&p.days_to_earnings<=14;}},
+  ];
+
+  var html = '';
+  for (var i=0; i<signals.length; i++) {
+    var sig = signals[i];
+    var with_sig = ps.filter(sig.with_fn);
+    var without  = ps.filter(function(p){return !sig.with_fn(p);});
+    if (with_sig.length < 3) continue;
+
+    var wr_with = with_sig.length ? Math.round(with_sig.filter(function(p){return p.returns[tf]>0;}).length/with_sig.length*100) : 0;
+    var wr_wout = without.length  ? Math.round(without.filter(function(p){return p.returns[tf]>0;}).length/without.length*100)  : 0;
+    var diff = wr_with - wr_wout;
+    var diffStr = (diff>=0?'+':'')+diff+'%';
+    var diffCol = diff>=5?'var(--green)':diff<=-5?'var(--red)':'var(--muted)';
+
+    html += '<div class="signal-card">';
+    html += '<div class="signal-name">'+sig.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+with_sig.length+' picks)</span></div>';
+    html += signalBar('With signal', wr_with, 'var(--green)');
+    html += signalBar('Without', wr_wout, 'var(--muted)');
+    html += '<div class="signal-diff">Difference: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
+    html += '</div>';
+  }
+  document.getElementById('signal-grid').innerHTML = html || '<div style="color:var(--muted)">Not enough picks yet</div>';
+}
+
+function signalBar(label, pct, color) {
+  return '<div class="signal-bar-row">'
+    +'<div class="signal-bar-label">'+label+'</div>'
+    +'<div class="signal-bar-track"><div class="signal-bar-fill" style="width:'+pct+'%;background:'+color+'"></div></div>'
+    +'<div class="signal-bar-val" style="color:'+color+'">'+pct+'%</div>'
+    +'</div>';
+}
+
+function renderPicks(tf) {
+  var start = page * pageSize;
+  var rows  = filtered.slice(start, start + pageSize);
+
+  var html = '';
+  for (var i=0; i<rows.length; i++) {
+    var p = rows[i];
+    var ret1w = p.returns&&p.returns['1w']!=null ? p.returns['1w'] : null;
+    var ret1m = p.returns&&p.returns['1m']!=null ? p.returns['1m'] : null;
+    var ret3m = p.returns&&p.returns['3m']!=null ? p.returns['3m'] : null;
+    var setup = p.pre_breakout?'Pre-brkout':p.bull_flag?'Bull flag':'Breakout';
+    html += '<tr>'
+      +'<td>'+p.scan_date+'</td>'
+      +'<td><strong>'+p.ticker+'</strong></td>'
+      +'<td>$'+(p.price_at_scan?p.price_at_scan.toFixed(2):'—')+'</td>'
+      +'<td>'+p.score+'</td>'
+      +'<td><span class="badge '+(p.status||'')+'">'+p.status+'</span></td>'
+      +'<td>'+setup+'</td>'
+      +'<td>'+(p.rs_percentile!=null?p.rs_percentile+'th':'—')+'</td>'
+      +'<td>'+(p.vol_contraction!=null?Math.round(p.vol_contraction*100)+'%':'—')+'</td>'
+      +'<td>'+(p.atr!=null?p.atr.toFixed(2):'—')+'</td>'
+      +'<td>'+(p.level||'—')+'</td>'
+      +'<td class="'+(ret1w==null?'ret-na':ret1w>=0?'ret-pos':'ret-neg')+'">'+(ret1w==null?'—':fmtRet(ret1w))+'</td>'
+      +'<td class="'+(ret1m==null?'ret-na':ret1m>=0?'ret-pos':'ret-neg')+'">'+(ret1m==null?'—':fmtRet(ret1m))+'</td>'
+      +'<td class="'+(ret3m==null?'ret-na':ret3m>=0?'ret-pos':'ret-neg')+'">'+(ret3m==null?'—':fmtRet(ret3m))+'</td>'
+      +'</tr>';
+  }
+  document.getElementById('picks-body').innerHTML = html;
+  document.getElementById('picks-count').textContent = '— '+filtered.length+' picks';
+  document.getElementById('pg-info').textContent = 'Page '+(page+1)+' of '+Math.ceil(filtered.length/pageSize);
+  document.getElementById('pg-prev').disabled = page === 0;
+  document.getElementById('pg-next').disabled = (page+1)*pageSize >= filtered.length;
+}
+
+function sortBy(col) { if(sortCol===col){sortAsc=!sortAsc;}else{sortCol=col;sortAsc=false;} render(); }
+function prevPage() { if(page>0){page--;renderPicks(document.getElementById('tf-select').value);} }
+function nextPage() { if((page+1)*pageSize<filtered.length){page++;renderPicks(document.getElementById('tf-select').value);} }
+function fmtRet(v) { return (v>=0?'+':'')+v.toFixed(1)+'%'; }
+function round1(v) { return Math.round(v*10)/10; }
+
+loadData();
+</script>
+</body>
+</html>"""
+
+
 @app.route('/')
 def index():
     html = HTML.format(
@@ -868,6 +1862,32 @@ def index():
         cfg=json.dumps(FIREBASE_CONFIG)
     )
     return html
+
+@app.route('/analytics')
+def analytics_page():
+    return ANALYTICS_HTML
+
+
+@app.route('/api/analytics')
+def api_analytics():
+    """Return flat list of all historical picks with returns."""
+    import firebase_admin
+    from firebase_admin import db as fdb
+    try:
+        history = fdb.reference('/scanner/history').get() or {}
+        picks = []
+        for day_str, day_data in history.items():
+            if not isinstance(day_data, dict):
+                continue
+            for ticker, pick in day_data.items():
+                if isinstance(pick, dict):
+                    pick['scan_date'] = day_str
+                    picks.append(pick)
+        return jsonify(picks)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
