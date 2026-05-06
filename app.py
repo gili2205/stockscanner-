@@ -601,36 +601,36 @@ function makeCard(s, rank) {{
 
   // ── Click-to-fold header ──────────────────────────────────────────────────
   var tgtCol2=upsidePct!=null&&upsidePct>5?'var(--green)':upsidePct!=null&&upsidePct<-5?'var(--red)':'var(--muted)';
-  h += '<div class="card-header" data-id="body-'+s.ticker+'" onclick="toggleCard(this.dataset.id)">';
-  // Row 1: rank + ticker + sector | price + score
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+  h += '<div class="card-header" data-id="body-'+s.ticker+'" onclick="toggleCard(\''+s.ticker+'\')">';
+  // Row 1: rank + ticker + sector | score
+  h += '<div style="display:flex;justify-content:space-between;align-items:center">';
   h += '<div style="display:flex;align-items:center;gap:12px">';
   h += '<div class="card-rank '+(isTop?'top':'')+'">'+rank+'</div>';
   h += '<div>';
   h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
-  h += '<div style="font-size:13px;font-weight:600;color:var(--muted);margin-top:2px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span></div>';
+  h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span></div>';
   h += '</div></div>';
-  h += '<div class="card-score-block">';
-  h += '<div id="'+scoreId+'" style="font-size:32px;font-weight:700;color:'+color+';cursor:pointer;line-height:1;text-align:right" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
-  h += '<div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:'+color+';margin-top:3px;text-align:right">'+s.status+'</div>';
+  h += '<div style="text-align:right">';
+  h += '<div id="'+scoreId+'" style="font-size:32px;font-weight:700;color:'+color+';cursor:pointer;line-height:1" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
+  h += '<div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:'+color+';margin-top:3px">'+s.status+'</div>';
   h += '</div>';
   h += '</div>';
-  // Row 2: P/E | RSI | 1Y Target — full width with dividers
-  h += '<div id="fold-'+s.ticker+'" style="display:flex;border-top:1px solid var(--border);padding-top:10px;margin-top:2px">';
-  h += '<div style="flex:1;text-align:center;padding:0 8px;border-right:1px solid var(--border)">';
-  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">P/E Ratio</div>';
-  h += '<div class="fund-pe-val" style="font-size:16px;font-weight:700;color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div>';
-  h += '<div class="fund-pe-sub" style="font-size:10px;color:var(--muted);margin-top:1px">'+(pe&&pe>0?(pe<20?'Cheap':pe<40?'Fair':'Pricey'):'')+'</div>';
+  // Row 2: P/E | RSI | 1Y Target — full width below header row
+  h += '<div id="fold-'+s.ticker+'" style="display:flex;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">';
+  h += '<div style="flex:1;text-align:center;border-right:1px solid var(--border);padding:0 8px">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">P/E Ratio</div>';
+  h += '<div class="fund-pe-val" style="font-size:18px;font-weight:700;color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div>';
+  h += '<div class="fund-pe-sub" style="font-size:10px;color:var(--muted);margin-top:2px">'+(pe&&pe>0?(pe<20?'Cheap':pe<40?'Fair':'Pricey'):'')+'</div>';
   h += '</div>';
-  h += '<div style="flex:1;text-align:center;padding:0 8px;border-right:1px solid var(--border)">';
-  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">RSI (14)</div>';
-  h += '<div class="fund-rsi-val" style="font-size:16px;font-weight:700;color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div>';
-  h += '<div class="fund-rsi-sub" style="font-size:10px;color:var(--muted);margin-top:1px">'+rsiL(rsi)+'</div>';
+  h += '<div style="flex:1;text-align:center;border-right:1px solid var(--border);padding:0 8px">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">RSI (14)</div>';
+  h += '<div class="fund-rsi-val" style="font-size:18px;font-weight:700;color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div>';
+  h += '<div class="fund-rsi-sub" style="font-size:10px;color:var(--muted);margin-top:2px">'+rsiL(rsi)+'</div>';
   h += '</div>';
   h += '<div style="flex:1;text-align:center;padding:0 8px">';
-  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">1Y Target</div>';
-  h += '<div class="fund-tgt-val" style="font-size:16px;font-weight:700;color:'+tgtCol2+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div>';
-  h += '<div class="fund-tgt-sub" style="font-size:10px;color:'+tgtCol2+';margin-top:1px">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'')+'</div>';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">1Y Target</div>';
+  h += '<div class="fund-tgt-val" style="font-size:18px;font-weight:700;color:'+tgtCol2+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div>';
+  h += '<div class="fund-tgt-sub" style="font-size:10px;color:'+tgtCol2+';margin-top:2px">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'')+'</div>';
   h += '</div>';
   h += '</div>';
   h += '</div>';
@@ -722,11 +722,12 @@ function makeCard(s, rank) {{
 }}
 
 
-function toggleCard(bodyId) {{
-  var body = document.getElementById(bodyId);
+function toggleCard(ticker) {{
+  var body = document.getElementById('body-'+ticker);
   if (!body) return;
-  var isOpen = body.style.display !== 'none' && body.style.display !== '';
+  var isOpen = body.style.display === 'block';
   body.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) fetchFundamentals(ticker, body);
 }}
 
 function showBreakdown(el) {{
