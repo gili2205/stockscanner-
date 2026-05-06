@@ -4,7 +4,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.4.0"
+VERSION = "v2.4.1"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -59,15 +59,29 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .sortrow{{display:flex;align-items:center;gap:10px;padding:8px 24px;background:var(--bg);border-bottom:1px solid var(--border);}}
 .sortrow select{{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;outline:none;cursor:pointer;}}
 .alertbox{{background:#1a3d2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin:8px 24px;font-size:12px;color:var(--green);display:none;}}
-.grid{{display:flex;flex-direction:column;gap:10px;padding:20px 24px;}}
-.card{{background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--border);border-radius:12px;overflow:hidden;transition:box-shadow .15s;box-shadow:0 2px 8px rgba(0,0,0,.25);}}
-.card:hover{{box-shadow:0 4px 16px rgba(0,0,0,.4);}}.card.pre{{border-left-color:var(--green);}}.card.watch{{border-left-color:var(--amber);}}
+.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;padding:20px 24px;}}
+.card{{background:var(--bg2);border:1px solid var(--border);border-left:4px solid var(--border);border-radius:14px;overflow:hidden;transition:box-shadow .2s;box-shadow:0 4px 16px rgba(0,0,0,.35);}}
+.card:hover{{box-shadow:0 8px 24px rgba(0,0,0,.5);}}
+.card.pre{{border-left-color:var(--green);}}
+.card.watch{{border-left-color:var(--amber);}}
+.card-header{{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;cursor:pointer;user-select:none;}}
+.card-header:hover{{background:#ffffff05;}}
+.card-header-left{{display:flex;align-items:center;gap:14px;}}
+.card-header-right{{display:flex;align-items:center;gap:20px;}}
+.card-rank{{width:32px;height:32px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--muted);flex-shrink:0;}}
+.card-rank.top{{background:#1a3d2b;color:var(--green);}}
+.card-score-block{{text-align:right;}}
+.card-body{{padding:0 20px 18px;}}
+.msl{{margin-left:6px;}}
+.sec-title{{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:14px 0 8px;}}
 .card-fold{{display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;user-select:none;}}.card-fold:hover{{background:#ffffff05;}}
 .fold-rank{{width:26px;height:26px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--muted);flex-shrink:0;}}.fold-rank.top{{background:#1a3d2b;color:var(--green);}}
 .fold-info{{flex:1;min-width:0;}}.fold-ticker{{font-size:17px;font-weight:700;letter-spacing:-.2px;}}.fold-sub{{font-size:11px;color:var(--muted);margin-top:2px;}}
 .fold-metrics{{display:flex;gap:20px;flex-shrink:0;}}
 .fold-metric{{text-align:center;min-width:48px;}}.fold-mlbl{{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;}}.fold-mval{{font-size:14px;font-weight:600;}}.fold-msub{{font-size:10px;margin-top:1px;}}
 .fold-score{{text-align:right;flex-shrink:0;margin-left:14px;}}.fold-snum{{font-size:26px;font-weight:700;line-height:1;cursor:pointer;}}.fold-snum:hover{{opacity:.8;}}.fold-slbl{{font-size:10px;font-weight:600;letter-spacing:.5px;margin-top:2px;}}
+.rank-badge{{width:32px;height:32px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--muted);}}
+.rank-badge.top{{background:#1a3d2b;color:var(--green);}}
 .score-track{{height:3px;background:var(--bg3);}}.score-fill{{height:100%;transition:width .3s;}}
 .card-body{{border-top:1px solid var(--border);padding:16px 18px;display:none;}}.card-body.open{{display:block;}}
 .sec-lbl{{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:8px;margin-top:14px;}}.sec-lbl:first-child{{margin-top:0;}}
@@ -509,12 +523,13 @@ function makeCard(s, rank) {{
   var buyPct = s.analyst_buy_pct||0;
   var numAna = s.num_analysts||0;
   var earn   = s.days_to_earnings;
+  var upColor = upsidePct!=null&&upsidePct>5?'#27ae60':upsidePct!=null&&upsidePct<-5?'#e74c3c':'#8892a4';
 
   // Unified score
   var t_rs  = Math.min(16,Math.round((s.rs_percentile||0)/100*16));
   var t_vol = (s.vol_contraction||1)<=0.5?12:(s.vol_contraction||1)<=0.7?8:(s.vol_contraction||1)<=0.9?4:0;
   var t_atr = (s.atr||1)<=0.2?8:(s.atr||1)<=0.3?5:(s.atr||1)<=0.4?2:0;
-  var t_lvl = (s.level||'').indexOf('ATH')>=0?4:(s.level||'').indexOf('multi')>=0?3:(s.level||'').indexOf('52')>=0?1:0;
+  var t_lvl = (s.level||'').indexOf('ATH')>=0?4:(s.level||'').indexOf('multi')>=0?3:1;
   var techScore = t_rs+t_vol+t_atr+t_lvl;
   var c_earn = earn!=null&&earn>=0&&earn<=7?15:earn!=null&&earn>=0&&earn<=14?10:earn!=null&&earn>=0&&earn<=30?5:0;
   var c_vol  = (s.vol_ratio||1)>=3?10:(s.vol_ratio||1)>=2?6:(s.vol_ratio||1)>=1.5?3:0;
@@ -535,7 +550,7 @@ function makeCard(s, rank) {{
   var stopDist=Math.max(atrStop,minStop);
   var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
 
-  // Risk/Reward signals
+  // Risk/Reward
   var sig_rs  = (s.rs_percentile||0)>=80;
   var sig_vol = (s.vol_contraction||1)<=0.7;
   var sig_lvl = (s.level||'').indexOf('ATH')>=0||(s.level||'').indexOf('multi')>=0;
@@ -549,20 +564,20 @@ function makeCard(s, rank) {{
   var rewardBg=rp>=3?'#1a3d2b':rp>=2?'#3d2e10':'#3d1a1a';
 
   // Timeframe
-  var tf = s.timeframe||'mid';
-  var tfLabel = tf==='short'?'Short (1-2w)':tf==='long'?'Long (3-12m)':'Mid (1-3m)';
-  var tfColor = tf==='short'?'#e74c3c':tf==='long'?'#3498db':'#e67e22';
-  var tfIcon  = tf==='short'?'&#9889;':tf==='long'?'&#128336;':'&#128197;';
+  var tf=s.timeframe||'mid';
+  var tfLabel=tf==='short'?'Short (1-2w)':tf==='long'?'Long (3-12m)':'Mid (1-3m)';
+  var tfColor=tf==='short'?'#e74c3c':tf==='long'?'#3498db':'#e67e22';
+  var tfIcon=tf==='short'?'&#9889;':tf==='long'?'&#128336;':'&#128197;';
 
-  // Setup label
+  // Setup
   var rr=riskCat+'/'+rewardCat,setupCat,setupColor,setupBg,setupIcon;
-  if     (rr==='Low/High')     {{ setupCat='Best setup';  setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#11088;'; }}
-  else if(rr==='Low/Medium')   {{ setupCat='Good setup';  setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#9989;'; }}
-  else if(rr==='Medium/High')  {{ setupCat='High upside'; setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127919;'; }}
-  else if(rr==='Medium/Medium'){{ setupCat='Balanced';    setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#128202;'; }}
-  else if(rr==='High/High')    {{ setupCat='Aggressive';  setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127922;'; }}
-  else if(rr==='Low/Low')      {{ setupCat='Weak upside'; setupColor='#8892a4';setupBg='#22263a';setupIcon='&#128201;'; }}
-  else                         {{ setupCat='Skip';        setupColor='#e74c3c';setupBg='#3d1a1a';setupIcon='&#9888;'; }}
+  if     (rr==='Low/High')    {{ setupCat='Best setup';  setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#11088;'; }}
+  else if(rr==='Low/Medium')  {{ setupCat='Good setup';  setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#9989;'; }}
+  else if(rr==='Medium/High') {{ setupCat='High upside'; setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127919;'; }}
+  else if(rr==='Medium/Medium'){{ setupCat='Balanced';   setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#128202;'; }}
+  else if(rr==='High/High')   {{ setupCat='Aggressive';  setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127922;'; }}
+  else if(rr==='Low/Low')     {{ setupCat='Weak upside'; setupColor='#8892a4';setupBg='#22263a';setupIcon='&#128201;'; }}
+  else                        {{ setupCat='Skip';        setupColor='#e74c3c';setupBg='#3d1a1a';setupIcon='&#9888;'; }}
 
   // Signal chips
   var sigs='';
@@ -574,95 +589,117 @@ function makeCard(s, rank) {{
   if(rsi!=null&&rsi>=70) sigs+='<span class="sig sr">RSI overbought</span>';
   if(upsidePct!=null&&upsidePct<-5) sigs+='<span class="sig sr">&#9888; Analyst bearish</span>';
 
-  // Store breakdown data
+  // Store breakdown
   var scoreId='sc-'+s.ticker;
   cardBreakdowns[scoreId]={{tech:techScore,cat:catalystScore,ana:analystScore,
     entry:entryNum.toFixed(2),stop:stopNum.toFixed(2),
     tfLabel:tfIcon+' '+tfLabel,tfColor:tfColor}};
 
-  var h = '';
-  h += '<div class="card '+(s.pre_breakout?'pre':s.status==='WATCH'?'watch':'')+'">';
-  h += '<div class="card-fold" data-card="card-'+s.ticker+'" onclick="toggleCard(this.dataset.card)">';
-  h += '<div class="fold-rank '+(isTop?'top':'')+'">'+rank+'</div>';
-  h += '<div class="fold-info">';
-  h += '<div class="fold-ticker">'+s.ticker;
-  if(s.name&&s.name!==s.ticker) h += '<span style="font-size:12px;font-weight:400;color:var(--muted)"> &middot; '+s.name.substring(0,20)+'</span>';
-  h += '</div>';
-  h += '<div style="font-size:12px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'"> '+chgStr+'</span>';
-  if(s.sector) h += '<span style="color:var(--muted)"> &middot; '+s.sector+'</span>';
+  var h='';
+  h += '<div class="card '+(s.pre_breakout?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
+
+  // ── Click-to-fold header ──────────────────────────────────────────────────
+  h += '<div class="card-header" onclick="toggleCard(\'card-'+s.ticker+'\')">';
+  h += '<div class="card-header-left">';
+  h += '<div class="card-rank '+(isTop?'top':'')+'">'+rank+'</div>';
+  h += '<div>';
+  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'</div>';
+  h += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+(s.sector||'NASDAQ')+'</div>';
   h += '</div></div>';
-  h += '<div class="fold-metrics">';
-  var tgtCol=upsidePct!=null&&upsidePct>5?'var(--green)':upsidePct!=null&&upsidePct<-5?'var(--red)':'var(--muted)';
-  h += '<div class="fold-metric"><div class="fold-mlbl">P/E</div><div class="fold-mval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div></div>';
-  h += '<div class="fold-metric"><div class="fold-mlbl">RSI</div><div class="fold-mval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div></div>';
-  h += '<div class="fold-metric"><div class="fold-mlbl">1Y Target</div><div class="fold-mval" style="color:'+tgtCol+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div>'+(upsidePct!=null?'<div class="fold-msub" style="color:'+tgtCol+'">'+(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%</div>':'')+'</div>';
+  h += '<div class="card-header-right">';
+  h += '<div style="text-align:right">';
+  h += '<div style="font-size:13px;font-weight:600">$'+price.toFixed(2)+'<span class="chg '+chgCls+' msl">'+chgStr+'</span></div>';
   h += '</div>';
-  h += '<div style="text-align:right;flex-shrink:0;margin-left:14px">';
-  h += '<div id="'+scoreId+'" style="font-size:26px;font-weight:700;color:'+color+';cursor:pointer;line-height:1" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
-  h += '<div style="font-size:10px;font-weight:600;letter-spacing:.5px;color:'+color+';margin-top:3px">'+s.status+'</div>';
-  h += '</div></div>';
-  h += '<div class="score-track"><div class="score-fill" style="width:'+Math.min(100,unifiedScore)+'%;background:'+color+'"></div></div>';
-  h += '<div class="card-body" id="card-'+s.ticker+'">';
-  h += '<div class="funds" style="margin-top:14px">';
+  h += '<div class="card-score-block">';
+  h += '<div id="'+scoreId+'" style="font-size:32px;font-weight:700;color:'+color+';cursor:pointer;line-height:1" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
+  h += '<div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:'+color+';margin-top:3px">'+s.status+'</div>';
+  h += '</div>';
+  h += '</div>';
+  h += '</div>';
+
+  // Score bar
+  h += '<div style="height:4px;background:var(--bg3)"><div style="height:100%;width:'+Math.min(100,unifiedScore)+'%;background:'+color+';transition:width .3s"></div></div>';
+
+  // ── Expandable body ───────────────────────────────────────────────────────
+  h += '<div class="card-body" id="body-'+s.ticker+'">';
+
+  // Fundamentals row
+  h += '<div class="funds">';
   h += '<div class="fbox"><div class="flbl">P/E Ratio</div><div class="fval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div><div class="fsub">'+(pe&&pe>0?(pe<20?'Cheap':pe<40?'Fair':'Pricey'):'N/A')+'</div></div>';
   h += '<div class="fbox"><div class="flbl">RSI (14)</div><div class="fval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div><div class="fsub">'+rsiL(rsi)+'</div></div>';
-  h += '<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':'#8892a4')+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div><div class="fsub" style="color:'+(upsidePct!=null&&upsidePct>0?'#27ae60':upsidePct!=null&&upsidePct<0?'#e74c3c':'#8892a4')+'">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct+'%':'N/A')+'</div></div>';
+  h += '<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+upColor+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div><div class="fsub" style="color:'+upColor+'">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'N/A')+'</div></div>';
   h += '</div>';
+
+  // Analyst row
   if(buyPct>0||numAna>0) {{
-    h += '<div style="font-size:11px;color:var(--muted);padding:6px 0;display:flex;gap:14px;flex-wrap:wrap">';
+    h += '<div style="font-size:11px;color:var(--muted);padding:6px 0;display:flex;gap:16px;flex-wrap:wrap">';
     if(numAna>0) h += '<span>&#128101; '+numAna+' analysts</span>';
-    if(buyPct>0) h += '<span style="color:'+(buyPct>=70?'#27ae60':buyPct>=50?'#e67e22':'#e74c3c')+'">&#128200; '+buyPct+'% Buy</span>';
-    if(s.recommendation) h += '<span style="text-transform:capitalize">Consensus: '+s.recommendation+'</span>';
+    if(buyPct>0) h += '<span style="color:'+(buyPct>=70?'#27ae60':buyPct>=50?'#e67e22':'#e74c3c')+'">&#128200; '+buyPct+'% Buy rating</span>';
+    if(s.recommendation) h += '<span style="text-transform:capitalize">Consensus: <strong>'+s.recommendation+'</strong></span>';
     h += '</div>';
   }}
-  if(sigs) h += '<div class="sigs">'+sigs+'</div>';
-  h += '<div class="sec-lbl">Technical Factors</div>';
+
+  // Signal chips
+  if(sigs) h += '<div class="sigs" style="margin:8px 0">'+sigs+'</div>';
+
+  // Technical factors
+  h += '<div class="sec-title">Technical Factors</div>';
   h += '<div class="factors">';
-  h += '<div class="factor"><span class="fn">ATR coil</span><span class="fv '+((s.atr||1)<=0.25?'fg':(s.atr||1)<=0.35?'fa':'fr')+'">'+(s.atr||0).toFixed(2)+'</span></div>';
-  h += '<div class="factor"><span class="fn">Vol contraction</span><span class="fv '+((s.vol_contraction||1)<=0.7?'fg':(s.vol_contraction||1)<=0.9?'fa':'fr')+'">'+Math.round((s.vol_contraction||1)*100)+'%</span></div>';
-  h += '<div class="factor"><span class="fn">RS percentile</span><span class="fv '+((s.rs_percentile||0)>=80?'fg':'')+'">'+( s.rs_percentile!=null?s.rs_percentile.toFixed(0):'&mdash;')+'th</span></div>';
-  h += '<div class="factor"><span class="fn">EMA stack</span><span class="fv '+ec(s.ema_stack)+'">'+(s.ema_stack||'&mdash;')+'</span></div>';
-  h += '<div class="factor"><span class="fn">Level</span><span class="fv" style="color:'+lc(s.level)+'">'+(s.level||'&mdash;')+'</span></div>';
-  h += '<div class="factor"><span class="fn">Distance</span><span class="fv" style="color:'+pc+'">'+dist.toFixed(1)+'%</span></div>';
+  h += '<div class="fbox"><div class="flbl">ATR coil</div><div class="fval '+((s.atr||1)<=0.25?'fg':(s.atr||1)<=0.35?'fa':'fr')+'">'+(s.atr||0).toFixed(2)+'</div><div class="fsub">'+((s.atr||1)<=0.25?'Very tight':(s.atr||1)<=0.35?'Tight':'Wide')+'</div></div>';
+  h += '<div class="fbox"><div class="flbl">RS percentile</div><div class="fval '+((s.rs_percentile||0)>=80?'fg':'')+'">'+(s.rs_percentile!=null?s.rs_percentile.toFixed(0)+'th':'&mdash;')+'</div><div class="fsub">'+((s.rs_percentile||0)>=90?'Elite':(s.rs_percentile||0)>=80?'Strong':(s.rs_percentile||0)>=60?'Good':'Weak')+'</div></div>';
+  h += '<div class="fbox"><div class="flbl">Vol contraction</div><div class="fval '+((s.vol_contraction||1)<=0.7?'fg':(s.vol_contraction||1)<=0.9?'fa':'fr')+'">'+Math.round((s.vol_contraction||1)*100)+'%</div><div class="fsub">'+((s.vol_contraction||1)<=0.5?'Very dry':(s.vol_contraction||1)<=0.7?'Dry':(s.vol_contraction||1)<=0.9?'Light':'Heavy')+'</div></div>';
+  h += '<div class="fbox"><div class="flbl">EMA stack</div><div class="fval '+('full'===(s.ema_stack||'')?'fg':'partial'===(s.ema_stack||'')?'fa':'fr')+'">'+(s.ema_stack||'&mdash;')+'</div><div class="fsub">'+('full'===(s.ema_stack||'')?'Strong trend':'partial'===(s.ema_stack||'')?'Partial':'Weak')+'</div></div>';
+  h += '<div class="fbox"><div class="flbl">Level</div><div class="fval" style="color:'+(lc(s.level))+'">'+(s.level||'&mdash;')+'</div><div class="fsub">'+((s.level||'').indexOf('ATH')>=0?'No resistance':(s.level||'').indexOf('multi')>=0?'Multi-year':'Prior level')+'</div></div>';
+  h += '<div class="fbox"><div class="flbl">Distance</div><div class="fval" style="color:'+pc+'">'+Math.abs(dist).toFixed(1)+'%</div><div class="fsub">'+(dist<=0?'Broke out':dist<=1?'Very close':'Away')+'</div></div>';
   h += '</div>';
-  h += '<div class="trade"><div class="ttitle">Risk / Reward</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
-  h += '<div style="background:'+riskBg+';border-radius:8px;padding:10px;text-align:center">';
-  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Risk</div>';
-  h += '<div style="font-size:18px;font-weight:700;color:'+riskColor+'">'+riskCat+'</div>';
-  h += '<div style="font-size:10px;color:'+riskColor+';margin-top:3px">stop '+stpPct+'%</div></div>';
-  h += '<div style="background:'+rewardBg+';border-radius:8px;padding:10px;text-align:center">';
-  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Reward</div>';
-  h += '<div style="font-size:18px;font-weight:700;color:'+rewardColor+'">'+rewardCat+'</div>';
-  h += '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;justify-content:center">';
-  h += '<span style="font-size:9px;padding:2px 5px;border-radius:8px;background:'+(sig_rs?'#1a3d2b':'#22263a')+';color:'+(sig_rs?'#27ae60':'#4a5568')+'">RS&gt;80</span>';
-  h += '<span style="font-size:9px;padding:2px 5px;border-radius:8px;background:'+(sig_vol?'#1a3d2b':'#22263a')+';color:'+(sig_vol?'#27ae60':'#4a5568')+'">Vol dry</span>';
-  h += '<span style="font-size:9px;padding:2px 5px;border-radius:8px;background:'+(sig_lvl?'#1a3d2b':'#22263a')+';color:'+(sig_lvl?'#27ae60':'#4a5568')+'">ATH</span>';
-  h += '<span style="font-size:9px;padding:2px 5px;border-radius:8px;background:'+(sig_ema?'#1a3d2b':'#22263a')+';color:'+(sig_ema?'#27ae60':'#4a5568')+'">EMA</span>';
+
+  // Risk/Reward
+  h += '<div class="sec-title">Risk / Reward</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">';
+  h += '<div style="background:'+riskBg+';border-radius:10px;padding:14px;text-align:center">';
+  h += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Risk</div>';
+  h += '<div style="font-size:22px;font-weight:700;color:'+riskColor+'">'+riskCat+'</div>';
+  h += '<div style="font-size:11px;color:'+riskColor+';margin-top:5px">Stop '+stpPct+'%</div>';
+  h += '</div>';
+  h += '<div style="background:'+rewardBg+';border-radius:10px;padding:14px;text-align:center">';
+  h += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Reward</div>';
+  h += '<div style="font-size:22px;font-weight:700;color:'+rewardColor+'">'+rewardCat+'</div>';
+  h += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;justify-content:center">';
+  h += '<span style="font-size:9px;padding:2px 7px;border-radius:20px;background:'+(sig_rs?'#1a3d2b':'#22263a')+';color:'+(sig_rs?'#27ae60':'#4a5568')+'">RS&gt;80</span>';
+  h += '<span style="font-size:9px;padding:2px 7px;border-radius:20px;background:'+(sig_vol?'#1a3d2b':'#22263a')+';color:'+(sig_vol?'#27ae60':'#4a5568')+'">Vol dry</span>';
+  h += '<span style="font-size:9px;padding:2px 7px;border-radius:20px;background:'+(sig_lvl?'#1a3d2b':'#22263a')+';color:'+(sig_lvl?'#27ae60':'#4a5568')+'">ATH</span>';
+  h += '<span style="font-size:9px;padding:2px 7px;border-radius:20px;background:'+(sig_ema?'#1a3d2b':'#22263a')+';color:'+(sig_ema?'#27ae60':'#4a5568')+'">EMA</span>';
   h += '</div></div></div>';
-  h += '<div style="background:'+setupBg+';border:1px solid '+setupColor+'44;border-radius:10px;padding:12px 14px">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
-  h += '<div style="font-size:14px;font-weight:700;color:'+setupColor+'">'+setupIcon+' '+setupCat+'</div>';
-  h += '<div style="font-size:11px;color:'+tfColor+';font-weight:600">'+tfIcon+' '+tfLabel+'</div>';
+
+  // Setup + Action
+  h += '<div style="background:'+setupBg+';border:1px solid '+setupColor+'44;border-radius:12px;padding:14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+  h += '<div style="font-size:15px;font-weight:700;color:'+setupColor+'">'+setupIcon+' '+setupCat+'</div>';
+  h += '<div style="font-size:12px;font-weight:600;color:'+tfColor+'">'+tfIcon+' '+tfLabel+'</div>';
   h += '</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
-  h += '<div style="background:var(--bg2);border-radius:7px;padding:8px 12px">';
-  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Buy above</div>';
-  h += '<div style="font-size:16px;font-weight:700;color:#27ae60">$'+entryNum.toFixed(2)+'</div></div>';
-  h += '<div style="background:var(--bg2);border-radius:7px;padding:8px 12px">';
-  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Stop loss</div>';
-  h += '<div style="font-size:16px;font-weight:700;color:#e74c3c">$'+stopNum.toFixed(2)+'</div>';
-  h += '<div style="font-size:10px;color:#e74c3c;margin-top:1px">-'+stpPct+'%</div></div>';
-  h += '</div></div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  h += '<div style="background:var(--bg2);border-radius:8px;padding:10px 14px">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Buy above</div>';
+  h += '<div style="font-size:20px;font-weight:700;color:#27ae60">$'+entryNum.toFixed(2)+'</div>';
   h += '</div>';
-  h += '<div class="cfoot">';
+  h += '<div style="background:var(--bg2);border-radius:8px;padding:10px 14px">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Stop loss</div>';
+  h += '<div style="font-size:20px;font-weight:700;color:#e74c3c">$'+stopNum.toFixed(2)+'</div>';
+  h += '<div style="font-size:10px;color:#e74c3c;margin-top:2px">-'+stpPct+'%</div>';
+  h += '</div></div></div>';
+
+  // Footer
+  h += '<div style="padding-top:12px;display:flex;justify-content:flex-end">';
   h += '<button class="chart-btn" id="cbtn-'+s.ticker+'" onclick="doChart(this)" data-ticker="'+s.ticker+'">&#128202; Chart</button>';
   h += '</div>';
+  h += '</div>'; // card-body
+
+  // Chart panel
   h += '<div class="chart-panel" id="cpanel-'+s.ticker+'">';
   h += '<button class="chart-close" data-ticker="'+s.ticker+'" onclick="doClose(this)">&times; Close</button>';
   h += '<iframe id="cframe-'+s.ticker+'" src="" scrolling="no" allowtransparency="true"></iframe>';
   h += '</div>';
-  h += '</div>';
+  h += '</div>'; // card
   return h;
 }}
 
