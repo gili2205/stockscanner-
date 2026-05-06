@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.4.4"
+VERSION = "v2.4.6"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -493,6 +493,7 @@ function render() {{
     grid.innerHTML = '<div class="empty">No stocks match this combination.<br><span style="font-size:12px;color:var(--muted)">Try removing some filters or click <strong style="color:var(--blue)">Show all</strong> to reset.</span></div>';
   }} else {{
     grid.innerHTML = top10.map(function(s,i){{return makeCard(s,i+1);}}).join("");
+    setTimeout(prefetchAllFundamentals, 500);
   }}
 }}
 
@@ -599,20 +600,37 @@ function makeCard(s, rank) {{
   h += '<div class="card '+(s.pre_breakout?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
 
   // ── Click-to-fold header ──────────────────────────────────────────────────
+  var tgtCol2=upsidePct!=null&&upsidePct>5?'var(--green)':upsidePct!=null&&upsidePct<-5?'var(--red)':'var(--muted)';
   h += '<div class="card-header" data-id="body-'+s.ticker+'" onclick="toggleCard(this.dataset.id)">';
-  h += '<div class="card-header-left">';
+  // Row 1: rank + ticker + sector | price + score
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+  h += '<div style="display:flex;align-items:center;gap:12px">';
   h += '<div class="card-rank '+(isTop?'top':'')+'">'+rank+'</div>';
   h += '<div>';
-  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'</div>';
-  h += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+(s.sector||'NASDAQ')+'</div>';
+  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
+  h += '<div style="font-size:13px;font-weight:600;color:var(--muted);margin-top:2px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span></div>';
   h += '</div></div>';
-  h += '<div class="card-header-right">';
-  h += '<div style="text-align:right">';
-  h += '<div style="font-size:13px;font-weight:600">$'+price.toFixed(2)+'<span class="chg '+chgCls+' msl">'+chgStr+'</span></div>';
-  h += '</div>';
   h += '<div class="card-score-block">';
-  h += '<div id="'+scoreId+'" style="font-size:32px;font-weight:700;color:'+color+';cursor:pointer;line-height:1" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
-  h += '<div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:'+color+';margin-top:3px">'+s.status+'</div>';
+  h += '<div id="'+scoreId+'" style="font-size:32px;font-weight:700;color:'+color+';cursor:pointer;line-height:1;text-align:right" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
+  h += '<div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:'+color+';margin-top:3px;text-align:right">'+s.status+'</div>';
+  h += '</div>';
+  h += '</div>';
+  // Row 2: P/E | RSI | 1Y Target — full width with dividers
+  h += '<div id="fold-'+s.ticker+'" style="display:flex;border-top:1px solid var(--border);padding-top:10px;margin-top:2px">';
+  h += '<div style="flex:1;text-align:center;padding:0 8px;border-right:1px solid var(--border)">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">P/E Ratio</div>';
+  h += '<div class="fund-pe-val" style="font-size:16px;font-weight:700;color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div>';
+  h += '<div class="fund-pe-sub" style="font-size:10px;color:var(--muted);margin-top:1px">'+(pe&&pe>0?(pe<20?'Cheap':pe<40?'Fair':'Pricey'):'')+'</div>';
+  h += '</div>';
+  h += '<div style="flex:1;text-align:center;padding:0 8px;border-right:1px solid var(--border)">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">RSI (14)</div>';
+  h += '<div class="fund-rsi-val" style="font-size:16px;font-weight:700;color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div>';
+  h += '<div class="fund-rsi-sub" style="font-size:10px;color:var(--muted);margin-top:1px">'+rsiL(rsi)+'</div>';
+  h += '</div>';
+  h += '<div style="flex:1;text-align:center;padding:0 8px">';
+  h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">1Y Target</div>';
+  h += '<div class="fund-tgt-val" style="font-size:16px;font-weight:700;color:'+tgtCol2+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div>';
+  h += '<div class="fund-tgt-sub" style="font-size:10px;color:'+tgtCol2+';margin-top:1px">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'')+'</div>';
   h += '</div>';
   h += '</div>';
   h += '</div>';
@@ -621,7 +639,7 @@ function makeCard(s, rank) {{
   h += '<div style="height:4px;background:var(--bg3)"><div style="height:100%;width:'+Math.min(100,unifiedScore)+'%;background:'+color+';transition:width .3s"></div></div>';
 
   // ── Expandable body ───────────────────────────────────────────────────────
-  h += '<div class="card-body" id="body-'+s.ticker+'">';
+  h += '<div class="card-body" id="body-'+s.ticker+'" style="display:none">';
 
   // Fundamentals row
   h += '<div class="funds">';
@@ -709,6 +727,79 @@ function toggleCard(bodyId) {{
   if (!body) return;
   var isOpen = body.style.display !== 'none' && body.style.display !== '';
   body.style.display = isOpen ? 'none' : 'block';
+}}
+
+function showBreakdown(el) {{
+  var d = cardBreakdowns[el.id];
+  if(!d) return;
+  var p = document.getElementById('breakdown-popup');
+  if(!p) return;
+  document.getElementById('bp-tech').textContent = d.tech+'/40';
+  document.getElementById('bp-cat').textContent  = d.cat+'/30';
+  document.getElementById('bp-ana').textContent  = d.ana+'/30';
+  document.getElementById('bp-tech-bar').style.width = Math.round(d.tech/40*100)+'%';
+  document.getElementById('bp-cat-bar').style.width  = Math.round(d.cat/30*100)+'%';
+  document.getElementById('bp-ana-bar').style.width  = Math.round(d.ana/30*100)+'%';
+  document.getElementById('bp-entry').textContent = '$'+d.entry;
+  document.getElementById('bp-stop').textContent  = '$'+d.stop;
+  document.getElementById('bp-tf').innerHTML = '<span style="color:'+d.tfColor+'">'+d.tfLabel+'</span>';
+  var rect = el.getBoundingClientRect();
+  p.style.top  = (rect.bottom + window.scrollY + 8) + 'px';
+  p.style.left = Math.min(rect.left, window.innerWidth - 310) + 'px';
+  p.style.display = p.style.display === 'block' ? 'none' : 'block';
+}}
+document.addEventListener('click', function(e) {{
+  var p = document.getElementById('breakdown-popup');
+  if(p && !p.contains(e.target)) p.style.display = 'none';
+}});
+
+var _fundCache = {{}};
+async function fetchFundamentals(ticker, container) {{
+  if(_fundCache[ticker]) return;
+  _fundCache[ticker] = true;
+  try {{
+    var resp = await fetch('/lookup?t='+ticker);
+    if(!resp.ok) return;
+    var d = await resp.json();
+    if(d.error) return;
+    // Update all matching elements in this container AND across the whole card
+    var card = document.getElementById('card-'+ticker);
+    var targets = card ? [card] : [container];
+    targets.forEach(function(el) {{
+      if(d.pe_ratio) {{
+        var pe=d.pe_ratio, peEl=el.querySelector('.fund-pe-val'), peSub=el.querySelector('.fund-pe-sub');
+        if(peEl){{peEl.textContent=pe.toFixed(1);peEl.style.color=pe<20?'var(--green)':pe<40?'var(--amber)':'var(--red)';}}
+        if(peSub) peSub.textContent=pe<20?'Cheap':pe<40?'Fair':'Pricey';
+      }}
+      if(d.rsi!=null) {{
+        var rsi=d.rsi, rsiEl=el.querySelector('.fund-rsi-val'), rsiSub=el.querySelector('.fund-rsi-sub');
+        if(rsiEl){{rsiEl.textContent=rsi.toFixed(0);rsiEl.style.color=rsi>=70?'var(--red)':rsi<=30?'var(--blue)':'var(--green)';}}
+        if(rsiSub) rsiSub.textContent=rsi>=70?'Overbought':rsi<=30?'Oversold':'Healthy';
+      }}
+      if(d.analyst_target) {{
+        var tgt=d.analyst_target, up=d.analyst_upside;
+        var col=up>5?'var(--green)':up<-5?'var(--red)':'var(--muted)';
+        var tEl=el.querySelector('.fund-tgt-val'), sEl=el.querySelector('.fund-tgt-sub');
+        if(tEl){{tEl.textContent='$'+tgt.toFixed(0);tEl.style.color=col;}}
+        if(sEl&&up!=null){{sEl.textContent=(up>=0?'+':'')+up.toFixed(1)+'%';sEl.style.color=col;}}
+      }}
+    }});
+  }} catch(e) {{}}
+}}
+
+function prefetchAllFundamentals() {{
+  var headers = document.querySelectorAll('.card-header');
+  var delay = 0;
+  headers.forEach(function(hdr) {{
+    var bodyId = hdr.getAttribute('data-id');
+    if(!bodyId) return;
+    var ticker = bodyId.replace('body-','');
+    setTimeout(function() {{
+      var card = document.getElementById('card-'+ticker);
+      if(card) fetchFundamentals(ticker, card);
+    }}, delay);
+    delay += 400;
+  }});
 }}
 
 function doChart(btn) {{
