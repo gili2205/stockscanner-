@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.4.6"
+VERSION = "v2.4.7"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -60,7 +60,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .sortrow{{display:flex;align-items:center;gap:10px;padding:8px 24px;background:var(--bg);border-bottom:1px solid var(--border);}}
 .sortrow select{{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;outline:none;cursor:pointer;}}
 .alertbox{{background:#1a3d2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin:8px 24px;font-size:12px;color:var(--green);display:none;}}
-.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;padding:20px 24px;}}
+.grid{{display:flex;flex-direction:column;gap:16px;padding:20px 24px;}}
 .card{{background:var(--bg2);border:1px solid var(--border);border-left:4px solid var(--border);border-radius:14px;overflow:hidden;transition:box-shadow .2s;box-shadow:0 4px 16px rgba(0,0,0,.35);}}
 .card:hover{{box-shadow:0 8px 24px rgba(0,0,0,.5);}}
 .card.pre{{border-left-color:var(--green);}}
@@ -600,7 +600,7 @@ function makeCard(s, rank) {{
 
   // ── Click-to-fold header ──────────────────────────────────────────────────
   var tgtCol2=upsidePct!=null&&upsidePct>5?'var(--green)':upsidePct!=null&&upsidePct<-5?'var(--red)':'var(--muted)';
-  h += '<div class="card-header" data-ticker="'+s.ticker+'" onclick="toggleCard(this.dataset.ticker)">';
+  h += '<div class="card-header" data-ticker="'+s.ticker+'" onclick="event.stopPropagation();toggleCard(this.dataset.ticker)">';
   // Row 1: rank + ticker + sector | score
   h += '<div style="display:flex;justify-content:space-between;align-items:center">';
   h += '<div style="display:flex;align-items:center;gap:12px">';
