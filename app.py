@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.4.8"
+VERSION = "v2.4.9"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -751,12 +751,12 @@ document.addEventListener('click', function(e) {{
 var _fundCache = {{}};
 async function fetchFundamentals(ticker, container) {{
   if(_fundCache[ticker]) return;
-  _fundCache[ticker] = true;
   try {{
     var resp = await fetch('/lookup?t='+ticker);
     if(!resp.ok) return;
     var d = await resp.json();
     if(d.error) return;
+    _fundCache[ticker] = true; // only cache on success
     // Update all matching elements in this container AND across the whole card
     var card = document.getElementById('card-'+ticker);
     var targets = card ? [card] : [container];
@@ -787,9 +787,8 @@ function prefetchAllFundamentals() {{
   var headers = document.querySelectorAll('.card-header');
   var delay = 0;
   headers.forEach(function(hdr) {{
-    var bodyId = hdr.getAttribute('data-id');
-    if(!bodyId) return;
-    var ticker = bodyId.replace('body-','');
+    var ticker = hdr.getAttribute('data-ticker');
+    if(!ticker) return;
     setTimeout(function() {{
       var card = document.getElementById('card-'+ticker);
       if(card) fetchFundamentals(ticker, card);
