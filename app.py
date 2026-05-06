@@ -71,7 +71,6 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .card-rank{{width:32px;height:32px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--muted);flex-shrink:0;}}
 .card-rank.top{{background:#1a3d2b;color:var(--green);}}
 .card-score-block{{text-align:right;}}
-.card-body{{padding:0 20px 18px;}}
 .msl{{margin-left:6px;}}
 .sec-title{{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:14px 0 8px;}}
 .card-fold{{display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;user-select:none;}}.card-fold:hover{{background:#ffffff05;}}
@@ -599,7 +598,7 @@ function makeCard(s, rank) {{
   h += '<div class="card '+(s.pre_breakout?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
 
   // ── Click-to-fold header ──────────────────────────────────────────────────
-  h += '<div class="card-header" onclick="toggleCard(\'card-'+s.ticker+'\')">';
+  h += '<div class="card-header" data-id="body-'+s.ticker+'" onclick="toggleCard(this.dataset.id)">';
   h += '<div class="card-header-left">';
   h += '<div class="card-rank '+(isTop?'top':'')+'">'+rank+'</div>';
   h += '<div>';
@@ -703,6 +702,13 @@ function makeCard(s, rank) {{
   return h;
 }}
 
+
+function toggleCard(bodyId) {{
+  var body = document.getElementById(bodyId);
+  if (!body) return;
+  var isOpen = body.style.display !== 'none' && body.style.display !== '';
+  body.style.display = isOpen ? 'none' : 'block';
+}}
 
 function doChart(btn) {{
   var t=btn.getAttribute('data-ticker');
