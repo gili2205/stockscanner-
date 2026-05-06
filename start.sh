@@ -1,108 +1,92 @@
 #!/bin/bash
 
-# ── NASDAQ Scanner — start/deploy script ──────────────────────────────────────
-# Usage:
-#   sudo bash start.sh          → start the scanner in background
-#   sudo bash start.sh restart  → kill existing + restart
-#   sudo bash start.sh stop     → kill the scanner
-#   sudo bash start.sh status   → show if running + last log lines
-#   sudo bash start.sh deploy   → git pull + restart
+SCANNER_DIR=/home/scanner
+VENV=$SCANNER_DIR/venv/bin/python
+LOG=/var/log/scanner.log
 
-SCANNER_DIR="/home/scanner"
-PYTHON="$SCANNER_DIR/venv/bin/python"
-SCRIPT="$SCANNER_DIR/live_scanner.py"
-LOG="/var/log/scanner.log"
-ENV_FILE="$SCANNER_DIR/.env"
+export ALPACA_KEY=PK55MZO64HVY3LM764ZIVHSMNY
+export ALPACA_SECRET=6hZg69XTG1DpVf8M3e2amUdFBDCExRg5zcyKgLaneqoN
+export FIREBASE_URL=https://stockscanner-f9f81-default-rtdb.firebaseio.com
+export FIREBASE_CRED=$SCANNER_DIR/firebase-key.json
 
-# ── Load environment variables ─────────────────────────────────────────────────
-set -a
-source "$ENV_FILE"
-set +a
-
-# ── Helper: is scanner running? ───────────────────────────────────────────────
-is_running() {
-    pgrep -f "live_scanner.py" > /dev/null 2>&1
-}
-
-# ── Commands ──────────────────────────────────────────────────────────────────
-case "${1:-start}" in
+case "$1" in
 
   start)
-    if is_running; then
-        echo "Scanner is already running (PID $(pgrep -f live_scanner.py))"
-        exit 0
-    fi
     echo "Starting scanner..."
-    nohup "$PYTHON" "$SCRIPT" >> "$LOG" 2>&1 &
-    sleep 2
-    if is_running; then
-        echo "Scanner started (PID $(pgrep -f live_scanner.py)) — logging to $LOG"
-    else
-        echo "ERROR: Scanner failed to start. Check $LOG"
-        tail -20 "$LOG"
-        exit 1
-    fi
+    systemctl start scanner
     ;;
 
   stop)
-    if is_running; then
-        pkill -f "live_scanner.py"
-        echo "Scanner stopped."
-    else
-        echo "Scanner is not running."
-    fi
+    echo "Stopping scanner..."
+    systemctl stop scanner
     ;;
 
   restart)
     echo "Restarting scanner..."
-    pkill -f "live_scanner.py" 2>/dev/null
-    sleep 2
-    nohup "$PYTHON" "$SCRIPT" >> "$LOG" 2>&1 &
-    sleep 2
-    if is_running; then
-        echo "Scanner restarted (PID $(pgrep -f live_scanner.py))"
-    else
-        echo "ERROR: Scanner failed to restart. Check $LOG"
-        tail -20 "$LOG"
-        exit 1
-    fi
+    systemctl restart scanner
     ;;
 
   status)
-    if is_running; then
-        echo "Scanner is RUNNING (PID $(pgrep -f live_scanner.py))"
-    else
-        echo "Scanner is STOPPED"
-    fi
-    echo ""
-    echo "Last 20 log lines:"
-    tail -20 "$LOG"
+    systemctl status scanner --no-pager -l
     ;;
 
   deploy)
-    echo "=== Deploying latest from GitHub ==="
-    git -C "$SCANNER_DIR" config --global --add safe.directory "$SCANNER_DIR" 2>/dev/null
-    git -C "$SCANNER_DIR" pull origin main
-    echo ""
-    echo "=== Restarting scanner ==="
-    pkill -f "live_scanner.py" 2>/dev/null
-    sleep 2
-    nohup "$PYTHON" "$SCRIPT" >> "$LOG" 2>&1 &
-    sleep 2
-    if is_running; then
-        echo "Scanner deployed and running (PID $(pgrep -f live_scanner.py))"
-        echo "Tailing log (Ctrl+C to exit):"
-        tail -f "$LOG"
+    echo "=== Deploying from GitHub ==="
+    systemctl stop scanner
+
+    cd $SCANNER_DIR
+    if [ -d ".git" ]; then
+      echo "Pulling latest from GitHub..."
+      git pull origin main
     else
-        echo "ERROR: Scanner failed after deploy. Check $LOG"
-        tail -20 "$LOG"
-        exit 1
+      echo "Cloning repo..."
+      git clone https://github.com/gili2205/stockscanner-.git .
     fi
+
+    echo "Files deployed:"
+    ls $SCANNER_DIR/*.py 2>/dev/null
+
+    if [ -f $SCANNER_DIR/requirements.txt ]; then
+      echo "Installing requirements..."
+      $SCANNER_DIR/venv/bin/pip install -r $SCANNER_DIR/requirements.txt -q
+    fi
+
+    echo "Restarting scanner..."
+    systemctl start scanner
+    echo "=== Deploy complete ==="
+    systemctl status scanner --no-pager | tail -3
+    ;;
+
+  run-backtest)
+    DAYS=${2:-30}
+    echo "=== Starting backtest ($DAYS days) in background ==="
+    cd $SCANNER_DIR
+    screen -dmS backtest bash -c "
+      export FIREBASE_URL=$FIREBASE_URL
+      export FIREBASE_CRED=$FIREBASE_CRED
+      $VENV backtest.py --days $DAYS 2>&1 | tee /var/log/backtest.log
+    "
+    echo "Backtest running. Check progress: sudo bash start.sh backtest-log"
+    ;;
+
+  backtest-log)
+    tail -f /var/log/backtest.log
+    ;;
+
+  update-returns)
+    echo "=== Updating forward returns ==="
+    cd $SCANNER_DIR
+    export FIREBASE_URL=$FIREBASE_URL
+    export FIREBASE_CRED=$FIREBASE_CRED
+    $VENV backtest.py --update-returns
+    ;;
+
+  logs)
+    tail -f $LOG
     ;;
 
   *)
-    echo "Usage: sudo bash start.sh [start|stop|restart|status|deploy]"
-    exit 1
+    echo "Usage: sudo bash start.sh {start|stop|restart|status|deploy|run-backtest [days]|backtest-log|update-returns|logs}"
     ;;
 
 esac
