@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.5.1"
+VERSION = "v2.5.2"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -491,8 +491,18 @@ function render() {{
   if (!top10.length) {{
     grid.innerHTML = '<div class="empty">No stocks match this combination.<br><span style="font-size:12px;color:var(--muted)">Try removing some filters or click <strong style="color:var(--blue)">Show all</strong> to reset.</span></div>';
   }} else {{
-    grid.innerHTML = top10.map(function(s,i){{return makeCard(s,i+1);}}).join("");
-    setTimeout(prefetchAllFundamentals, 500);
+  // Save which cards are open before rebuild
+  var openCards = {{}};
+  document.querySelectorAll('.card-body').forEach(function(b) {{
+    if(b.style.display==='block') openCards[b.id]=true;
+  }});
+  grid.innerHTML = top10.map(function(s,i){{return makeCard(s,i+1);}}).join("");
+  // Restore open cards
+  Object.keys(openCards).forEach(function(id) {{
+    var el=document.getElementById(id);
+    if(el) el.style.display='block';
+  }});
+  setTimeout(prefetchAllFundamentals, 100);
   }}
 }}
 
