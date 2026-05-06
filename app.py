@@ -65,10 +65,9 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .card:hover{{box-shadow:0 8px 24px rgba(0,0,0,.5);}}
 .card.pre{{border-left-color:var(--green);}}
 .card.watch{{border-left-color:var(--amber);}}
-.card-header{{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;cursor:pointer;user-select:none;}}
+.card-header{{display:block;padding:18px 20px;cursor:pointer;user-select:none;}}
 .card-header:hover{{background:#ffffff05;}}
-.card-header-left{{display:flex;align-items:center;gap:14px;}}
-.card-header-right{{display:flex;align-items:center;gap:20px;}}
+
 .card-rank{{width:32px;height:32px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--muted);flex-shrink:0;}}
 .card-rank.top{{background:#1a3d2b;color:var(--green);}}
 .card-score-block{{text-align:right;}}
@@ -641,12 +640,7 @@ function makeCard(s, rank) {{
   // ── Expandable body ───────────────────────────────────────────────────────
   h += '<div class="card-body" id="body-'+s.ticker+'" style="display:none">';
 
-  // Fundamentals row
-  h += '<div class="funds">';
-  h += '<div class="fbox"><div class="flbl">P/E Ratio</div><div class="fval" style="color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div><div class="fsub">'+(pe&&pe>0?(pe<20?'Cheap':pe<40?'Fair':'Pricey'):'N/A')+'</div></div>';
-  h += '<div class="fbox"><div class="flbl">RSI (14)</div><div class="fval" style="color:'+rc+'">'+(rsi!=null?rsi.toFixed(0):'&mdash;')+'</div><div class="fsub">'+rsiL(rsi)+'</div></div>';
-  h += '<div class="fbox"><div class="flbl">1Y Target</div><div class="fval" style="color:'+upColor+'">'+(target?'$'+target.toFixed(0):'&mdash;')+'</div><div class="fsub" style="color:'+upColor+'">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'N/A')+'</div></div>';
-  h += '</div>';
+  // Fundamentals shown in header — not repeated here
 
   // Analyst row
   if(buyPct>0||numAna>0) {{
