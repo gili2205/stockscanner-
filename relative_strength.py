@@ -84,7 +84,7 @@ def assign_rs_percentiles(results: list[dict]) -> list[dict]:
     After all stocks are analyzed, rank raw_rs values and assign percentiles.
     Called from ranking.py.
     """
-    rs_values = [r.get("rs_raw", r.get("raw_rs", 0)) for r in results]
+    rs_values = [r.get("raw_rs", r.get("rs_raw", 0)) for r in results]
     if not rs_values:
         return results
 

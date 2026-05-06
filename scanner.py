@@ -18,7 +18,7 @@ import json
 import os
 import sys
 import time
-import webbrowse
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
@@ -85,14 +85,13 @@ def analyze_stock(ticker: str, df: pd.DataFrame, benchmark_df: pd.DataFrame) -> 
         composite = max(0, min(100, composite))
 
         # --- Quality gate (must pass or ranks last) ---
-                        vol_ratio = round(float(df["Volume"].iloc[-1]) / float(df["Volume"].iloc[-20:].mean()), 2) if len(df) >= 20 else 0.0
-      passes_gate = quality_gate(consolidation, rs, vol_ratio)
+        vol_ratio = round(float(df["Volume"].iloc[-1]) / float(df["Volume"].iloc[-20:].mean()), 2) if len(df) >= 20 else 0.0
+        passes_gate = quality_gate(consolidation, rs, vol_ratio)
 
         last = df.iloc[-1]
         prev = df.iloc[-2]
         price = round(float(last["Close"]), 2)
         change_pct = round((price - float(prev["Close"])) / float(prev["Close"]) * 100, 2)
-        vol_ratio = round(float(last["Volume"]) / float(df["Volume"].iloc[-20:].mean()), 2)
 
         return {
             "ticker": ticker,
@@ -289,13 +288,12 @@ def watch_mode(results: list[dict]):
                     if closes.empty:
                         continue
                     current = float(closes.iloc[-1])
-                                                    # Alert if current price is within 1% above the scan-time price
-                                              # (uses scan result price as breakout level proxy — more accurate than intraday high)
-                                              scan_price = result.get("price", 0)
-                                              if scan_price > 0:
-                                                                                    dist = (current - scan_price) / scan_price
-                                                                                    if -0.01 <= dist <= 0.02:  # within 1% below or 2% above scan price
-                                                                                                                              alerts.append(f"  🚀 {ticker} — near breakout level at ${current:.2f} (scan: ${scan_price:.2f})")
+                    # Alert if within 1% below or 2% above scan price
+                    scan_price = result.get("price", 0)
+                    if scan_price > 0:
+                        dist = (current - scan_price) / scan_price
+                        if -0.01 <= dist <= 0.02:
+                            alerts.append(f"  🚀 {ticker} — near breakout level at ${current:.2f} (scan: ${scan_price:.2f})")
                 except Exception:
                     continue
 

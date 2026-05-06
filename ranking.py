@@ -2,6 +2,9 @@
 Evidence-based ranking system.
 Implements Qullamaggie scanner v5 ranking with RS percentile assignment
 and quality gate from all three source repos.
+
+NOTE: This is the canonical ranking.py. The nasdaq_scanner/ranking.py
+is a legacy 2-arg version — keep it in sync with this file or remove it.
 """
 
 import pandas as pd
@@ -52,8 +55,8 @@ def rank_stocks(results: list[dict]) -> list[dict]:
         if r.get("catalyst_freshness", 0) > 0.8 and r.get("atr_compression", 1) > 0.6:
             score = max(0, score - 8)
 
-        # Extension penalty: if price is >2 ABR above breakout level, penalize
-        if r.get("breakout_level") == "ATH" and r.get("vol_ratio", 1) < 0.5:
+        # Climax move penalty: high volume at ATH = extended/climax, risky
+        if r.get("breakout_level") == "ATH" and r.get("vol_ratio", 1) > 3.0:
             score = max(0, score - 5)
 
         r["composite_score"] = score
