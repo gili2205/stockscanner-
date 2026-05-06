@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.4.3"
+VERSION = "v2.4.4"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -1410,6 +1410,9 @@ function showEmpty(msg) {{
 
 @app.route('/analytics')
 def analytics():
+    return ANALYTICS_HTML
+
+def _unused_analytics_old():
     cfg = json.dumps(FIREBASE_CONFIG)
     return render_template_string(ANALYTICS_HTML, cfg=cfg)
 
@@ -1863,11 +1866,6 @@ def index():
         cfg=json.dumps(FIREBASE_CONFIG)
     )
     return html
-
-@app.route('/analytics')
-def analytics_page():
-    return ANALYTICS_HTML
-
 
 @app.route('/api/analytics')
 def api_analytics():
