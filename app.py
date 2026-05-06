@@ -601,7 +601,7 @@ function makeCard(s, rank) {{
 
   // ── Click-to-fold header ──────────────────────────────────────────────────
   var tgtCol2=upsidePct!=null&&upsidePct>5?'var(--green)':upsidePct!=null&&upsidePct<-5?'var(--red)':'var(--muted)';
-  h += '<div class="card-header" data-id="body-'+s.ticker+'" onclick="toggleCard(\''+s.ticker+'\')">';
+  h += '<div class="card-header" data-ticker="'+s.ticker+'" onclick="toggleCard(this.dataset.ticker)">';
   // Row 1: rank + ticker + sector | score
   h += '<div style="display:flex;justify-content:space-between;align-items:center">';
   h += '<div style="display:flex;align-items:center;gap:12px">';
