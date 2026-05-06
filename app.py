@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.4.7"
+VERSION = "v2.4.8"
 
 FIREBASE_CONFIG = {
     "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
@@ -772,11 +772,12 @@ async function fetchFundamentals(ticker, container) {{
         if(rsiSub) rsiSub.textContent=rsi>=70?'Overbought':rsi<=30?'Oversold':'Healthy';
       }}
       if(d.analyst_target) {{
-        var tgt=d.analyst_target, up=d.analyst_upside;
-        var col=up>5?'var(--green)':up<-5?'var(--red)':'var(--muted)';
+        var tgt=d.analyst_target;
+        var up=d.analyst_upside!=null?parseFloat(d.analyst_upside):null;
+        var col=up!=null&&up>5?'var(--green)':up!=null&&up<-5?'var(--red)':'var(--muted)';
         var tEl=el.querySelector('.fund-tgt-val'), sEl=el.querySelector('.fund-tgt-sub');
         if(tEl){{tEl.textContent='$'+tgt.toFixed(0);tEl.style.color=col;}}
-        if(sEl&&up!=null){{sEl.textContent=(up>=0?'+':'')+up.toFixed(1)+'%';sEl.style.color=col;}}
+        if(sEl){{sEl.textContent=up!=null?(up>=0?'+':'')+up.toFixed(1)+'%':'';sEl.style.color=col;}}
       }}
     }});
   }} catch(e) {{}}
@@ -927,7 +928,9 @@ def lookup():
             losses = [abs(min(d,0)) for d in deltas[-14:]]
             avg_g  = sum(gains)/14
             avg_l  = sum(losses)/14
-            if avg_l > 0:
+            if avg_l == 0 and avg_g > 0:
+                rsi = 100.0
+            elif avg_l > 0:
                 rs  = avg_g / avg_l
                 rsi = round(100 - 100/(1+rs), 1)
         return jsonify({
