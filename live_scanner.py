@@ -7,6 +7,7 @@ Both require minimum liquidity ($15 price, $10M+ daily dollar volume).
 """
 
 import os, time, logging, requests, pickle, json
+from logger import log_scan_results
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import pytz
@@ -202,8 +203,6 @@ def get_fundamentals_fast(tickers):
             pe      = info.get("trailingPE") or info.get("forwardPE")
             target  = info.get("targetMeanPrice")
             rec     = info.get("recommendationMean")
-            rec_key = info.get("recommendationKey","")  # "buy","hold","sell" etc
-            num_ana = info.get("numberOfAnalystOpinions") or info.get("numAnalystOpinions")
             rev_g   = info.get("revenueGrowth")
             eps_g   = info.get("earningsGrowth")
             short   = info.get("shortPercentOfFloat")
@@ -225,8 +224,6 @@ def get_fundamentals_fast(tickers):
                 "pe_ratio":           round(float(pe),1) if pe and pe>0 else None,
                 "analyst_target":     round(float(target),2) if target else None,
                 "analyst_buy_pct":    buy_pct,
-                "num_analysts":       int(num_ana) if num_ana else None,
-                "recommendation":     rec_key,
                 "revenue_growth_yoy": round(float(rev_g)*100,1) if rev_g else None,
                 "eps_growth_yoy":     round(float(eps_g)*100,1) if eps_g else None,
                 "short_interest_pct": round(float(short)*100,1) if short else None,
@@ -499,13 +496,11 @@ def score_stock(ticker, df, live_price=None, fund=None):
             "earnings_soon":    earnings_soon,
             "days_to_earnings": days_earn,
             "analyst_buy_pct":  buy_pct,
-            "num_analysts":     fund.get("num_analysts"),
-            "recommendation":   fund.get("recommendation",""),
             "revenue_growth":   rev_growth,
             "analyst_upside":   upside,
             "breakout_score":   breakout_score,
             "catalyst_score":   catalyst_score,
-            "rs_percentile":    None,
+            "rs_percentile":    70,
             "rank":             0,
             "name":             ticker,
             "sector":           fund.get("sector",""),
@@ -514,7 +509,6 @@ def score_stock(ticker, df, live_price=None, fund=None):
             "rsi":              None,
             "momentum_1m":      mom1m,
             "momentum_3m":      mom3m,
-            "timeframe":        "short" if (days_earn and 0<days_earn<=14) or (vr>=3) else "mid" if pre or bull_flag else "long",
         }
     except Exception as e:
         log.debug(f"score_stock {ticker}: {e}")
@@ -645,6 +639,7 @@ while True:
         scan_time = now_et.strftime("%Y-%m-%d %H:%M:%S ET")
 
         push_results(results, sess, scan_time, elapsed)
+        log_scan_results(results, sess)
         log.info("Next scan in 60s...")
         time.sleep(60)
 
