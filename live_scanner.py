@@ -580,10 +580,10 @@ def push_results(results, sess, scan_time, elapsed):
     # Also push all scored stocks so dashboard filters work across full universe
     # Send as a dict keyed by ticker for fast lookup
     try:
-        all_stocks = {{r["ticker"]: r for r in results[:200]}}  # top 200 by score
+        all_stocks = {r["ticker"]: r for r in results[:200]}  # top 200 by score
         ref.child("all_stocks").set(all_stocks)
     except Exception as e:
-        log.debug(f"all_stocks push failed: {{e}}")
+        log.debug(f"all_stocks push failed: {e}")
 
     log.info(f"Pushed: top10={{top10_tickers}} | READY={{payload['ready_count']}} | [{{sess}}] | {{elapsed}}s")
 
@@ -638,7 +638,8 @@ while True:
         elapsed   = round(time.time()-t0, 1)
         scan_time = now_et.strftime("%Y-%m-%d %H:%M:%S ET")
 
-        push_results(results, sess, scan_time, elapsed)
+        if results:
+            push_results(results, sess, scan_time, elapsed)
         log_scan_results(results, sess)
         log.info("Next scan in 60s...")
         time.sleep(60)
