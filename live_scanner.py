@@ -585,7 +585,7 @@ def push_results(results, sess, scan_time, elapsed):
     except Exception as e:
         log.debug(f"all_stocks push failed: {e}")
 
-    log.info(f"Pushed: top10={{top10_tickers}} | READY={{payload['ready_count']}} | [{{sess}}] | {{elapsed}}s")
+    log.info(f"Pushed: top10={top10_tickers} | READY={payload['ready_count']} | [{sess}] | {elapsed}s")
 
 # ── Session helper ────────────────────────────────────────────────────────────
 def get_session():
