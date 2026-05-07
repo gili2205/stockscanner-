@@ -42,7 +42,7 @@ from factors.breakout_level import classify_breakout_level
 from factors.weekly import score_weekly_confluence
 from factors.bull_flag import detect_bull_flag, score_bull_flag
 from factors.pattern import score_pattern_quality
-from ranking import rank_stocks, quality_gate, assign_rs_percentiles
+from ranking import rank_stocks, quality_gate, assign_rs_percentiles, _get_status
 from dashboard import render_dashboard
 
 
@@ -108,6 +108,7 @@ def analyze_stock(ticker: str, df: pd.DataFrame, benchmark_df: pd.DataFrame) -> 
             "candle_quality": consolidation["candle_quality"],
             "rs_percentile": rs["percentile"],
             "rs_direction": rs["direction"],
+            "raw_rs": rs["raw_rs"],
             "catalyst_tier": catalyst["tier"],
             "catalyst_freshness": catalyst["freshness"],
             "breakout_level": breakout_level,
