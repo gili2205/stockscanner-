@@ -1525,7 +1525,7 @@ function showEmpty(msg) {{
 
 @app.route('/analytics')
 def analytics():
-    return ANALYTICS_HTML.format(cfg=json.dumps(FIREBASE_CONFIG))
+    return ANALYTICS_HTML.replace('{cfg}', json.dumps(FIREBASE_CONFIG))
 
 def _unused_analytics_old():
     cfg = json.dumps(FIREBASE_CONFIG)
