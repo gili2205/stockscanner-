@@ -21,6 +21,19 @@ import os, sys, time, json, logging, argparse
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import pytz
+
+# Load .env automatically so the script works from any shell without
+# needing to manually source it first. Checks script dir, then /home/scanner/.
+def _load_dotenv():
+    for candidate in [Path(__file__).parent / ".env", Path("/home/scanner/.env")]:
+        if candidate.exists():
+            for line in candidate.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            return
+_load_dotenv()
 import pandas as pd
 import numpy as np
 import yfinance as yf
