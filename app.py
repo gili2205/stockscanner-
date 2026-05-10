@@ -1741,24 +1741,38 @@ var sortAsc  = false;
 var page     = 0;
 var pageSize = 50;
 
-async function loadData() {
+function loadData() {
   document.getElementById('loading').style.display = 'block';
   document.getElementById('content').style.display = 'none';
 
-  try {
-    const resp = await fetch('/api/analytics');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    allPicks = await resp.json();
+  fdb.ref('scanner/history').once('value', function(snap) {
+    var data = snap.val();
+    if (!data) {
+      document.getElementById('loading').innerHTML =
+        '<div class="error">No historical data yet. Run the backtest on the VM.</div>';
+      return;
+    }
+    allPicks = [];
+    Object.keys(data).sort().forEach(function(date) {
+      var day = data[date];
+      if (!day || typeof day !== 'object') return;
+      Object.keys(day).forEach(function(ticker) {
+        var r = day[ticker];
+        if (r && r.price_at_scan) {
+          allPicks.push(Object.assign({scan_date: date}, r));
+        }
+      });
+    });
     document.getElementById('data-info').textContent =
       allPicks.length + ' picks loaded from ' +
-      new Set(allPicks.map(p=>p.scan_date)).size + ' scan days';
+      new Set(allPicks.map(function(p) { return p.scan_date; })).size + ' scan days';
     render();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
-  } catch(e) {
+  }, function(err) {
     document.getElementById('loading').innerHTML =
-      '<div class="error">Failed to load: ' + e.message + '</div>';
-  }
+      '<div class="error">Firebase error: ' + err.message + '</div>';
+  });
 }
 
 function getFiltered() {
