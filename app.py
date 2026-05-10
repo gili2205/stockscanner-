@@ -981,7 +981,8 @@ def lookup():
 
 @app.route('/analytics')
 def analytics():
-    return ANALYTICS_HTML.replace('{cfg}', json.dumps(FIREBASE_CONFIG))
+    cfg_tag = '<script id="fb-cfg" type="application/json">' + json.dumps(FIREBASE_CONFIG) + '</script>'
+    return ANALYTICS_HTML.replace('<!--FB_CONFIG-->', cfg_tag)
 
 
 ANALYTICS_HTML = """<!DOCTYPE html>
@@ -1064,11 +1065,11 @@ select,input[type=number]{background:var(--bg3);color:var(--text);border:1px sol
 .pg button{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:3px 10px;cursor:pointer;font-size:11px;}
 .pg button:disabled{opacity:.4;cursor:default;}
 </style>
-<!-- Firebase -->
+<!--FB_CONFIG-->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
-var CFG = {cfg};
+var CFG = JSON.parse(document.getElementById('fb-cfg').textContent);
 try { firebase.initializeApp(CFG); } catch(e) {}
 var fdb = firebase.database();
 </script>
