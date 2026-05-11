@@ -1,3 +1,4 @@
+import os
 import json
 import requests
 import yfinance as yf
@@ -7,15 +8,29 @@ app = Flask(__name__)
 
 VERSION = "v2.5.2"
 
-FIREBASE_CONFIG = {
-    "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
-    "authDomain": "stockscanner-f9f81.firebaseapp.com",
-    "databaseURL": "https://stockscanner-f9f81-default-rtdb.firebaseio.com",
-    "projectId": "stockscanner-f9f81",
-    "storageBucket": "stockscanner-f9f81.firebasestorage.app",
-    "messagingSenderId": "1066582982090",
-    "appId": "1:1066582982090:web:359e1c670b8c3ca8222333"
+FIREBASE_CONFIGS = {
+    "production": {
+        "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
+        "authDomain": "stockscanner-f9f81.firebaseapp.com",
+        "databaseURL": "https://stockscanner-f9f81-default-rtdb.firebaseio.com",
+        "projectId": "stockscanner-f9f81",
+        "storageBucket": "stockscanner-f9f81.firebasestorage.app",
+        "messagingSenderId": "1066582982090",
+        "appId": "1:1066582982090:web:359e1c670b8c3ca8222333"
+    },
+    "staging": {
+        "apiKey": "AIzaSyA-zd6GX6QB_-q0x2HvVUSdYVsjtNqcuTk",
+        "authDomain": "stockscanner-staging.firebaseapp.com",
+        "databaseURL": "https://stockscanner-staging-default-rtdb.firebaseio.com",
+        "projectId": "stockscanner-staging",
+        "storageBucket": "stockscanner-staging.firebasestorage.app",
+        "messagingSenderId": "342956679780",
+        "appId": "1:342956679780:web:573fc062c897cbb3e8b571"
+    }
 }
+
+FLASK_ENV = os.environ.get("FLASK_ENV", "production")
+FIREBASE_CONFIG = FIREBASE_CONFIGS.get(FLASK_ENV, FIREBASE_CONFIGS["production"])
 
 HTML = """<!DOCTYPE html>
 <html lang="en">
