@@ -1154,13 +1154,17 @@ var fdb = firebase.database();
 
     <!-- Per-pick detail table -->
     <div class="section">
-      <h2>📋 All Picks
+      <h2>📋 First Flagged Stocks
         <span id="picks-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
       </h2>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:14px;">
+        Each stock shown once — from the <strong style="color:var(--text)">first time the scanner flagged it</strong>.
+        Returns measured from that entry date.
+      </p>
       <table class="picks-table">
         <thead>
           <tr>
-            <th onclick="sortBy('scan_date')">Date ↕</th>
+            <th onclick="sortBy('scan_date')">First Flagged ↕</th>
             <th onclick="sortBy('ticker')">Ticker ↕</th>
             <th onclick="sortBy('price_at_scan')">Entry $</th>
             <th onclick="sortBy('score')">Score ↕</th>
@@ -1170,6 +1174,7 @@ var fdb = firebase.database();
             <th onclick="sortBy('vol_contraction')">Vol dry</th>
             <th onclick="sortBy('atr')">ATR</th>
             <th>Level</th>
+            <th onclick="sortBy('days_on_list')">Days on list ↕</th>
             <th onclick="sortBy('ret_1w')">1W</th>
             <th onclick="sortBy('ret_1m')">1M</th>
             <th onclick="sortBy('ret_3m')">3M</th>
@@ -1206,20 +1211,39 @@ function loadData() {
         '<div class="error">No historical data yet. Run the backtest on the VM.</div>';
       return;
     }
-    allPicks = [];
+    // Build flat list of all picks across all days
+    var rawPicks = [];
     Object.keys(data).sort().forEach(function(date) {
       var day = data[date];
       if (!day || typeof day !== 'object') return;
       Object.keys(day).forEach(function(ticker) {
         var r = day[ticker];
         if (r && r.price_at_scan) {
-          allPicks.push(Object.assign({scan_date: date}, r));
+          rawPicks.push(Object.assign({}, r, {scan_date: date}));
         }
       });
     });
+
+    // Count how many scan days each ticker appeared on
+    var daysCount = {};
+    rawPicks.forEach(function(p) {
+      daysCount[p.ticker] = (daysCount[p.ticker] || 0) + 1;
+    });
+
+    // Keep only the FIRST time each ticker was flagged (earliest scan_date)
+    var firstMap = {};
+    rawPicks.forEach(function(p) {
+      if (!firstMap[p.ticker] || p.scan_date < firstMap[p.ticker].scan_date) {
+        firstMap[p.ticker] = p;
+      }
+    });
+    allPicks = Object.values(firstMap).map(function(p) {
+      return Object.assign({}, p, {days_on_list: daysCount[p.ticker] || 1});
+    });
+
+    var nDays = new Set(rawPicks.map(function(p) { return p.scan_date; })).size;
     document.getElementById('data-info').textContent =
-      allPicks.length + ' picks loaded from ' +
-      new Set(allPicks.map(function(p) { return p.scan_date; })).size + ' scan days';
+      allPicks.length + ' unique stocks · first flagged across ' + nDays + ' scan days';
     render();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
@@ -1409,6 +1433,8 @@ function renderPicks(tf) {
     var ret1m = p.returns&&p.returns['1m']!=null ? p.returns['1m'] : null;
     var ret3m = p.returns&&p.returns['3m']!=null ? p.returns['3m'] : null;
     var setup = p.pre_breakout?'Pre-brkout':p.bull_flag?'Bull flag':'Breakout';
+    var dol   = p.days_on_list || 1;
+    var dolColor = dol >= 5 ? 'var(--green)' : dol >= 3 ? 'var(--amber)' : 'var(--muted)';
     html += '<tr>'
       +'<td>'+p.scan_date+'</td>'
       +'<td><strong>'+p.ticker+'</strong></td>'
@@ -1420,6 +1446,7 @@ function renderPicks(tf) {
       +'<td>'+(p.vol_contraction!=null?Math.round(p.vol_contraction*100)+'%':'—')+'</td>'
       +'<td>'+(p.atr!=null?p.atr.toFixed(2):'—')+'</td>'
       +'<td>'+(p.level||'—')+'</td>'
+      +'<td style="color:'+dolColor+';font-weight:600">'+dol+'d</td>'
       +'<td class="'+(ret1w==null?'ret-na':ret1w>=0?'ret-pos':'ret-neg')+'">'+(ret1w==null?'—':fmtRet(ret1w))+'</td>'
       +'<td class="'+(ret1m==null?'ret-na':ret1m>=0?'ret-pos':'ret-neg')+'">'+(ret1m==null?'—':fmtRet(ret1m))+'</td>'
       +'<td class="'+(ret3m==null?'ret-na':ret3m>=0?'ret-pos':'ret-neg')+'">'+(ret3m==null?'—':fmtRet(ret3m))+'</td>'
