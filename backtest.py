@@ -127,7 +127,7 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
     # 120-second deadline. Unlike ThreadPoolExecutor, process.terminate() actually
     # kills the stuck yf.download() call instead of waiting for it to finish.
     result = {}
-    batch_size = 200
+    batch_size = 50   # smaller batches complete in ~15-20s, much less likely to timeout
     batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
 
     for i, batch in enumerate(batches):
