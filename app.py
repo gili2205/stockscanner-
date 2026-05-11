@@ -1062,6 +1062,11 @@ select,input[type=number]{background:var(--bg3);color:var(--text);border:1px sol
 .signal-bar-val{font-size:11px;font-weight:600;width:40px;text-align:right;flex-shrink:0;}
 .signal-diff{font-size:11px;color:var(--muted);margin-top:4px;}
 
+/* Sort buttons */
+.sort-btn{background:var(--bg3);color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.sort-btn:hover{border-color:var(--blue);color:var(--text);}
+.sort-btn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+
 /* Picks table */
 .picks-table{width:100%;border-collapse:collapse;font-size:12px;}
 .picks-table th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;}
@@ -1136,8 +1141,23 @@ var fdb = firebase.database();
           <option value="bull_flag">Bull flag</option>
         </select>
       </div>
+      <div class="ctrl-group">
+        <label>Search</label>
+        <input type="text" id="ticker-search" placeholder="e.g. NVDA" style="width:90px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();page=0;render()">
+      </div>
       <button class="btn" onclick="loadData()">🔄 Refresh</button>
       <span id="data-info" style="font-size:11px;color:var(--muted)"></span>
+    </div>
+
+    <!-- Sort bar -->
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Sort:</span>
+      <button class="sort-btn active" id="sort-btn-date"    onclick="setSort('scan_date')">📅 Date</button>
+      <button class="sort-btn"        id="sort-btn-abc"     onclick="setSort('ticker_asc')">🔤 A–Z</button>
+      <button class="sort-btn"        id="sort-btn-score"   onclick="setSort('score')">⭐ Score</button>
+      <button class="sort-btn"        id="sort-btn-ret1w"   onclick="setSort('ret_1w')">1W Return</button>
+      <button class="sort-btn"        id="sort-btn-ret1m"   onclick="setSort('ret_1m')">1M Return</button>
+      <button class="sort-btn"        id="sort-btn-ret3m"   onclick="setSort('ret_3m')">3M Return</button>
     </div>
 
     <!-- KPI row -->
@@ -1342,32 +1362,54 @@ function loadData() {
 }
 
 function getFiltered() {
-  var tf        = document.getElementById('tf-select').value;
-  var status    = document.getElementById('status-filter').value;
-  var minScore  = parseInt(document.getElementById('min-score').value) || 0;
-  var setup     = document.getElementById('setup-filter').value;
+  var status   = document.getElementById('status-filter').value;
+  var minScore = parseInt(document.getElementById('min-score').value) || 0;
+  var setup    = document.getElementById('setup-filter').value;
+  var search   = (document.getElementById('ticker-search').value || '').trim().toUpperCase();
 
   return allPicks.filter(function(p) {
     if (status !== 'all' && p.status !== status) return false;
     if (p.score < minScore) return false;
     if (setup === 'pre_breakout' && !p.pre_breakout) return false;
     if (setup === 'bull_flag'    && !p.bull_flag)    return false;
+    if (search && p.ticker.indexOf(search) === -1)   return false;
     return true;
   });
 }
 
+function setSort(col) {
+  sortCol = col;
+  sortAsc = (col === 'ticker_asc');  // A-Z is ascending, everything else descending
+  // Update button styles
+  var btns = ['date','abc','score','ret1w','ret1m','ret3m'];
+  var map  = {scan_date:'date', ticker_asc:'abc', score:'score', ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m'};
+  btns.forEach(function(b) { document.getElementById('sort-btn-'+b).classList.remove('active'); });
+  var active = map[col];
+  if (active) document.getElementById('sort-btn-'+active).classList.add('active');
+  page = 0;
+  render();
+}
+
 function render() {
-  var tf   = document.getElementById('tf-select').value;
+  var tf = document.getElementById('tf-select').value;
   filtered = getFiltered();
   filtered.sort(function(a,b) {
-    var va = a[sortCol] != null ? a[sortCol] : (sortAsc ? Infinity : -Infinity);
-    var vb = b[sortCol] != null ? b[sortCol] : (sortAsc ? Infinity : -Infinity);
+    // A-Z sort
+    if (sortCol === 'ticker_asc') {
+      return a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0;
+    }
+    // Return sorts
     if (sortCol.startsWith('ret_')) {
       var key = sortCol.replace('ret_','');
-      va = a.returns && a.returns[key] != null ? a.returns[key] : (sortAsc?Infinity:-Infinity);
-      vb = b.returns && b.returns[key] != null ? b.returns[key] : (sortAsc?Infinity:-Infinity);
+      var va = a.returns && a.returns[key] != null ? a.returns[key] : -Infinity;
+      var vb = b.returns && b.returns[key] != null ? b.returns[key] : -Infinity;
+      return vb - va;  // highest first
     }
-    return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+    // Standard sorts (highest first)
+    var va = a[sortCol] != null ? a[sortCol] : -Infinity;
+    var vb = b[sortCol] != null ? b[sortCol] : -Infinity;
+    if (sortCol === 'scan_date') return va < vb ? 1 : va > vb ? -1 : 0;  // newest first
+    return vb - va;
   });
 
   renderKPIs(tf);
