@@ -18,6 +18,7 @@ Strategy:
 """
 
 import os, sys, time, json, logging, argparse
+import concurrent.futures
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import pytz
@@ -101,42 +102,62 @@ def get_universe():
 
 
 # ── Price download ─────────────────────────────────────────────────────────────
+def _download_one_batch(batch, start_str, end_str):
+    """Run yf.download for one batch — called inside a thread so we can time it out."""
+    return yf.download(
+        batch, start=start_str, end=end_str,
+        auto_adjust=True, progress=False, threads=True
+    )
+
+
 def download_prices(tickers: list, start: date, end: date) -> dict:
     """Download OHLCV for all tickers. Returns {ticker: DataFrame}."""
     log.info(f"Downloading price data for {len(tickers)} tickers: {start} to {end}...")
-    
-    # Download in batches of 200 to avoid yfinance timeouts
+
+    start_str = str(start - timedelta(days=90))
+    end_str   = str(end   + timedelta(days=5))
+
+    # Download in batches of 200 to avoid yfinance memory/timeout issues.
+    # Each batch runs in its own thread with a hard 120-second wall-clock timeout
+    # so a frozen batch never stalls the whole run.
     result = {}
     batch_size = 200
     batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
-    
+
     for i, batch in enumerate(batches):
         log.info(f"  Batch {i+1}/{len(batches)} ({len(batch)} tickers)...")
-        try:
-            raw = yf.download(
-                batch, start=str(start - timedelta(days=90)), end=str(end + timedelta(days=5)),
-                auto_adjust=True, progress=False, threads=True, timeout=60
-            )
-            if raw.empty:
-                continue
+        raw = None
+        for attempt in range(1, 4):          # up to 3 attempts per batch
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    future = ex.submit(_download_one_batch, batch, start_str, end_str)
+                    raw = future.result(timeout=120)   # hard 120-second deadline
+                break                                  # success → stop retrying
+            except concurrent.futures.TimeoutError:
+                log.warning(f"  Batch {i+1} attempt {attempt} timed out, retrying…")
+            except Exception as e:
+                log.warning(f"  Batch {i+1} attempt {attempt} error: {e}, retrying…")
+            time.sleep(3)
 
-            if isinstance(raw.columns, pd.MultiIndex):
-                for ticker in batch:
-                    try:
-                        df = raw.xs(ticker, level=1, axis=1).dropna(how="all")
-                        if len(df) >= 30:
-                            result[ticker] = df
-                    except Exception:
-                        pass
-            else:
-                # Single ticker
-                if len(raw) >= 30:
-                    result[batch[0]] = raw
+        if raw is None or (hasattr(raw, 'empty') and raw.empty):
+            log.warning(f"  Batch {i+1} gave no data after 3 attempts, skipping")
+            time.sleep(2)
+            continue
 
-        except Exception as e:
-            log.warning(f"Batch {i+1} failed: {e}")
-        
-        time.sleep(1)  # Rate limit
+        if isinstance(raw.columns, pd.MultiIndex):
+            for ticker in batch:
+                try:
+                    df = raw.xs(ticker, level=1, axis=1).dropna(how="all")
+                    if len(df) >= 30:
+                        result[ticker] = df
+                except Exception:
+                    pass
+        else:
+            # Single ticker returned
+            if len(raw) >= 30:
+                result[batch[0]] = raw
+
+        time.sleep(1)  # polite rate-limit between batches
 
     log.info(f"Downloaded {len(result)} tickers with sufficient history")
     return result
