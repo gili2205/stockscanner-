@@ -1141,23 +1141,8 @@ var fdb = firebase.database();
           <option value="bull_flag">Bull flag</option>
         </select>
       </div>
-      <div class="ctrl-group">
-        <label>Search</label>
-        <input type="text" id="ticker-search" placeholder="e.g. NVDA" style="width:90px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();page=0;render()">
-      </div>
       <button class="btn" onclick="loadData()">🔄 Refresh</button>
       <span id="data-info" style="font-size:11px;color:var(--muted)"></span>
-    </div>
-
-    <!-- Sort bar -->
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;flex-wrap:wrap;">
-      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Sort:</span>
-      <button class="sort-btn active" id="sort-btn-date"    onclick="setSort('scan_date')">📅 Date</button>
-      <button class="sort-btn"        id="sort-btn-abc"     onclick="setSort('ticker_asc')">🔤 A–Z</button>
-      <button class="sort-btn"        id="sort-btn-score"   onclick="setSort('score')">⭐ Score</button>
-      <button class="sort-btn"        id="sort-btn-ret1w"   onclick="setSort('ret_1w')">1W Return</button>
-      <button class="sort-btn"        id="sort-btn-ret1m"   onclick="setSort('ret_1m')">1M Return</button>
-      <button class="sort-btn"        id="sort-btn-ret3m"   onclick="setSort('ret_3m')">3M Return</button>
     </div>
 
     <!-- KPI row -->
@@ -1196,6 +1181,19 @@ var fdb = firebase.database();
         Each stock shown once — from the <strong style="color:var(--text)">first time the scanner flagged it</strong>.
         Returns measured from that entry date.
       </p>
+      <!-- Table sort + search -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Sort:</span>
+        <button class="sort-btn active" id="sort-btn-date"  onclick="setSort('scan_date')">📅 Date</button>
+        <button class="sort-btn"        id="sort-btn-abc"   onclick="setSort('ticker_asc')">🔤 A–Z</button>
+        <button class="sort-btn"        id="sort-btn-score" onclick="setSort('score')">⭐ Score</button>
+        <button class="sort-btn"        id="sort-btn-ret1w" onclick="setSort('ret_1w')">1W Return</button>
+        <button class="sort-btn"        id="sort-btn-ret1m" onclick="setSort('ret_1m')">1M Return</button>
+        <button class="sort-btn"        id="sort-btn-ret3m" onclick="setSort('ret_3m')">3M Return</button>
+        <div style="margin-left:auto;">
+          <input type="text" id="ticker-search" placeholder="🔍 Search ticker…" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;outline:none;width:150px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();page=0;render()">
+        </div>
+      </div>
       <table class="picks-table">
         <thead>
           <tr>
