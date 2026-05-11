@@ -135,7 +135,11 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
         raw = None
         for attempt in range(1, 4):          # up to 3 attempts per batch
             try:
-                ctx   = multiprocessing.get_context("spawn")
+                # Use "fork" on Linux (default) — inherits parent env/imports so the
+                # child doesn't re-run firebase_admin.initialize_app() and crash.
+                # "spawn" (macOS/Windows default) caused child crashes → empty queue →
+                # silent 0-ticker results.
+                ctx   = multiprocessing.get_context("fork")
                 queue = ctx.Queue()
                 proc  = ctx.Process(target=_download_worker,
                                     args=(queue, batch, start_str, end_str))
@@ -145,11 +149,12 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
                     proc.terminate()
                     proc.join()
                     raise concurrent.futures.TimeoutError()
-                if not queue.empty():
-                    val = queue.get_nowait()
-                    if isinstance(val, Exception):
-                        raise val
-                    raw = val
+                if queue.empty():
+                    raise RuntimeError("worker process exited with empty queue (crashed)")
+                val = queue.get_nowait()
+                if isinstance(val, Exception):
+                    raise val
+                raw = val
                 break                         # success → stop retrying
             except concurrent.futures.TimeoutError:
                 log.warning(f"  Batch {i+1} attempt {attempt} timed out, retrying…")
