@@ -19,7 +19,6 @@ Strategy:
 
 import os, sys, time, json, logging, argparse
 import concurrent.futures
-import multiprocessing
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import pytz
@@ -103,17 +102,12 @@ def get_universe():
 
 
 # ── Price download ─────────────────────────────────────────────────────────────
-def _download_worker(queue, batch, start_str, end_str):
-    """Worker function run in a separate process to download one batch."""
-    try:
-        import yfinance as yf
-        result = yf.download(
-            batch, start=start_str, end=end_str,
-            auto_adjust=True, progress=False, threads=True
-        )
-        queue.put(result)
-    except Exception as e:
-        queue.put(e)
+def _download_one_batch(batch, start_str, end_str):
+    """Run yf.download for one batch — called inside a thread so we can time it out."""
+    return yf.download(
+        batch, start=start_str, end=end_str,
+        auto_adjust=True, progress=False, threads=True
+    )
 
 
 def download_prices(tickers: list, start: date, end: date) -> dict:
@@ -123,9 +117,9 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
     start_str = str(start - timedelta(days=90))
     end_str   = str(end   + timedelta(days=5))
 
-    # Download in batches of 200. Each batch runs in a subprocess with a hard
-    # 120-second deadline. Unlike ThreadPoolExecutor, process.terminate() actually
-    # kills the stuck yf.download() call instead of waiting for it to finish.
+    # Download in batches of 200 to avoid yfinance memory/timeout issues.
+    # Each batch runs in its own thread with a hard 120-second wall-clock timeout
+    # so a frozen batch never stalls the whole run.
     result = {}
     batch_size = 200
     batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
@@ -135,27 +129,10 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
         raw = None
         for attempt in range(1, 4):          # up to 3 attempts per batch
             try:
-                # Use "fork" on Linux (default) — inherits parent env/imports so the
-                # child doesn't re-run firebase_admin.initialize_app() and crash.
-                # "spawn" (macOS/Windows default) caused child crashes → empty queue →
-                # silent 0-ticker results.
-                ctx   = multiprocessing.get_context("fork")
-                queue = ctx.Queue()
-                proc  = ctx.Process(target=_download_worker,
-                                    args=(queue, batch, start_str, end_str))
-                proc.start()
-                proc.join(timeout=120)        # hard 120-second wall-clock deadline
-                if proc.is_alive():
-                    proc.terminate()
-                    proc.join()
-                    raise concurrent.futures.TimeoutError()
-                if queue.empty():
-                    raise RuntimeError("worker process exited with empty queue (crashed)")
-                val = queue.get_nowait()
-                if isinstance(val, Exception):
-                    raise val
-                raw = val
-                break                         # success → stop retrying
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    future = ex.submit(_download_one_batch, batch, start_str, end_str)
+                    raw = future.result(timeout=120)   # hard 120-second deadline
+                break                                  # success → stop retrying
             except concurrent.futures.TimeoutError:
                 log.warning(f"  Batch {i+1} attempt {attempt} timed out, retrying…")
             except Exception as e:
