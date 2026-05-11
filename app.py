@@ -1215,10 +1215,63 @@ var sortAsc  = false;
 var page     = 0;
 var pageSize = 50;
 
+var CACHE_KEY     = 'scanner_analytics_v1';
+var CACHE_TS_KEY  = 'scanner_analytics_ts_v1';
+var CACHE_DAYS_KEY= 'scanner_analytics_days_v1';
+
+function getCached() {
+  try {
+    var raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+
+function setCached(picks, knownDays) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(picks));
+    localStorage.setItem(CACHE_TS_KEY, Date.now().toString());
+    localStorage.setItem(CACHE_DAYS_KEY, JSON.stringify(knownDays));
+  } catch(e) {}
+}
+
+function getCachedDays() {
+  try {
+    var raw = localStorage.getItem(CACHE_DAYS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
+function buildPicks(rawPicks) {
+  var daysCount = {};
+  rawPicks.forEach(function(p) {
+    daysCount[p.ticker] = (daysCount[p.ticker] || 0) + 1;
+  });
+  var firstMap = {};
+  rawPicks.forEach(function(p) {
+    if (!firstMap[p.ticker] || p.scan_date < firstMap[p.ticker].scan_date) {
+      firstMap[p.ticker] = p;
+    }
+  });
+  return Object.values(firstMap).map(function(p) {
+    return Object.assign({}, p, {days_on_list: daysCount[p.ticker] || 1});
+  });
+}
+
+function processAndRender(rawPicks, nDays) {
+  allPicks = buildPicks(rawPicks);
+  document.getElementById('data-info').textContent =
+    allPicks.length + ' unique stocks · first flagged across ' + nDays + ' scan days';
+  render();
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+}
+
 function loadData() {
   document.getElementById('loading').style.display = 'block';
+  document.getElementById('loading').innerHTML = '⏳ Loading historical data...';
   document.getElementById('content').style.display = 'none';
 
+  // Step 1: get list of available dates (shallow fetch — very fast)
   fdb.ref('scanner/history').once('value', function(snap) {
     var data = snap.val();
     if (!data) {
@@ -1226,42 +1279,62 @@ function loadData() {
         '<div class="error">No historical data yet. Run the backtest on the VM.</div>';
       return;
     }
-    // Build flat list of all picks across all days
+
+    var allDates   = Object.keys(data).sort();
+    var cachedDays = getCachedDays();
+    var cachedPicks= getCached() || [];
+    var newDates   = allDates.filter(function(d) { return cachedDays.indexOf(d) === -1; });
+
+    if (newDates.length === 0) {
+      // Everything is cached — instant load
+      document.getElementById('data-info').textContent =
+        'Loaded from cache · ' + cachedPicks.length + ' unique stocks · ' + allDates.length + ' scan days';
+      allPicks = cachedPicks;
+      render();
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      return;
+    }
+
+    // Step 2: fetch only missing dates
+    document.getElementById('loading').innerHTML =
+      '⏳ Fetching ' + newDates.length + ' new scan day' + (newDates.length > 1 ? 's' : '') + '…';
+
+    // Build raw picks from cached + new data
     var rawPicks = [];
-    Object.keys(data).sort().forEach(function(date) {
-      var day = data[date];
-      if (!day || typeof day !== 'object') return;
-      Object.keys(day).forEach(function(ticker) {
-        var r = day[ticker];
-        if (r && r.price_at_scan) {
-          rawPicks.push(Object.assign({}, r, {scan_date: date}));
-        }
-      });
-    });
 
-    // Count how many scan days each ticker appeared on
-    var daysCount = {};
-    rawPicks.forEach(function(p) {
-      daysCount[p.ticker] = (daysCount[p.ticker] || 0) + 1;
-    });
-
-    // Keep only the FIRST time each ticker was flagged (earliest scan_date)
-    var firstMap = {};
-    rawPicks.forEach(function(p) {
-      if (!firstMap[p.ticker] || p.scan_date < firstMap[p.ticker].scan_date) {
-        firstMap[p.ticker] = p;
+    // Restore cached raw picks (we keep them as allPicks so rebuild from stored picks)
+    // Expand stored first-seen picks back to rawPicks format
+    cachedPicks.forEach(function(p) {
+      for (var i = 0; i < (p.days_on_list || 1); i++) {
+        rawPicks.push(p);
       }
     });
-    allPicks = Object.values(firstMap).map(function(p) {
-      return Object.assign({}, p, {days_on_list: daysCount[p.ticker] || 1});
+
+    var pending = newDates.length;
+    if (pending === 0) {
+      processAndRender(rawPicks, allDates.length);
+      setCached(buildPicks(rawPicks), allDates);
+      return;
+    }
+
+    newDates.forEach(function(date) {
+      var dayData = data[date];
+      if (dayData && typeof dayData === 'object') {
+        Object.keys(dayData).forEach(function(ticker) {
+          var r = dayData[ticker];
+          if (r && r.price_at_scan) {
+            rawPicks.push(Object.assign({}, r, {scan_date: date}));
+          }
+        });
+      }
+      pending--;
+      if (pending === 0) {
+        processAndRender(rawPicks, allDates.length);
+        setCached(buildPicks(rawPicks), allDates);
+      }
     });
 
-    var nDays = new Set(rawPicks.map(function(p) { return p.scan_date; })).size;
-    document.getElementById('data-info').textContent =
-      allPicks.length + ' unique stocks · first flagged across ' + nDays + ' scan days';
-    render();
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('content').style.display = 'block';
   }, function(err) {
     document.getElementById('loading').innerHTML =
       '<div class="error">Firebase error: ' + err.message + '</div>';
