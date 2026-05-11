@@ -588,7 +588,7 @@ def push_results(results, sess, scan_time, elapsed):
         "scan_duration_sec":  elapsed,
         "scanner_version":    "v2.0.2",
     }
-    ref.set(payload)
+    ref.update(payload)
 
     # Also push all scored stocks so dashboard filters work across full universe
     # Send as a dict keyed by ticker for fast lookup
