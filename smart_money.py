@@ -397,12 +397,13 @@ def parse_13f_holdings(filing):
         root = ET.fromstring(r.content)
 
         def _val(elem, tag):
-            """Get text from a child element, namespace-agnostic."""
-            for found in (elem.find(f".//*[local-name()='{tag}']"),
-                          elem.find(f".//{{{chr(42)}}}{tag}"),
-                          elem.find(f".//{tag}")):
-                if found is not None and found.text:
-                    return found.text.strip()
+            """Get text from a child element, namespace-agnostic.
+            Uses {*} wildcard (Python 3.8+) to match any namespace."""
+            found = elem.find(f".//{{{chr(42)}}}{tag}")   # {*}tag — any namespace
+            if found is None:
+                found = elem.find(f".//{tag}")             # fallback: no namespace
+            if found is not None and found.text:
+                return found.text.strip()
             return None
 
         holdings = []
