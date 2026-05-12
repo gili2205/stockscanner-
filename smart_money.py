@@ -399,12 +399,14 @@ def parse_13f_holdings(filing):
         return []
 
     try:
-        # Strip namespace for easier parsing
-        content = r.text
-        # Remove namespace declarations for simpler parsing
+        # Strip namespaces for easier parsing
         import re
-        content = re.sub(r'\s+xmlns[^"]*"[^"]*"', '', content)
+        content = r.text
         content = re.sub(r'<\?xml[^?]*\?>', '', content)
+        # Remove xmlns declarations (both default and prefixed)
+        content = re.sub(r'\s+xmlns(?::\w+)?="[^"]*"', '', content)
+        # Remove namespace prefixes from element tags: <ns1:tag> → <tag>, </ns1:tag> → </tag>
+        content = re.sub(r'<(/?)\w+:(\w)', r'<\1\2', content)
         root = ET.fromstring(content)
 
         holdings = []
