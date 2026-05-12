@@ -123,11 +123,11 @@ def get_recent_form4_filings(days_back=14):
         filings = []
         for hit in hits[:MAX_INSIDER_FILINGS]:
             src = hit.get("_source", {})
-            accession = src.get("accession_no", "")
+            accession = src.get("adsh", "")          # field is "adsh", not "accession_no"
             if accession:
                 filings.append({
                     "accession": accession,
-                    "entity":    src.get("entity_name", ""),
+                    "entity":    src.get("display_names", ""),  # field is "display_names"
                     "file_date": src.get("file_date", ""),
                 })
         log.info(f"Found {len(filings)} Form 4 filings")
@@ -296,14 +296,17 @@ def get_latest_13f(cik, fund_name):
         accessions = filings.get("accessionNumber", [])
         dates   = filings.get("filingDate", [])
 
+        primary_docs = filings.get("primaryDocument", [])
+
         # Find most recent 13F-HR
         for i, form in enumerate(forms):
             if form in ("13F-HR", "13F-HR/A"):
                 return {
-                    "cik":       cik,
-                    "fund":      fund_name,
-                    "accession": accessions[i],
-                    "filed":     dates[i],
+                    "cik":             cik,
+                    "fund":            fund_name,
+                    "accession":       accessions[i],
+                    "filed":           dates[i],
+                    "primary_doc":     primary_docs[i] if i < len(primary_docs) else "",
                 }
         log.warning(f"No 13F-HR found for {fund_name}")
         return None
@@ -349,36 +352,42 @@ def parse_13f_holdings(filing):
     cik = filing["cik"]
     accession = filing["accession"]
     accession_clean = accession.replace("-", "")
+    primary_doc = filing.get("primary_doc", "")
 
-    # Get filing index to find the infotable XML
-    index_url = (
-        f"https://www.sec.gov/Archives/edgar/data/{cik}/"
-        f"{accession_clean}/{accession}-index.json"
-    )
-    r = sec_get(index_url)
-    if not r:
-        return []
+    # Strategy: try primaryDocument first (most reliable), then fall back to index
+    info_file = None
 
-    try:
-        idx = r.json()
-        # Find the information table XML
-        info_file = None
-        for doc in idx.get("documents", []):
-            name = doc.get("document", "").lower()
-            doc_type = doc.get("type", "").lower()
-            if "infotable" in name or "information" in name or doc_type == "13f-hr":
-                if name.endswith(".xml"):
-                    info_file = doc["document"]
-                    break
-        if not info_file:
-            # Try finding any XML that's not the primary doc
-            for doc in idx.get("documents", []):
-                if doc.get("document", "").endswith(".xml") and doc.get("type") != "13F-HR":
-                    info_file = doc["document"]
-                    break
-        if not info_file:
-            return []
-    except Exception:
+    # Try 1: use primaryDocument from submissions API
+    if primary_doc and primary_doc.endswith(".xml"):
+        info_file = primary_doc
+
+    # Try 2: fetch the filing index to find the infotable XML
+    if not info_file:
+        index_url = (
+            f"https://www.sec.gov/Archives/edgar/data/{cik}/"
+            f"{accession_clean}/{accession}-index.json"
+        )
+        r = sec_get(index_url)
+        if r:
+            try:
+                idx = r.json()
+                for doc in idx.get("documents", []):
+                    name = doc.get("document", "").lower()
+                    doc_type = doc.get("type", "").lower()
+                    if "infotable" in name or "information" in name or doc_type == "13f-hr":
+                        if name.endswith(".xml"):
+                            info_file = doc["document"]
+                            break
+                if not info_file:
+                    for doc in idx.get("documents", []):
+                        if doc.get("document", "").endswith(".xml") and doc.get("type") != "13F-HR":
+                            info_file = doc["document"]
+                            break
+            except Exception:
+                pass
+
+    if not info_file:
+        log.warning(f"  Could not find infotable XML for {filing['fund']}")
         return []
 
     xml_url = (
