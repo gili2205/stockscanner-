@@ -349,51 +349,44 @@ def cusip_to_ticker(cusips):
 
 def parse_13f_holdings(filing):
     """Parse 13F XML and return list of holdings."""
+    import re as _re
     cik = filing["cik"]
     accession = filing["accession"]
     accession_clean = accession.replace("-", "")
-    primary_doc = filing.get("primary_doc", "")
 
-    # Strategy: try primaryDocument first (most reliable), then fall back to index
+    # The primaryDocument is the HTML cover page, NOT the infotable XML.
+    # Fetch the directory listing to find the actual infotable XML file.
+    base_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_clean}/"
+    r_dir = sec_get(base_url)
+    if not r_dir:
+        log.warning(f"  Could not fetch filing directory for {filing['fund']}")
+        return []
+
+    # Find all XML links in the directory listing
+    xml_links = _re.findall(r'href="([^"]*\.xml)"', r_dir.text, _re.IGNORECASE)
+
+    # Prefer files with 'infotable' or 'informationtable' in the name
     info_file = None
+    for link in xml_links:
+        name = link.lower().split("/")[-1]
+        if "infotable" in name or "informationtable" in name:
+            info_file = link.split("/")[-1]
+            break
 
-    # Try 1: use primaryDocument from submissions API
-    if primary_doc and primary_doc.endswith(".xml"):
-        info_file = primary_doc
-
-    # Try 2: fetch the filing index to find the infotable XML
+    # Fallback: any XML that isn't the cover page primary doc
     if not info_file:
-        index_url = (
-            f"https://www.sec.gov/Archives/edgar/data/{cik}/"
-            f"{accession_clean}/{accession}-index.json"
-        )
-        r = sec_get(index_url)
-        if r:
-            try:
-                idx = r.json()
-                for doc in idx.get("documents", []):
-                    name = doc.get("document", "").lower()
-                    doc_type = doc.get("type", "").lower()
-                    if "infotable" in name or "information" in name or doc_type == "13f-hr":
-                        if name.endswith(".xml"):
-                            info_file = doc["document"]
-                            break
-                if not info_file:
-                    for doc in idx.get("documents", []):
-                        if doc.get("document", "").endswith(".xml") and doc.get("type") != "13F-HR":
-                            info_file = doc["document"]
-                            break
-            except Exception:
-                pass
+        primary_name = (filing.get("primary_doc") or "").split("/")[-1].lower()
+        for link in xml_links:
+            candidate = link.split("/")[-1]
+            if candidate.lower() != primary_name:
+                info_file = candidate
+                break
 
     if not info_file:
         log.warning(f"  Could not find infotable XML for {filing['fund']}")
         return []
 
-    xml_url = (
-        f"https://www.sec.gov/Archives/edgar/data/{cik}/"
-        f"{accession_clean}/{info_file}"
-    )
+    xml_url = f"{base_url}{info_file}"
     r = sec_get(xml_url)
     if not r:
         return []
