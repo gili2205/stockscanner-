@@ -57,11 +57,11 @@ HEDGE_FUNDS = {
     "1336528":  "Pershing Square (Ackman)",
     "1536411":  "Duquesne (Druckenmiller)",
     "1418814":  "Appaloosa (Tepper)",
-    "1040730":  "Third Point (Loeb)",
+    "1040273":  "Third Point (Loeb)",        # was 1040730 — digits were transposed
     "1167483":  "Tiger Global (Coleman)",
     "1061768":  "Baupost Group (Klarman)",
     "1103804":  "Viking Global (Halvorsen)",
-    "1582652":  "Point72 (Cohen)",
+    "1350694":  "Bridgewater Associates (Dalio)",  # replaced Point72 — files 13F-NT only
     "1037389":  "Renaissance Technologies",
 }
 
