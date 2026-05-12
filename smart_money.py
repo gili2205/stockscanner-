@@ -108,7 +108,7 @@ def get_recent_form4_filings(days_back=14):
     r = sec_get(
         "https://efts.sec.gov/LATEST/search-index",
         params={
-            "q": "",
+            "q": '""',       # quoted empty string (%22%22) — empty q= returns 0 documents
             "forms": "4",
             "dateRange": "custom",
             "startdt": start,
