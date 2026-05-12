@@ -392,23 +392,29 @@ def parse_13f_holdings(filing):
         return []
 
     try:
-        # Strip namespaces for easier parsing
-        import re
-        content = r.text
-        content = re.sub(r'<\?xml[^?]*\?>', '', content)
-        # Remove xmlns declarations (both default and prefixed)
-        content = re.sub(r'\s+xmlns(?::\w+)?="[^"]*"', '', content)
-        # Remove namespace prefixes from element tags: <ns1:tag> → <tag>, </ns1:tag> → </tag>
-        content = re.sub(r'<(/?)\w+:(\w)', r'<\1\2', content)
-        root = ET.fromstring(content)
+        # Parse XML as-is — use {*} namespace wildcard instead of stripping namespaces.
+        # Stripping leaves unbound prefixes in attributes and causes parse errors.
+        root = ET.fromstring(r.content)
+
+        def _val(elem, tag):
+            """Get text from a child element, namespace-agnostic."""
+            for found in (elem.find(f".//*[local-name()='{tag}']"),
+                          elem.find(f".//{{{chr(42)}}}{tag}"),
+                          elem.find(f".//{tag}")):
+                if found is not None and found.text:
+                    return found.text.strip()
+            return None
 
         holdings = []
-        for info in root.findall(".//infoTable"):
-            name   = xml_val(info, "nameOfIssuer") or ""
-            cusip  = xml_val(info, "cusip") or ""
-            value  = xml_val(info, "value")   # in thousands
-            shares = xml_val(info, "sshPrnamt")
-            put_call = xml_val(info, "putCall") or ""
+        # Find infoTable elements regardless of namespace
+        info_tables = (root.findall(f".//{{{chr(42)}}}infoTable") or
+                       root.findall(".//infoTable"))
+        for info in info_tables:
+            name     = _val(info, "nameOfIssuer") or ""
+            cusip    = _val(info, "cusip") or ""
+            value    = _val(info, "value")   # in thousands
+            shares   = _val(info, "sshPrnamt")
+            put_call = _val(info, "putCall") or ""
 
             if put_call in ("Put", "Call"):  # skip options
                 continue
