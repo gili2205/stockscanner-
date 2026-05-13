@@ -650,8 +650,16 @@ function makeCard(s, rank) {{
   h += '<div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:'+color+';margin-top:3px">'+s.status+'</div>';
   h += '</div>';
   h += '</div>';
-  // Row 2: P/E | RSI | 1Y Target — full width below header row
-  h += '<div id="fold-'+s.ticker+'" style="display:flex;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">';
+  // Performance row — directly under title, no 1D (already shown in price line)
+  h += '<div class="perf-row" style="margin-top:10px">';
+  h += '<div class="perf-item"><div class="perf-lbl">1W</div><div class="perf-val" id="p1w-'+s.ticker+'">&mdash;</div></div>';
+  h += '<div class="perf-item"><div class="perf-lbl">1M</div><div class="perf-val" id="p1m-'+s.ticker+'">&mdash;</div></div>';
+  h += '<div class="perf-item"><div class="perf-lbl">3M</div><div class="perf-val" id="p3m-'+s.ticker+'">&mdash;</div></div>';
+  h += '<div class="perf-item"><div class="perf-lbl">6M</div><div class="perf-val" id="p6m-'+s.ticker+'">&mdash;</div></div>';
+  h += '</div>';
+
+  // Row 2: P/E | RSI | 1Y Target
+  h += '<div id="fold-'+s.ticker+'" style="display:flex;margin-top:10px;border-top:1px solid var(--border);padding-top:10px">';
   h += '<div style="flex:1;text-align:center;border-right:1px solid var(--border);padding:0 8px">';
   h += '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">P/E Ratio</div>';
   h += '<div class="fund-pe-val" style="font-size:18px;font-weight:700;color:'+peC(pe)+'">'+(pe&&pe>0?pe.toFixed(1):'&mdash;')+'</div>';
@@ -668,19 +676,8 @@ function makeCard(s, rank) {{
   h += '<div class="fund-tgt-sub" style="font-size:10px;color:'+tgtCol2+';margin-top:2px">'+(upsidePct!=null?(upsidePct>=0?'+':'')+upsidePct.toFixed(1)+'%':'')+'</div>';
   h += '</div>';
   h += '</div>';
-  h += '</div>';
-
-  // Score bar
-  h += '<div style="height:4px;background:var(--bg3)"><div style="height:100%;width:'+Math.min(100,unifiedScore)+'%;background:'+color+';transition:width .3s"></div></div>';
-
-  // Performance row — 1D from scanner data, 1W/1M/3M/6M loaded async
-  h += '<div class="perf-row">';
-  h += '<div class="perf-item"><div class="perf-lbl">1D</div><div class="perf-val '+(chg>=0?'fg':'fr')+'">'+chgStr+'</div></div>';
-  h += '<div class="perf-item"><div class="perf-lbl">1W</div><div class="perf-val" id="p1w-'+s.ticker+'">&mdash;</div></div>';
-  h += '<div class="perf-item"><div class="perf-lbl">1M</div><div class="perf-val" id="p1m-'+s.ticker+'">&mdash;</div></div>';
-  h += '<div class="perf-item"><div class="perf-lbl">3M</div><div class="perf-val" id="p3m-'+s.ticker+'">&mdash;</div></div>';
-  h += '<div class="perf-item"><div class="perf-lbl">6M</div><div class="perf-val" id="p6m-'+s.ticker+'">&mdash;</div></div>';
-  h += '</div>';
+  h += '</div>'; // end card-header
+  // Score bar removed — left border color already conveys status
 
   // ── Expandable body ───────────────────────────────────────────────────────
   h += '<div class="card-body" id="body-'+s.ticker+'" style="display:none">';
@@ -1116,6 +1113,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .nav-pill:hover{color:var(--text);border-color:var(--blue);}
 .nav-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
 .ver{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}
+.regime{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid;}
+.regime.open{background:#1a3d2b;color:#27ae60;border-color:#27ae6055;}
+.regime.pre{background:#1a2a3d;color:#3498db;border-color:#3498db55;}
+.regime.after{background:#2d1a3d;color:#9b59b6;border-color:#9b59b655;}
+.regime.closed{background:var(--bg3);color:var(--muted);border-color:var(--border);}
 .page{padding:24px;}
 .loading{text-align:center;padding:80px;color:var(--muted);font-size:16px;}
 .error{color:var(--red);padding:20px;text-align:center;}
@@ -1205,8 +1207,20 @@ var fdb = firebase.database();
   <div style="display:flex;align-items:center;gap:10px">
     <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a></div>
     <span class="ver"><!--VERSION--></span>
+    <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
   </div>
 </div>
+<script>
+(function(){
+  var n=new Date(),h=(n.getUTCHours()-4+24)%24,m=n.getUTCMinutes(),d=n.getUTCDay(),t=h*60+m;
+  var el=document.getElementById('regime-badge');
+  if(d===0||d===6){el.textContent='○ Market Closed';el.className='regime closed';}
+  else if(t>=570&&t<960){el.textContent='● Market Open';el.className='regime open';}
+  else if(t>=240&&t<570){el.textContent='◐ Pre-Market';el.className='regime pre';}
+  else if(t>=960&&t<1200){el.textContent='◑ After-Hours';el.className='regime after';}
+  else{el.textContent='○ Market Closed';el.className='regime closed';}
+})();
+</script>
 
 <div class="page">
   <div id="loading" class="loading">⏳ Loading historical data...</div>
@@ -1735,6 +1749,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .nav-pill:hover{color:var(--text);border-color:var(--blue);}
 .nav-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
 .ver{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}
+.regime{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid;}
+.regime.open{background:#1a3d2b;color:#27ae60;border-color:#27ae6055;}
+.regime.pre{background:#1a2a3d;color:#3498db;border-color:#3498db55;}
+.regime.after{background:#2d1a3d;color:#9b59b6;border-color:#9b59b655;}
+.regime.closed{background:var(--bg3);color:var(--muted);border-color:var(--border);}
 .page{padding:24px;}
 .loading{text-align:center;padding:60px;color:var(--muted);font-size:15px;}
 .error{color:var(--red);padding:20px;text-align:center;}
@@ -1791,8 +1810,20 @@ var fdb = firebase.database();
   <div style="display:flex;align-items:center;gap:10px">
     <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a></div>
     <span class="ver"><!--VERSION--></span>
+    <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
   </div>
 </div>
+<script>
+(function(){
+  var n=new Date(),h=(n.getUTCHours()-4+24)%24,m=n.getUTCMinutes(),d=n.getUTCDay(),t=h*60+m;
+  var el=document.getElementById('regime-badge');
+  if(d===0||d===6){el.textContent='○ Market Closed';el.className='regime closed';}
+  else if(t>=570&&t<960){el.textContent='● Market Open';el.className='regime open';}
+  else if(t>=240&&t<570){el.textContent='◐ Pre-Market';el.className='regime pre';}
+  else if(t>=960&&t<1200){el.textContent='◑ After-Hours';el.className='regime after';}
+  else{el.textContent='○ Market Closed';el.className='regime closed';}
+})();
+</script>
 
 <div class="page">
   <div id="loading" class="loading">⏳ Loading smart money data...</div>
