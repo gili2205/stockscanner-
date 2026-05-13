@@ -144,15 +144,18 @@ def parse_form4_xml(accession):
     """
     import re as _re
 
-    # Derive filer CIK from accession number (first 10 digits)
-    cik = str(int(accession.split("-")[0]))
-    accession_clean = accession.replace("-", "")
+    # Normalise accession number — EFTS search returns CIK without zero-padding
+    # (e.g. "1536411-26-000001") but the archive URL requires 18-digit form
+    # ("000153641126000001"). Zero-pad the first segment to 10 digits.
+    parts = accession.split("-")
+    cik = str(int(parts[0]))                          # CIK without leading zeros (for URL path)
+    accession_clean = parts[0].zfill(10) + "".join(parts[1:])  # always 18 digits
 
     # Fetch the filing directory listing to find the Form 4 XML.
-    # (Same approach as 13F — the {accession}-index.json URL does not exist for Form 4.)
     base_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_clean}/"
     r_dir = sec_get(base_url)
     if not r_dir:
+        log.warning(f"  Could not fetch Form 4 directory: {base_url}")
         return []
 
     xml_links = _re.findall(r'href="([^"]*\.xml)"', r_dir.text, _re.IGNORECASE)
@@ -230,7 +233,7 @@ def parse_form4_xml(accession):
         return transactions
 
     except Exception as e:
-        log.debug(f"XML parse error for {accession}: {e}")
+        log.warning(f"  XML parse error for {accession}: {e}")
         return []
 
 
