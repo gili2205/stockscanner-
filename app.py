@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v3.1.1"
+VERSION = "v3.2.0"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -67,7 +67,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .fgroup{{display:flex;flex-direction:column;gap:5px;}}.fgrouplabel{{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;font-weight:600;}}
 .fchips{{display:flex;gap:4px;flex-wrap:wrap;}}
 .fchip{{display:flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);cursor:pointer;font-size:11px;font-weight:500;transition:all .15s;user-select:none;white-space:nowrap;}}
-.fchip:hover{{border-color:var(--blue);color:var(--text);}}.fchip.on{{color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);}}.fchip.on.green{{background:var(--green);border-color:var(--green);}}.fchip.on.blue{{background:var(--blue);border-color:var(--blue);}}.fchip.on.amber{{background:var(--amber);border-color:var(--amber);}}.fchip.on.purple{{background:#9b59b6;border-color:#9b59b6;}}.fchip.on.red{{background:var(--red);border-color:var(--red);}}
+.fchip:hover{{border-color:var(--blue);color:var(--text);}}.fchip.on{{color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);}}.fchip.on.green{{background:var(--green);border-color:var(--green);}}.fchip.on.blue{{background:var(--blue);border-color:var(--blue);}}.fchip.on.amber{{background:var(--amber);border-color:var(--amber);}}.fchip.on.purple{{background:#9b59b6;border-color:#9b59b6;}}.fchip.on.red{{background:var(--red);border-color:var(--red);}}.fchip.on.teal{{background:#1abc9c;border-color:#1abc9c;}}
 .fchip .fcheck{{width:11px;height:11px;border-radius:2px;border:1.5px solid currentColor;display:flex;align-items:center;justify-content:center;font-size:8px;flex-shrink:0;}}.fchip.on .fcheck::after{{content:'✓';}}
 .filteractions{{display:flex;align-items:center;gap:10px;margin-top:6px;}}
 .resetbtn{{background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;}}.resetbtn:hover{{color:var(--red);border-color:var(--red);}}
@@ -181,10 +181,10 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <div class="fgroup">
       <div class="fgrouplabel">&#127970; Size</div>
       <div class="fchips">
-        <div class="fchip green" data-group="size" data-val="mega" onclick="toggleChip(this)"><span class="fcheck"></span>&#129432; Mega $300+</div>
-        <div class="fchip green" data-group="size" data-val="large" onclick="toggleChip(this)"><span class="fcheck"></span>&#128024; Large $80+</div>
-        <div class="fchip green" data-group="size" data-val="mid" onclick="toggleChip(this)"><span class="fcheck"></span>&#128002; Mid $20+</div>
-        <div class="fchip green" data-group="size" data-val="small" onclick="toggleChip(this)"><span class="fcheck"></span>&#128041; Small &lt;$20</div>
+        <div class="fchip green" data-group="size" data-val="mega" onclick="toggleChip(this)"><span class="fcheck"></span>&#129432; Mega &gt;$200B</div>
+        <div class="fchip green" data-group="size" data-val="large" onclick="toggleChip(this)"><span class="fcheck"></span>&#128024; Large $10B-$200B</div>
+        <div class="fchip green" data-group="size" data-val="mid" onclick="toggleChip(this)"><span class="fcheck"></span>&#128002; Mid $2B-$10B</div>
+        <div class="fchip green" data-group="size" data-val="small" onclick="toggleChip(this)"><span class="fcheck"></span>&#128041; Small &lt;$2B</div>
       </div>
     </div>
 
@@ -207,6 +207,23 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
         <div class="fchip amber" data-group="setup" data-val="bullflag" onclick="toggleChip(this)"><span class="fcheck"></span>&#127987; Bull Flag</div>
         <div class="fchip amber" data-group="setup" data-val="prebreak" onclick="toggleChip(this)"><span class="fcheck"></span>&#9889; Pre-breakout</div>
         <div class="fchip amber" data-group="setup" data-val="earnings" onclick="toggleChip(this)"><span class="fcheck"></span>&#128226; Earnings soon</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="filterrow">
+    <!-- Sector -->
+    <div class="fgroup">
+      <div class="fgrouplabel">&#127970; Sector</div>
+      <div class="fchips">
+        <div class="fchip teal" data-group="sector" data-val="Technology" onclick="toggleChip(this)"><span class="fcheck"></span>&#128187; Tech</div>
+        <div class="fchip teal" data-group="sector" data-val="Healthcare" onclick="toggleChip(this)"><span class="fcheck"></span>&#127973; Health</div>
+        <div class="fchip teal" data-group="sector" data-val="Financial Services" onclick="toggleChip(this)"><span class="fcheck"></span>&#127970; Finance</div>
+        <div class="fchip teal" data-group="sector" data-val="Consumer Cyclical" onclick="toggleChip(this)"><span class="fcheck"></span>&#128717; Consumer</div>
+        <div class="fchip teal" data-group="sector" data-val="Industrials" onclick="toggleChip(this)"><span class="fcheck"></span>&#9881; Industrial</div>
+        <div class="fchip teal" data-group="sector" data-val="Communication Services" onclick="toggleChip(this)"><span class="fcheck"></span>&#128225; Telecom</div>
+        <div class="fchip teal" data-group="sector" data-val="Energy" onclick="toggleChip(this)"><span class="fcheck"></span>&#9889; Energy</div>
+        <div class="fchip teal" data-group="sector" data-val="Real Estate" onclick="toggleChip(this)"><span class="fcheck"></span>&#127968; Real Estate</div>
       </div>
     </div>
   </div>
@@ -268,7 +285,7 @@ var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}};
 
 // ── Filter state — which chips are ON per group ───────────────────────────────
 // Empty set = no filter for that group (show all)
-var activeFilters = {{ size:[], risk:[], setup:[], momentum:[] }};
+var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[] }};
 
 function toggleChip(el) {{
   var group = el.dataset.group;
@@ -300,16 +317,16 @@ function setChip(group, val, on) {{
 
 function resetAll() {{
   document.querySelectorAll(".fchip[data-group]").forEach(function(c){{c.classList.remove("on");}});
-  activeFilters = {{ size:[], risk:[], setup:[], momentum:[] }};
+  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[] }};
   render();
 }}
 
 // ── Quick presets ─────────────────────────────────────────────────────────────
 var PRESETS = {{
-  safe:      {{ size:["mega","large"], risk:["low","med"], setup:["breakout","prebreak"], momentum:[] }},
-  bigtech:   {{ size:["mega","large"], risk:[],            setup:[],                      momentum:["strong","hot"] }},
-  earnings:  {{ size:[],              risk:[],            setup:["earnings","catalyst"],  momentum:[] }},
-  explosive: {{ size:["small","mid"], risk:["high"],      setup:["bullflag","breakout"],  momentum:["strong","hot"] }},
+  safe:      {{ size:["mega","large"], risk:["low","med"], setup:["breakout","prebreak"], momentum:[], sector:[] }},
+  bigtech:   {{ size:["mega","large"], risk:[],            setup:[],                      momentum:["strong","hot"], sector:["Technology","Communication Services"] }},
+  earnings:  {{ size:[],              risk:[],            setup:["earnings","catalyst"],  momentum:[], sector:[] }},
+  explosive: {{ size:["small","mid"], risk:["high"],      setup:["bullflag","breakout"],  momentum:["strong","hot"], sector:[] }},
 }};
 
 function applyPreset(name) {{
@@ -323,21 +340,48 @@ function applyPreset(name) {{
 }}
 
 // ── Filter logic ──────────────────────────────────────────────────────────────
-function capBucket(price)  {{ return price>=300?"mega":price>=80?"large":price>=20?"mid":"small"; }}
+// Parse "4.6B" → 4.6e9, "1.2T" → 1.2e12, "500M" → 500e6
+function parseMcap(str) {{
+  if (!str) return 0;
+  var s = String(str).trim();
+  var n = parseFloat(s);
+  if (isNaN(n)) return 0;
+  if (s.indexOf("T")>=0) return n*1e12;
+  if (s.indexOf("B")>=0) return n*1e9;
+  if (s.indexOf("M")>=0) return n*1e6;
+  return n;
+}}
+// Bucket by market cap (uses s.market_cap if present, otherwise falls back to price)
+function capBucket(s) {{
+  var mc = parseMcap(s.market_cap);
+  if (mc >= 200e9) return "mega";
+  if (mc >= 10e9)  return "large";
+  if (mc >= 2e9)   return "mid";
+  if (mc > 0)      return "small";
+  // Fallback: price-based buckets when market_cap not yet populated
+  var p = s.price || 0;
+  return p>=300?"mega":p>=80?"large":p>=20?"mid":"small";
+}}
 function riskBucket(atr)   {{ return atr<=0.25?"low":atr<=0.5?"med":"high"; }}
 function momBucket(mom)    {{ return mom>=30?"hot":mom>=15?"strong":mom>=0?"pos":"neg"; }}
 
 function passesFilters(s) {{
-  var price = s.price||0;
   var atr   = s.atr||1;
   var mom   = s.momentum_1m||s.change_pct||0;
   var track = (s.track||"BREAKOUT").toUpperCase();
+  var earn  = s.days_to_earnings;
 
-  // Size — if any size chips selected, stock must match one of them
-  if (activeFilters.size.length > 0 && !activeFilters.size.includes(capBucket(price))) return false;
+  // Size — if any size chips selected, stock must match one of them (uses market cap)
+  if (activeFilters.size.length > 0 && !activeFilters.size.includes(capBucket(s))) return false;
 
   // Risk — if any risk chips selected, stock must match one of them
   if (activeFilters.risk.length > 0 && !activeFilters.risk.includes(riskBucket(atr))) return false;
+
+  // Sector — if any sector chips selected, stock must match one of them
+  if (activeFilters.sector && activeFilters.sector.length > 0) {{
+    var stockSector = s.sector || "";
+    if (!activeFilters.sector.includes(stockSector)) return false;
+  }}
 
   // Momentum — use threshold logic (not exact bucket)
   // hot=30+, strong=15+, pos=0+, neg=<0 — pick the highest selected threshold
@@ -357,7 +401,7 @@ function passesFilters(s) {{
     if (activeFilters.setup.includes("catalyst") && track==="CATALYST")  setupOk = true;
     if (activeFilters.setup.includes("bullflag") && s.bull_flag)         setupOk = true;
     if (activeFilters.setup.includes("prebreak") && s.pre_breakout)      setupOk = true;
-    if (activeFilters.setup.includes("earnings") && s.earnings_soon)     setupOk = true;
+    if (activeFilters.setup.includes("earnings") && (s.earnings_soon || (earn!=null && earn>=0 && earn<=14))) setupOk = true;
     if (!setupOk) return false;
   }}
 
@@ -368,7 +412,8 @@ function getActiveDesc() {{
   var parts = [];
   if (activeFilters.size.length)     parts.push(activeFilters.size.join(" or ").replace(/mega/g,"Mega").replace(/large/g,"Large").replace(/mid/g,"Mid").replace(/small/g,"Small")+" cap");
   if (activeFilters.risk.length)     parts.push(activeFilters.risk.join("/")+"-risk");
-  if (activeFilters.setup.length)    parts.push(activeFilters.setup.map(function(v){{return {{breakout:"Breakout",catalyst:"Catalyst",bullflag:"Bull Flag",prebreak:"Pre-breakout",earnings:"Earnings"}}[v]||v;}}).join(" or "));
+  if (activeFilters.sector && activeFilters.sector.length) parts.push(activeFilters.sector.join(" or "));
+  if (activeFilters.setup.length)    parts.push(activeFilters.setup.map(function(v){{return {{breakout:"Breakout",catalyst:"Catalyst",bullflag:"Bull Flag",prebreak:"Pre-breakout",earnings:"Earnings soon"}}[v]||v;}}).join(" or "));
   if (activeFilters.momentum.length) parts.push({{hot:"Hot +30%",strong:"Strong +15%",pos:"Positive",neg:"Pullback"}}[activeFilters.momentum[0]]||activeFilters.momentum[0]);
   if (!parts.length) return "Showing all stocks \u2014 select filters above to narrow down";
   return "Filters: " + parts.join(" \u00b7 ");
