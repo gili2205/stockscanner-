@@ -101,67 +101,72 @@ def xml_val(elem, tag):
 # ── Form 4 — Insider Buying ───────────────────────────────────────────────────
 
 def get_recent_form4_filings(days_back=14):
-    """Get recent Form 4 filings from EDGAR daily index files.
+    """Get recent Form 4 filings from EDGAR quarterly full-index.
 
-    Downloads SEC's form{YYYYMMDD}.idx for each recent trading day.
-    These index files list EVERY Form 4 filed that day (hundreds per day),
-    giving far better coverage than the Atom feed (which returns only ~100
-    total regardless of date range due to throttling/aggregation on SEC's end).
-
-    The CIK in the daily index is the FILER (reporting person) CIK, which is
-    the correct CIK for the archive URL — no mismatch issues.
+    Uses https://www.sec.gov/Archives/edgar/full-index/{YEAR}/QTR{N}/form.idx
+    — a fixed-width text file listing every SEC filing for the quarter, updated
+    daily. Streamed line-by-line so we never load the full file into memory.
+    Filters to Form 4 entries filed within the last `days_back` calendar days.
+    The CIK column is the filer (reporting person) CIK, which matches the
+    archive URL — no CIK mismatch issues.
     """
-    filings = []
+    start = (date.today() - timedelta(days=days_back)).isoformat()
+    log.info(f"Fetching Form 4 filings since {start}...")
+
     today   = date.today()
+    quarter = (today.month - 1) // 3 + 1
+    idx_url = (f"https://www.sec.gov/Archives/edgar/full-index/"
+               f"{today.year}/QTR{quarter}/form.idx")
 
-    for i in range(days_back + 7):   # +7 to handle weekends / holidays
-        d = today - timedelta(days=i)
-        if d.weekday() >= 5:          # skip Saturday / Sunday
+    log.info(f"Streaming quarterly index: {idx_url}")
+    try:
+        r = requests.get(idx_url, headers=HEADERS, timeout=60, stream=True)
+        if r.status_code != 200:
+            log.error(f"Failed to fetch quarterly index: HTTP {r.status_code}")
+            return []
+    except Exception as e:
+        log.error(f"Failed to fetch quarterly index: {e}")
+        return []
+
+    # form.idx fixed-width columns:
+    #   0-11:  Form Type  (12 chars)
+    #   12-73: Company Name (62 chars)
+    #   74-85: CIK (12 chars)
+    #   86-97: Date Filed YYYY-MM-DD (12 chars)
+    #   98+:   Filename (e.g. edgar/data/CIK/ACCNO.txt)
+    filings = []
+    for raw in r.iter_lines(decode_unicode=True):
+        if not raw or len(raw) < 98:
+            continue
+        form_type = raw[:12].strip()
+        if form_type != "4":
             continue
 
-        quarter  = (d.month - 1) // 3 + 1
-        date_str = d.strftime("%Y%m%d")
-        idx_url  = (f"https://www.sec.gov/Archives/edgar/daily-index/"
-                    f"{d.year}/QTR{quarter}/form{date_str}.idx")
+        filed = raw[86:98].strip()
+        if filed < start:
+            continue   # too old (index is sorted by company name, not date)
 
-        r = sec_get(idx_url)
-        if not r:
-            log.info(f"  {d.isoformat()}: index not available (holiday / weekend)")
+        company         = raw[12:74].strip()
+        cik             = raw[74:86].strip()
+        filename        = raw[98:].strip()
+
+        m = re.search(r'(\d{10}-\d{2}-\d{6})', filename)
+        if not m:
             continue
+        accession_clean = m.group(1).replace("-", "")
 
-        day_count = 0
-        for line in r.text.splitlines():
-            if len(line) < 100:
-                continue
-            form_type = line[:12].strip()
-            if form_type != "4":
-                continue
-
-            company  = line[12:74].strip()
-            cik      = line[74:86].strip()
-            filed    = line[86:98].strip()
-            filename = line[98:].strip()   # e.g. edgar/data/CIK/XXXXXXXXXX-YY-ZZZZZZ.txt
-
-            # Accession number is embedded in the filename path
-            m = re.search(r'(\d{10}-\d{2}-\d{6})', filename)
-            if not m:
-                continue
-            accession_clean = m.group(1).replace("-", "")
-
-            filings.append({
-                "company_cik":     cik,
-                "accession_clean": accession_clean,
-                "entity":          company,
-                "file_date":       filed,
-            })
-            day_count += 1
-
-        log.info(f"  {d.isoformat()}: {day_count} Form 4 filings")
+        filings.append({
+            "company_cik":     cik,
+            "accession_clean": accession_clean,
+            "entity":          company,
+            "file_date":       filed,
+        })
 
         if len(filings) >= MAX_INSIDER_FILINGS:
+            log.info(f"  Reached {MAX_INSIDER_FILINGS} cap — stopping early")
             break
 
-    log.info(f"Found {len(filings)} Form 4 filings total")
+    log.info(f"Found {len(filings)} Form 4 filings in date range")
     return filings[:MAX_INSIDER_FILINGS]
 
 
