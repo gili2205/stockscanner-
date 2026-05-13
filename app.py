@@ -281,7 +281,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 var VER = "{ver}";
 var CFG = {cfg};
 var connected = false, lastDataTime = null, watchdogTimer = null;
-var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}};
+var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}}, firstSeenData = {{}};
 
 // ── Filter state — which chips are ON per group ───────────────────────────────
 // Empty set = no filter for that group (show all)
@@ -489,6 +489,7 @@ fdb.ref("/scanner").on("value", function(snap) {{
 
   if (d.all_stocks&&Object.keys(d.all_stocks).length>0) allStockData=d.all_stocks;
   else if (d.stocks&&Object.keys(d.stocks).length>0) allStockData=d.stocks;
+  if (d.first_seen) firstSeenData = d.first_seen;
 
   if (d.stocks) {{
     var nr = [];
@@ -676,6 +677,20 @@ function makeCard(s, rank) {{
     entry:entryNum.toFixed(2),stop:stopNum.toFixed(2),
     tfLabel:tfIcon+' '+tfLabel,tfColor:tfColor}};
 
+  // Days on list
+  var daysOnList = null;
+  var fsEntry = firstSeenData[s.ticker];
+  if (fsEntry && fsEntry.date) {{
+    var fsDate = new Date(fsEntry.date + 'T00:00:00');
+    var today2 = new Date(); today2.setHours(0,0,0,0);
+    daysOnList = Math.round((today2 - fsDate) / 86400000);
+  }}
+  var daysLabel='', daysColor='var(--muted)';
+  if (daysOnList === 0) {{ daysLabel='&#127381; New today'; daysColor='var(--blue)'; }}
+  else if (daysOnList !== null && daysOnList <= 3) {{ daysLabel='&#128197; Day '+daysOnList; daysColor='var(--muted)'; }}
+  else if (daysOnList !== null && daysOnList <= 14) {{ daysLabel='&#128197; Day '+daysOnList; daysColor='var(--amber)'; }}
+  else if (daysOnList !== null) {{ daysLabel='&#128197; Day '+daysOnList; daysColor='var(--green)'; }}
+
   var h='';
   h += '<div class="card '+(s.status==='READY'?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
 
@@ -688,7 +703,7 @@ function makeCard(s, rank) {{
   h += '<div class="card-rank '+(isTop?'top':'')+'">'+rank+'</div>';
   h += '<div>';
   h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
-  h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span></div>';
+  h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
   h += '<div id="'+scoreId+'" style="font-size:32px;font-weight:700;color:'+color+';cursor:pointer;line-height:1" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
