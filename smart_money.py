@@ -269,13 +269,13 @@ def parse_form4_xml(company_cik, accession_clean):
                 "price":      round(price_f, 2),
                 "value":      value,
                 "owned_after": int(float(owned)) if owned else None,
-                "accession":  accession,
+                "accession":  accession_clean,
             })
 
         return transactions
 
     except Exception as e:
-        log.warning(f"  XML parse error for {accession}: {e}")
+        log.warning(f"  XML parse error for {accession_clean}: {e}")
         return []
 
 
