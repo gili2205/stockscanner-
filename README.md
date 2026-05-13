@@ -10,102 +10,126 @@ A production stock scanner built on the Qullamaggie breakout methodology. Runs c
 GCP VM (scanner-prod / scanner-staging)
   ├── live_scanner.py   — runs every market day, scores all NASDAQ stocks, pushes to Firebase
   ├── backtest.py       — reconstructs historical signals + forward returns, stores in Firebase
-  ├── optimizer.py      — factor analysis: which signals actually predict winning stocks
+  ├── optimizer.py      — factor analysis: which signals actually predict winning stocks (free, weekly cron)
+  ├── ai_optimizer.py   — Claude AI analysis: suggests weight changes, shadow-backtested on 180 days
   └── smart_money.py    — fetches insider buys (Form 4) + hedge fund holdings (13F) from SEC EDGAR
 
 Firebase Realtime Database
-  ├── /scanner/all_stocks      — latest scan results (live dashboard)
-  ├── /scanner/history         — historical picks with forward returns (analytics)
-  ├── /scanner/first_seen      — when each ticker was first flagged
-  ├── /scanner/smart_money     — insider + institutional data
-  └── /scanner/optimization_reports — factor analysis results
+  ├── /scanner/all_stocks             — latest scan results (live dashboard)
+  ├── /scanner/history                — historical picks with forward returns (analytics)
+  ├── /scanner/first_seen             — when each ticker was first flagged
+  ├── /scanner/smart_money            — insider + institutional data
+  ├── /scanner/optimization_reports   — statistical factor analysis results (optimizer.py)
+  ├── /scanner/ai_recommendations     — Claude AI weight suggestions (ai_optimizer.py)
+  ├── /scanner/approved_weights       — approved weight changes awaiting apply
+  └── /scanner/run_ai_requested       — UI trigger flag for on-demand AI analysis
 
 Vercel (Flask app — app.py)
   ├── /            — live dashboard (latest scan results)
   ├── /analytics   — historical picks table with returns, sort, search
-  └── /smart-money — insider buying + hedge fund holdings
+  ├── /smart-money — insider buying + hedge fund holdings
+  └── /optimizer   — statistical + AI optimizer with approve/reject workflow
 ```
 
-Two environments — staging and production — with separate Firebase databases and GCP VMs. `FLASK_ENV=staging` switches the app to the staging Firebase config.
+Two environments — staging and production — with separate Firebase databases and GCP VMs.
 
 ---
 
 ## Scoring Logic
 
-### Qullamaggie Score (0–100)
+### Qullamaggie Score (0–95, capped)
 
-Each stock is scored using these factors (same logic in both live scanner and backtest):
+Each stock is scored on a BREAKOUT track using these factors:
 
 | Factor | Max pts | Logic |
 |--------|---------|-------|
-| EMA stack | 30 | `full` (price > EMA10 > EMA20 > EMA50) = 30, `partial` = 18, `weak` = 8 |
-| HH/HL structure | 20 | % of last 20 bars with higher-high + higher-low: ≥85% = 20, ≥70% = 13, ≥55% = 7 |
-| ATR compression | 15 | ATR/price: ≤0.25 = 15, ≤0.35 = 11, ≤0.45 = 7, ≤0.55 = 3 |
-| Level | 10 | ATH = 10, multi-year high = 8, 52-week high = 6, prior resistance = 3 |
-| Volume contraction | 10 | 5-day avg vs 20-day avg: ≤50% = 10, ≤70% = 6, ≤90% = 2 |
-| Pre-breakout setup | 5 | ATR ≤ 3%, vol dry ≤ 70%, within 5% of level, EMA full/partial |
-| Bull flag | 5 | ATR ≤ 2.5%, vol dry ≤ 65%, 1M momentum ≥ 8%, EMA full/partial |
+| Momentum 1M | 28 | ≥25%=28, ≥15%=22, ≥8%=15, ≥3%=9, ≥0%=4 |
+| EMA stack (full) | 22 | price > EMA10 > EMA20 > EMA50 |
+| EMA stack (partial) | 12 | EMA10 > EMA20 only |
+| Distance to level | 18 | ≤1%=18, ≤2%=14, ≤3.5%=9, ≤6%=4, ≤10%=1 |
+| ATR compression | 12 | ≤0.20=12, ≤0.25=9, ≤0.30=6, ≤0.40=2 |
+| HH/HL structure | 6 | ≥0.85 ratio=6, ≥0.70=3 |
+| Volume contraction | 8 | ≤50%=8, ≤65%=5, ≤80%=2 |
+| Liquidity | 7 | ≥$200M/day=7, ≥$50M=5, ≥$20M=3, else=1 |
+| **Penalty: weak EMA** | -18 | Subtracted when ema_stack = "weak" |
+| **Penalty: far dist** | -12 | Subtracted when dist_to_level > 15% |
+| **Penalty: neg momentum** | -12 | Subtracted when momentum_1m < -5% |
+| **Penalty: high vol/ATR** | -8 | Subtracted when ATR > 0.7 AND momentum < 10% |
 
 ### Status Labels
 | Score | Status | Meaning |
 |-------|--------|---------|
 | ≥ 72 | READY | All criteria met — breakout imminent |
 | 55–71 | WATCH | Pattern forming — wait for trigger |
-| < 55 | BUILDING | Too early |
+| < 55 | BUILDING | Too early — not surfaced |
 
 ### Quality Gate (live scanner)
 Stock must pass ALL to appear in results:
 - Price ≥ $15
-- Avg daily dollar volume ≥ $10M (price × avg volume)
+- Avg daily dollar volume ≥ $10M
 
 ---
 
 ## Files
 
 ### `live_scanner.py`
-Runs on the GCP VM (via systemd). Every market day it:
+Runs on the GCP VM (via systemd + watchdog cron). Every market day it:
 1. Fetches ~4,000 NASDAQ tickers
 2. Downloads OHLCV data via yfinance
 3. Scores each stock with the Qullamaggie logic
 4. Assigns RS percentiles across the universe
-5. Pushes top results to Firebase `/scanner/all_stocks` using `ref.update()` (not `ref.set()` — critical: `set()` would wipe history)
+5. Pushes top results to Firebase `/scanner/all_stocks` using `ref.update()` (**not** `ref.set()` — `set()` wipes all history)
 
 ### `backtest.py`
 Reconstructs historical scanner signals using past price data. Run manually on the GCP VM.
 
 ```bash
-# Last 30 trading days (default)
-python backtest.py
-
-# Last 180 trading days
-python backtest.py --days 180
-
-# Specific date only
-python backtest.py --date 2026-04-01
-
-# Fill in forward returns for existing picks (run after time passes)
-python backtest.py --update-returns
+python backtest.py                    # last 30 trading days
+python backtest.py --days 180         # last 180 trading days
+python backtest.py --date 2026-04-01  # specific date only
+python backtest.py --update-returns   # fill forward returns for existing picks
 ```
 
-Stores results in Firebase `/scanner/history/YYYY-MM-DD` — each day holds up to 200 top picks with all signals + forward returns (1W / 2W / 1M / 2M / 3M).
-
-**Important**: Downloads price data in batches of 200 tickers using `ThreadPoolExecutor` with a 120-second timeout per batch. Batches that hang are retried up to 3 times then skipped.
+Stores results in Firebase `/scanner/history/YYYY-MM-DD` — each day holds up to 200 top picks with all signals + forward returns (1W/2W/1M/2M/3M).
 
 ### `optimizer.py`
-Factor analysis engine. Reads all historical picks from Firebase and identifies which signals predict winning stocks.
+Statistical factor analysis. Reads all historical picks from Firebase and identifies which signals predict winning stocks. **Free — no AI involved.**
 
 ```bash
-# Analyze 1-month forward returns (default)
-python optimizer.py
-
-# Analyze all return windows
-python optimizer.py --all-windows
-
-# Specific window: 1w, 2w, 1m, 2m, 3m
-python optimizer.py --window 2w
+python optimizer.py                   # analyze 1-month returns
+python optimizer.py --all-windows     # all return windows (1w/2w/1m/2m/3m)
+python optimizer.py --window 2w       # specific window
 ```
 
-Output: overall win rate, performance by score band, factor analysis table sorted by win-rate lift. Saves to Firebase `/scanner/optimization_reports/<timestamp>` and `/tmp/optimizer_report.json`.
+Output: overall win rate, score band breakdown, factor lift table. Saves to Firebase `/scanner/optimization_reports/<timestamp>`.
+
+**Cron**: runs automatically every Sunday at 4am.
+```
+0 4 * * 0 cd /home/scanner && /home/scanner/venv/bin/python optimizer.py --all-windows >> /tmp/optimizer_cron.log 2>&1
+```
+
+### `ai_optimizer.py`
+Claude AI analysis. Calls Claude claude-opus-4-5 to analyze backtest data, suggest scoring weight changes, and shadow-backtests the proposal on 180 days of history before saving to Firebase for human approval. **Costs ~$0.10 per run.**
+
+```bash
+python ai_optimizer.py                # analyze 1m window, generate recommendation
+python ai_optimizer.py --window 2w    # different return window
+python ai_optimizer.py --all-windows  # run for every window, pick best improvement
+python ai_optimizer.py --apply        # apply latest APPROVED recommendation to live_scanner.py
+python ai_optimizer.py --check-and-run  # check Firebase flag, run if requested (cron mode)
+```
+
+**Cron**: polls Firebase every 5 minutes for on-demand requests from the UI.
+```
+*/5 * * * * cd /home/scanner && /home/scanner/venv/bin/python ai_optimizer.py --check-and-run >> /tmp/ai_check.log 2>&1
+```
+
+**Approval flow**:
+1. Click "Run AI Analysis" in `/optimizer` tab → sets `/scanner/run_ai_requested = pending`
+2. VM picks it up within 5 min → sets status = `running` → calls Claude → saves recommendation
+3. UI shows result automatically via Firebase listener
+4. Click "Approve" in UI → sets `/scanner/ai_recommendations/<id>/status = approved`
+5. On VM: `python ai_optimizer.py --apply` → patches `live_scanner.py` (creates backup first)
 
 ### `smart_money.py`
 Fetches smart money signals from SEC EDGAR:
@@ -118,21 +142,40 @@ CUSIP → ticker mapping via OpenFIGI API. Pushes to Firebase `/scanner/smart_mo
 python smart_money.py
 ```
 
+### `app.py`
+Flask web app deployed on Vercel. Auto-deploys from `main` branch.
+
 ---
 
 ## Web Pages
 
 ### `/` — Live Dashboard
-Shows the latest scan results from Firebase. Auto-refreshes. Cards show score, status, EMA stack, level, ATR, volume contraction, momentum, and setup flags.
+Latest scan results from Firebase. Auto-refreshes. Cards show score, status, EMA stack, level, ATR, volume contraction, momentum, setup flags.
 
 ### `/analytics` — Historical Picks
-Shows all historical picks from Firebase `/scanner/history` with forward returns.
-- **localStorage caching**: first load fetches all data, subsequent loads only fetch new dates (fast)
+All historical picks from Firebase `/scanner/history` with forward returns.
+- **localStorage caching**: first load fetches all data, subsequent loads only fetch new dates
 - **Sort**: by date, A–Z, score, 1W / 1M / 3M return
 - **Search**: filter by ticker symbol
 
 ### `/smart-money` — Smart Money
-Insider buying and hedge fund holdings in one tab. Updated by running `smart_money.py` on the VM.
+Insider buying and hedge fund holdings. Updated by running `smart_money.py` on the VM.
+
+### `/optimizer` — Optimizer
+Two sections:
+
+**Section 1 — Statistical Optimizer** (free, auto-runs weekly)
+- Reads `optimizer.py` reports from Firebase
+- Shows overall win rate, score band breakdown, factor lift table
+- Auto-generates weight change suggestions for factors with >±5% win-rate lift
+- Approve button saves to Firebase `/scanner/approved_weights`
+
+**Section 2 — AI Analysis** (manual, ~$0.10/run)
+- "Run AI Analysis" button triggers on-demand Claude analysis
+- Live status: Queued → Running → Done (via Firebase listener)
+- Shows Claude's reasoning, proposed weight changes, and projected win-rate improvement
+- Approve / Reject buttons
+- Approved → run `python ai_optimizer.py --apply` on VM to patch `live_scanner.py`
 
 ---
 
@@ -145,9 +188,33 @@ Insider buying and hedge fund holdings in one tab. Updated by running `smart_mon
 | Vercel | Production deployment | Preview deployment |
 | Branch | `main` | `fix/scanner-bugs` |
 
-`FLASK_ENV=staging` in the VM `.env` switches the app to the staging Firebase.
+**Branch policy**: all changes go to `fix/scanner-bugs` first. Test on staging. Merge to `main` only with explicit approval.
 
-**Branch policy**: all changes go to `fix/scanner-bugs` first. Only merge to `main` after staging verification and explicit approval.
+---
+
+## Cron Jobs (both VMs)
+
+```bash
+crontab -l
+```
+
+Should contain:
+```
+# Watchdog — restart scanner if it dies
+*/5 * * * * pgrep -f live_scanner.py > /dev/null || sudo bash /home/scanner/start.sh restart >> /var/log/scanner_watchdog.log 2>&1
+
+# Backtest — nightly (market days only)
+0 22 * * 1-5 cd /home/scanner && /bin/bash -c 'set -a; source /home/scanner/.env; set +a; /home/scanner/venv/bin/python3 backtest.py --days 2' >> /var/log/backtest.log 2>&1
+
+# Update returns — nightly
+0 23 * * 1-5 cd /home/scanner && /bin/bash -c 'set -a; source /home/scanner/.env; set +a; /home/scanner/venv/bin/python3 backtest.py --update-returns' >> /var/log/backtest.log 2>&1
+
+# Statistical optimizer — weekly (Sunday 4am)
+0 4 * * 0 cd /home/scanner && /home/scanner/venv/bin/python optimizer.py --all-windows >> /tmp/optimizer_cron.log 2>&1
+
+# AI trigger poller — every 5 minutes
+*/5 * * * * cd /home/scanner && /home/scanner/venv/bin/python ai_optimizer.py --check-and-run >> /tmp/ai_check.log 2>&1
+```
 
 ---
 
@@ -157,7 +224,7 @@ Insider buying and hedge fund holdings in one tab. Updated by running `smart_mon
 # Clone repo
 git clone https://github.com/gili2205/stockscanner-.git /home/scanner
 cd /home/scanner
-git checkout fix/scanner-bugs   # or main for production
+git checkout main   # or fix/scanner-bugs for staging
 
 # Virtual environment
 python3 -m venv venv
@@ -165,15 +232,20 @@ venv/bin/pip install -r requirements.txt
 
 # Environment variables
 cp env_template.txt .env
-# Edit .env: set FIREBASE_URL, FIREBASE_CRED, FLASK_ENV
+# Edit .env: FIREBASE_URL, FIREBASE_CRED, FLASK_ENV, ANTHROPIC_API_KEY
 
-# Run backtest to populate history
+# Populate history
 nohup venv/bin/python backtest.py --days 180 > /tmp/backtest.log 2>&1 &
-
-# Then fill in forward returns
 venv/bin/python backtest.py --update-returns
 
-# Start live scanner (systemd service)
+# Run optimizer once to populate Optimizer tab
+venv/bin/python optimizer.py --all-windows
+
+# Set up cron jobs
+crontab -e
+# (add lines from Cron Jobs section above)
+
+# Start live scanner
 sudo systemctl start scanner
 ```
 
