@@ -2522,7 +2522,7 @@ function renderPage() {
       aiIds.slice(0,5).forEach(function(id) {
         var r = aiRecs[id];
         var d = r.win_rate_delta || 0;
-        h += '<div class="hist-item'+(id===currentAiId?' active':'')+'" onclick="selectAiRec(\''+id+'\')">';
+        h += '<div class="hist-item'+(id===currentAiId?' active':'')+'" data-id="'+id+'" onclick="selectAiRec(this.dataset.id)">';
         h += '<span class="hist-ts">'+id.replace('_',' ').replace(/_/g,':')+'</span>';
         h += '<span class="hist-sum">'+(r.window||'')+'w &middot; '+(r.claude_summary||'').substring(0,70)+'…</span>';
         h += '<span class="hist-delta '+dc(d)+'">'+fmt(d,true)+' WR</span>';
