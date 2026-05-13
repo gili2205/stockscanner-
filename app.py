@@ -2555,7 +2555,7 @@ function renderPage() {
 
       // Reasoning
       if (rec.claude_reasoning) {
-        h += '<div class="reasoning">'+rec.claude_reasoning.replace(/\n/g,'<br>')+'</div>';
+        h += '<div class="reasoning">'+rec.claude_reasoning.replace(/\\n/g,'<br>')+'</div>';
       }
 
       // Changes table
