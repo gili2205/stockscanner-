@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v2.5.2"
+VERSION = "v3.0.0"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -1096,7 +1096,7 @@ def api_perf(ticker):
 @app.route('/analytics')
 def analytics():
     cfg_tag = '<script id="fb-cfg" type="application/json">' + json.dumps(FIREBASE_CONFIG) + '</script>'
-    return ANALYTICS_HTML.replace('<!--FB_CONFIG-->', cfg_tag)
+    return ANALYTICS_HTML.replace('<!--FB_CONFIG-->', cfg_tag).replace('<!--VERSION-->', VERSION)
 
 
 ANALYTICS_HTML = """<!DOCTYPE html>
@@ -1115,6 +1115,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
 .nav-pill:hover{color:var(--text);border-color:var(--blue);}
 .nav-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+.ver{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}
 .page{padding:24px;}
 .loading{text-align:center;padding:80px;color:var(--muted);font-size:16px;}
 .error{color:var(--red);padding:20px;text-align:center;}
@@ -1201,7 +1202,10 @@ var fdb = firebase.database();
     <h1>📊 Scanner Analytics</h1>
     <p>Historical performance of scanner picks — does the logic actually find winners?</p>
   </div>
-  <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a></div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a></div>
+    <span class="ver"><!--VERSION--></span>
+  </div>
 </div>
 
 <div class="page">
@@ -1711,7 +1715,7 @@ def index():
 @app.route('/smart-money')
 def smart_money():
     cfg_tag = '<script id="fb-cfg" type="application/json">' + json.dumps(FIREBASE_CONFIG) + '</script>'
-    return SMART_MONEY_HTML.replace('<!--FB_CONFIG-->', cfg_tag)
+    return SMART_MONEY_HTML.replace('<!--FB_CONFIG-->', cfg_tag).replace('<!--VERSION-->', VERSION)
 
 
 SMART_MONEY_HTML = """<!DOCTYPE html>
@@ -1730,6 +1734,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
 .nav-pill:hover{color:var(--text);border-color:var(--blue);}
 .nav-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+.ver{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}
 .page{padding:24px;}
 .loading{text-align:center;padding:60px;color:var(--muted);font-size:15px;}
 .error{color:var(--red);padding:20px;text-align:center;}
@@ -1783,7 +1788,10 @@ var fdb = firebase.database();
     <h1>🏦 Smart Money Tracker</h1>
     <p>Insider transactions &amp; hedge fund holdings — see what big players are buying</p>
   </div>
-  <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a></div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a></div>
+    <span class="ver"><!--VERSION--></span>
+  </div>
 </div>
 
 <div class="page">
