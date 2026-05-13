@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v3.0.2"
+VERSION = "v3.1.0"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -139,7 +139,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <p>Scans 2,000+ stocks &middot; Multi-filter &middot; P/E &middot; RSI &middot; Analyst Target &middot; Updates every 60s</p>
   </div>
   <div class="hright">
-    <div class="nav-pills"><a class="nav-pill active" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a></div>
+    <div class="nav-pills"><a class="nav-pill active" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/ai">&#129504; AI</a></div>
     <span class="ver" id="verspan">{ver}</span>
     <span class="regime closed" id="regime">&#9679; Connecting...</span>
   </div>
@@ -1210,7 +1210,7 @@ var fdb = firebase.database();
     <p>Historical performance of scanner picks — does the logic actually find winners?</p>
   </div>
   <div class="hright">
-    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a></div>
+    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/ai">&#129504; AI</a></div>
     <span class="ver"><!--VERSION--></span>
     <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
   </div>
@@ -1815,7 +1815,7 @@ var fdb = firebase.database();
     <p>Insider transactions &amp; hedge fund holdings — see what big players are buying</p>
   </div>
   <div class="hright">
-    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a></div>
+    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/ai">&#129504; AI</a></div>
     <span class="ver"><!--VERSION--></span>
     <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
   </div>
@@ -2022,6 +2022,407 @@ def api_analytics():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+
+@app.route('/ai')
+def ai_page():
+    cfg_tag = f'<script>var FIREBASE_CONFIG={json.dumps(FIREBASE_CONFIG)};</script>'
+    return AI_HTML.replace('<!--FB_CONFIG-->', cfg_tag).replace('<!--VERSION-->', VERSION)
+
+@app.route('/api/recommendations/<rec_id>/approve', methods=['POST'])
+def approve_recommendation(rec_id):
+    try:
+        db_url = FIREBASE_CONFIG.get('databaseURL', '')
+        # Read the recommendation
+        resp = requests.get(f"{db_url}/scanner/ai_recommendations/{rec_id}.json", timeout=10)
+        if not resp.ok or not resp.json():
+            return jsonify({'error': 'Recommendation not found'}), 404
+        rec = resp.json()
+        proposed = rec.get('proposed_weights', {})
+        # Mark as approved + store approved weights
+        requests.patch(
+            f"{db_url}/scanner/ai_recommendations/{rec_id}.json",
+            json={'status': 'approved', 'approved_at': __import__('datetime').datetime.now().isoformat()},
+            timeout=10
+        )
+        requests.put(
+            f"{db_url}/scanner/approved_weights.json",
+            json={**proposed, '_approved_from': rec_id, '_approved_at': __import__('datetime').datetime.now().isoformat()},
+            timeout=10
+        )
+        return jsonify({'ok': True, 'message': 'Approved. Run python ai_optimizer.py --apply on the VM to update live_scanner.py.'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/recommendations/<rec_id>/reject', methods=['POST'])
+def reject_recommendation(rec_id):
+    try:
+        db_url = FIREBASE_CONFIG.get('databaseURL', '')
+        requests.patch(
+            f"{db_url}/scanner/ai_recommendations/{rec_id}.json",
+            json={'status': 'rejected', 'rejected_at': __import__('datetime').datetime.now().isoformat()},
+            timeout=10
+        )
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+AI_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Recommendations <!--VERSION--></title>
+<style>
+:root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;--purple:#9b59b6;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;min-height:56px;}
+.header h1{font-size:16px;font-weight:600;}
+.header p{font-size:11px;color:var(--muted);margin-top:1px;}
+.hright{display:flex;align-items:center;gap:10px;}
+.ver{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}
+.nav-pills{display:flex;gap:6px;align-items:center;}
+.nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
+.nav-pill:hover{color:var(--text);border-color:var(--blue);}
+.nav-pill.active{background:var(--purple);color:#fff;border-color:var(--purple);}
+.regime{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid;}
+.regime.open{background:#1a3d2b;color:var(--green);border-color:#27ae6055;}.regime.pre{background:#1a2a3d;color:var(--blue);border-color:#3498db55;}.regime.after{background:#2d1a3d;color:#9b59b6;border-color:#9b59b655;}.regime.closed{background:var(--bg3);color:var(--muted);border-color:var(--border);}
+.page{max-width:1100px;margin:0 auto;padding:24px;}
+.loading{text-align:center;padding:60px;color:var(--muted);font-size:14px;}
+.empty{text-align:center;padding:60px 24px;color:var(--muted);line-height:2;}
+.empty h2{color:var(--text);font-size:18px;margin-bottom:8px;}
+
+/* Status banner */
+.rec-banner{border-radius:14px;padding:20px 24px;margin-bottom:24px;border:1px solid;}
+.rec-banner.pending{background:#1a2a3d;border-color:var(--blue);}
+.rec-banner.approved{background:#1a3d2b;border-color:var(--green);}
+.rec-banner.rejected{background:#3d1a1a;border-color:var(--red);}
+.rec-banner.applied{background:#1a3d2b;border-color:var(--green);}
+.banner-title{font-size:18px;font-weight:700;margin-bottom:6px;}
+.banner-meta{font-size:12px;color:var(--muted);margin-bottom:16px;}
+.confidence{display:inline-block;padding:2px 10px;border-radius:20px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+.conf-HIGH{background:#1a3d2b;color:var(--green);border:1px solid #27ae6055;}
+.conf-MEDIUM{background:#3d2e10;color:var(--amber);border:1px solid #e67e2255;}
+.conf-LOW{background:#3d1a1a;color:var(--red);border:1px solid #e74c3c55;}
+
+/* Stats comparison */
+.stats-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:24px;}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center;}
+.stat-card.current{border-color:var(--border);}
+.stat-card.projected{border-color:var(--green);}
+.stat-card.delta{border-color:var(--purple);}
+.stat-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;}
+.stat-main{font-size:32px;font-weight:700;line-height:1;margin-bottom:4px;}
+.stat-sub{font-size:11px;color:var(--muted);margin-top:8px;}
+.stat-row{display:flex;justify-content:center;gap:24px;margin-top:8px;}
+.stat-item{text-align:center;}
+.stat-item-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;}
+.stat-item-val{font-size:14px;font-weight:600;margin-top:2px;}
+
+/* AI Reasoning */
+.reasoning-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:24px;}
+.section-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:14px;}
+.reasoning-text{font-size:13px;line-height:1.8;color:var(--text);}
+.summary-pill{display:inline-block;background:var(--purple);color:#fff;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:14px;}
+
+/* Changes table */
+.changes-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:24px;}
+.changes-table{width:100%;border-collapse:collapse;}
+.changes-table th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);}
+.changes-table td{padding:12px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:top;}
+.changes-table tr:last-child td{border-bottom:none;}
+.changes-table tr:hover td{background:#ffffff05;}
+.val-chip{display:inline-block;padding:3px 10px;border-radius:6px;font-size:13px;font-weight:700;font-family:monospace;}
+.val-current{background:var(--bg3);color:var(--muted);}
+.val-arrow{color:var(--muted);margin:0 6px;font-size:11px;}
+.val-up{background:#1a3d2b;color:var(--green);}
+.val-down{background:#3d1a1a;color:var(--red);}
+.val-same{background:var(--bg3);color:var(--muted);}
+.reason-text{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5;}
+
+/* Action buttons */
+.action-bar{display:flex;gap:12px;align-items:center;padding:20px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;margin-bottom:24px;}
+.btn{padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:all .15s;}
+.btn-approve{background:var(--green);color:#fff;}.btn-approve:hover{background:#219a52;}
+.btn-reject{background:transparent;color:var(--red);border:1px solid var(--red);}.btn-reject:hover{background:#3d1a1a;}
+.btn-disabled{background:var(--bg3);color:var(--muted);cursor:not-allowed;}
+.action-note{font-size:12px;color:var(--muted);flex:1;}
+.status-badge{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;}
+.sb-approved{background:#1a3d2b;color:var(--green);}
+.sb-rejected{background:#3d1a1a;color:var(--red);}
+.sb-applied{background:#1a3d2b;color:var(--green);}
+.sb-pending{background:#1a2a3d;color:var(--blue);}
+
+/* History list */
+.history-list{display:flex;flex-direction:column;gap:8px;}
+.hist-item{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:16px;cursor:pointer;transition:border-color .15s;}
+.hist-item:hover{border-color:var(--blue);}
+.hist-item.active{border-color:var(--purple);}
+.hist-ts{font-size:12px;color:var(--muted);flex-shrink:0;width:140px;}
+.hist-summary{flex:1;font-size:13px;}
+.hist-delta{font-size:13px;font-weight:700;flex-shrink:0;}
+
+.fg{color:var(--green);} .fr{color:var(--red);} .fa{color:var(--amber);}
+.pgfoot{padding:14px 24px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);text-align:center;margin-top:8px;}
+</style>
+</head>
+<body>
+<!--FB_CONFIG-->
+<div class="header">
+  <div>
+    <h1>&#129504; AI Recommendations</h1>
+    <p>Claude analyzes backtest data &middot; suggests scoring improvements &middot; shadow-backtested on 180 days</p>
+  </div>
+  <div class="hright">
+    <div class="nav-pills">
+      <a class="nav-pill" href="/">&#128202; Dashboard</a>
+      <a class="nav-pill" href="/analytics">&#128200; Analytics</a>
+      <a class="nav-pill" href="/smart-money">&#127974; Smart Money</a>
+      <a class="nav-pill active" href="/ai">&#129504; AI</a>
+    </div>
+    <span class="ver"><!--VERSION--></span>
+    <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
+  </div>
+</div>
+<script>
+(function(){
+  var n=new Date(),h=(n.getUTCHours()-4+24)%24,m=n.getUTCMinutes(),d=n.getUTCDay(),t=h*60+m;
+  var el=document.getElementById('regime-badge');
+  if(d===0||d===6){el.textContent='○ Market Closed';el.className='regime closed';}
+  else if(t>=570&&t<960){el.textContent='● Market Open';el.className='regime open';}
+  else if(t>=240&&t<570){el.textContent='◐ Pre-Market';el.className='regime pre';}
+  else if(t>=960&&t<1200){el.textContent='◑ After-Hours';el.className='regime after';}
+  else{el.textContent='○ Market Closed';el.className='regime closed';}
+})();
+</script>
+
+<div class="page">
+  <div id="loading" class="loading">&#129504; Loading AI recommendations...</div>
+  <div id="content" style="display:none"></div>
+</div>
+<div class="pgfoot">AI Scanner Optimizer <!--VERSION--> &middot; Claude claude-opus-4-5 &middot; Shadow-backtested on 180 days &middot; &#9888; Always review changes before approving.</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+firebase.initializeApp(FIREBASE_CONFIG);
+var fdb = firebase.database();
+
+var allRecs = {};
+var currentRecId = null;
+
+fdb.ref('/scanner/ai_recommendations').on('value', function(snap) {
+  var data = snap.val() || {};
+  allRecs = data;
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  if (!Object.keys(data).length) {
+    document.getElementById('content').innerHTML = renderEmpty();
+    return;
+  }
+
+  // Sort by timestamp desc
+  var ids = Object.keys(data).sort().reverse();
+  if (!currentRecId || !data[currentRecId]) currentRecId = ids[0];
+  renderPage();
+});
+
+function renderEmpty() {
+  return '<div class="empty">' +
+    '<h2>&#129504; No AI Recommendations Yet</h2>' +
+    '<p>Run the AI optimizer on the GCP VM to generate the first recommendation:</p>' +
+    '<pre style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;display:inline-block;margin-top:16px;text-align:left;font-size:13px">' +
+    'cd /home/scanner\\nnohup python ai_optimizer.py &gt; /tmp/ai_optimizer.log 2&gt;&amp;1 &amp;\\ntail -f /tmp/ai_optimizer.log' +
+    '</pre>' +
+    '</div>';
+}
+
+function fmt(v, sign) {
+  if (v == null) return '—';
+  return (sign && v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+}
+function fmtAvg(v) {
+  if (v == null) return '—';
+  return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+}
+function deltaClass(v) { return v > 0 ? 'fg' : v < 0 ? 'fr' : ''; }
+
+function renderPage() {
+  var ids = Object.keys(allRecs).sort().reverse();
+  var rec = allRecs[currentRecId];
+  if (!rec) return;
+
+  var cur  = rec.current_stats  || {};
+  var proj = rec.projected_stats || {};
+  var curAll  = cur.all  || {};
+  var projAll = proj.all || {};
+  var wrDelta  = rec.win_rate_delta  || 0;
+  var avgDelta = rec.avg_return_delta || 0;
+  var status   = rec.status || 'pending';
+  var changes  = rec.changes || [];
+
+  var statusBadge = {
+    pending:  '<span class="status-badge sb-pending">&#9711; Pending Review</span>',
+    approved: '<span class="status-badge sb-approved">&#10003; Approved</span>',
+    rejected: '<span class="status-badge sb-rejected">&#10005; Rejected</span>',
+    applied:  '<span class="status-badge sb-applied">&#9679; Applied</span>',
+  }[status] || '';
+
+  var confClass = 'conf-' + (rec.claude_confidence || 'MEDIUM');
+
+  var h = '';
+
+  // ── History sidebar if multiple recs ──────────────────────────────────────
+  if (ids.length > 1) {
+    h += '<div class="history-list" style="margin-bottom:24px">';
+    ids.slice(0,5).forEach(function(id) {
+      var r = allRecs[id];
+      var d = r.win_rate_delta || 0;
+      h += '<div class="hist-item'+(id===currentRecId?' active':'')+'" onclick="selectRec(\''+id+'\')">';
+      h += '<span class="hist-ts">'+id.replace('_',' ').replace(/_/g,':')+'</span>';
+      h += '<span class="hist-summary">'+r.window+' window &middot; '+(r.claude_summary||'').substring(0,80)+'…</span>';
+      h += '<span class="hist-delta '+(d>0?'fg':d<0?'fr':'')+'">'+fmt(d,true)+' WR</span>';
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+
+  // ── Banner ────────────────────────────────────────────────────────────────
+  h += '<div class="rec-banner '+status+'">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">';
+  h += '<div>';
+  h += '<div class="banner-title">Recommendation &middot; <span style="font-size:13px;font-weight:400">'+rec.window+' return window</span></div>';
+  h += '<div class="banner-meta">Generated '+rec.generated_at+' &middot; '+rec.n_picks+' picks analyzed';
+  if (rec.applied) h += ' &middot; <strong style="color:var(--green)">Applied to live scanner</strong>';
+  h += '</div>';
+  h += '</div>';
+  h += '<div style="display:flex;align-items:center;gap:8px">'+statusBadge;
+  h += '<span class="confidence '+confClass+'">'+(rec.claude_confidence||'MEDIUM')+' confidence</span>';
+  h += '</div></div>';
+
+  h += '<div class="summary-pill">&#129504; '+rec.claude_summary+'</div>';
+  h += '</div>';
+
+  // ── Stats comparison ──────────────────────────────────────────────────────
+  h += '<div class="stats-grid">';
+
+  // Current
+  h += '<div class="stat-card current">';
+  h += '<div class="stat-lbl">&#128202; Current Performance</div>';
+  h += '<div class="stat-main" style="color:var(--blue)">'+fmt(curAll.win_rate,false)+'</div>';
+  h += '<div style="font-size:11px;color:var(--muted);margin-top:4px">Win Rate</div>';
+  h += '<div class="stat-row"><div class="stat-item"><div class="stat-item-lbl">Avg return</div><div class="stat-item-val">'+fmtAvg(curAll.avg_return)+'</div></div>';
+  h += '<div class="stat-item"><div class="stat-item-lbl">N picks</div><div class="stat-item-val">'+(curAll.n||'—')+'</div></div></div>';
+  h += '</div>';
+
+  // Projected
+  h += '<div class="stat-card projected">';
+  h += '<div class="stat-lbl">&#128200; Projected (new weights)</div>';
+  h += '<div class="stat-main" style="color:var(--green)">'+fmt(projAll.win_rate,false)+'</div>';
+  h += '<div style="font-size:11px;color:var(--muted);margin-top:4px">Win Rate</div>';
+  h += '<div class="stat-row"><div class="stat-item"><div class="stat-item-lbl">Avg return</div><div class="stat-item-val">'+fmtAvg(projAll.avg_return)+'</div></div>';
+  h += '<div class="stat-item"><div class="stat-item-lbl">N picks</div><div class="stat-item-val">'+(projAll.n||'—')+'</div></div></div>';
+  h += '</div>';
+
+  // Delta
+  h += '<div class="stat-card delta">';
+  h += '<div class="stat-lbl">&#9654; Estimated Improvement</div>';
+  h += '<div class="stat-main '+deltaClass(wrDelta)+'" style="font-size:36px">'+fmt(wrDelta,true)+'</div>';
+  h += '<div style="font-size:11px;color:var(--muted);margin-top:4px">Win Rate Change</div>';
+  h += '<div class="stat-row"><div class="stat-item"><div class="stat-item-lbl">Avg ret change</div><div class="stat-item-val '+deltaClass(avgDelta)+'">'+fmtAvg(avgDelta)+'</div></div></div>';
+  h += '</div>';
+
+  h += '</div>'; // stats-grid
+
+  // ── Action buttons ────────────────────────────────────────────────────────
+  h += '<div class="action-bar" id="action-bar">';
+  if (status === 'pending') {
+    h += '<button class="btn btn-approve" onclick="doApprove()">&#10003; Approve &amp; Queue Changes</button>';
+    h += '<button class="btn btn-reject" onclick="doReject()">&#10005; Reject</button>';
+    h += '<span class="action-note">Approving queues the weight changes. To apply: run <code style="background:var(--bg);padding:2px 6px;border-radius:4px">python ai_optimizer.py --apply</code> on the VM.</span>';
+  } else if (status === 'approved' && !rec.applied) {
+    h += '<button class="btn btn-disabled" disabled>&#10003; Approved</button>';
+    h += '<span class="action-note">&#9654; To apply to live scanner: run <code style="background:var(--bg);padding:2px 6px;border-radius:4px">python ai_optimizer.py --apply</code> on the VM, then restart the scanner.</span>';
+  } else if (rec.applied) {
+    h += '<button class="btn btn-disabled" disabled>&#9679; Applied to Live Scanner</button>';
+    if (rec.applied_at) h += '<span class="action-note">Applied '+rec.applied_at+'</span>';
+  } else if (status === 'rejected') {
+    h += '<button class="btn btn-disabled" disabled>&#10005; Rejected</button>';
+    h += '<span class="action-note">This recommendation was rejected. Generate a new one on the VM.</span>';
+  }
+  h += '</div>';
+
+  // ── AI Reasoning ──────────────────────────────────────────────────────────
+  if (rec.claude_reasoning) {
+    h += '<div class="reasoning-card">';
+    h += '<div class="section-title">&#129504; Claude\'s Analysis</div>';
+    h += '<div class="reasoning-text">' + rec.claude_reasoning.replace(/\n/g, '<br>') + '</div>';
+    h += '</div>';
+  }
+
+  // ── Proposed changes table ────────────────────────────────────────────────
+  if (changes.length) {
+    h += '<div class="changes-card">';
+    h += '<div class="section-title">Proposed Weight Changes (' + changes.length + ')</div>';
+    h += '<table class="changes-table">';
+    h += '<thead><tr><th>Weight</th><th>Current</th><th></th><th>Proposed</th><th>Reason</th></tr></thead>';
+    h += '<tbody>';
+    changes.forEach(function(ch) {
+      var cur2  = ch.current_value;
+      var prop  = ch.proposed_value;
+      var up    = prop > cur2;
+      var same  = prop === cur2;
+      var cls   = same ? 'val-same' : up ? 'val-up' : 'val-down';
+      var arrow = same ? '=' : up ? '&#8593;' : '&#8595;';
+      h += '<tr>';
+      h += '<td><strong>' + ch.weight_key + '</strong></td>';
+      h += '<td><span class="val-chip val-current">'+cur2+'</span></td>';
+      h += '<td style="text-align:center"><span class="val-arrow">'+arrow+'</span></td>';
+      h += '<td><span class="val-chip '+cls+'">'+prop+'</span></td>';
+      h += '<td><div class="reason-text">'+ch.reason+'</div></td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+    h += '</div>';
+  }
+
+  document.getElementById('content').innerHTML = h;
+}
+
+function selectRec(id) {
+  currentRecId = id;
+  renderPage();
+}
+
+async function doApprove() {
+  var bar = document.getElementById('action-bar');
+  if (bar) bar.innerHTML = '<span style="color:var(--muted)">Approving...</span>';
+  try {
+    var resp = await fetch('/api/recommendations/'+currentRecId+'/approve', {method:'POST'});
+    var data = await resp.json();
+    if (data.ok) {
+      allRecs[currentRecId].status = 'approved';
+      renderPage();
+    } else {
+      alert('Error: ' + (data.error || 'Unknown'));
+      renderPage();
+    }
+  } catch(e) { alert('Network error: '+e.message); renderPage(); }
+}
+
+async function doReject() {
+  if (!confirm('Reject this recommendation?')) return;
+  try {
+    await fetch('/api/recommendations/'+currentRecId+'/reject', {method:'POST'});
+    allRecs[currentRecId].status = 'rejected';
+    renderPage();
+  } catch(e) { alert('Network error: '+e.message); }
+}
+</script>
+</body>
+</html>"""
 
 
 if __name__ == '__main__':
