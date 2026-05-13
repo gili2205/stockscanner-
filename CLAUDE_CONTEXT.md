@@ -1,7 +1,7 @@
 # NASDAQ Scanner — Full Context Document
 **For continuing this project in a new Claude thread**
 
-Last updated: 2026-05-13
+Last updated: 2026-05-13 — v3.2.0
 
 ---
 
@@ -146,7 +146,7 @@ Key Flask routes:
 - `POST /api/recommendations/<id>/reject` — rejects an AI recommendation
 - `POST /api/optimizer-suggestions/approve` — approves statistical optimizer suggestions
 
-Current version: `v3.1.1`
+Current version: `v3.2.0`
 
 ---
 

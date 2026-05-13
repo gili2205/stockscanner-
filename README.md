@@ -1,5 +1,44 @@
 # NASDAQ Momentum Scanner
 
+## Changelog
+
+### v3.2.0 — 2026-05-13
+- **New: `/optimizer` tab** — two-section optimizer page
+  - Section 1: Statistical Optimizer (reads `optimizer.py` factor analysis from Firebase, free, runs weekly via cron)
+  - Section 2: AI Analysis (Claude claude-opus-4-5, on-demand via button, ~$0.10/run)
+- **New: `ai_optimizer.py`** — calls Claude to suggest scoring weight changes, shadow-backtests on 180 days, saves recommendation for human approval
+- **New: `--check-and-run` mode** in `ai_optimizer.py` — 5-min cron polls Firebase flag, runs analysis when UI button is clicked
+- **New: approval workflow** — Approve/Reject buttons in UI → `ai_optimizer.py --apply` patches `live_scanner.py` with approved weights (creates backup)
+- **Fix: READY card missing green border** — card class logic now correctly uses status field
+- **Fix: WATCH + pre_breakout showing green** — status takes priority over setup flags in card styling
+- **Fix: 3M/6M performance data missing** — off-by-one in `pct()` function fixed
+- **Fix: header height jumping between tabs** — unified CSS with `min-height:56px` and `position:sticky` across all pages
+
+### v3.1.1 — 2026-05-12
+- Added `optimizer.py` — statistical factor analysis engine
+- Added `smart_money.py` — SEC EDGAR insider buys (Form 4) + hedge fund holdings (13F)
+- Added `/smart-money` page
+- Added staging Firebase environment support
+- Analytics localStorage caching (only fetch new dates on reload)
+- Analytics sort buttons + ticker search
+
+### v3.0.0 — 2026-04-xx
+- Added `/analytics` page with historical picks and forward returns
+- Added `backtest.py` — reconstructs historical signals, fills forward returns
+- Firebase history structure (`/scanner/history/YYYY-MM-DD`)
+
+### v2.0.0 — 2026-03-xx
+- Live dashboard rewrite with card-based UI
+- RS percentile scoring
+- Pre-breakout and bull flag detection
+
+### v1.0.0 — 2026-02-xx
+- Initial scanner — EMA stack, ATR, volume contraction scoring
+- Basic Firebase integration
+- Simple Vercel Flask app
+
+---
+
 A production stock scanner built on the Qullamaggie breakout methodology. Runs continuously on a GCP VM, stores results in Firebase, and serves a live web dashboard on Vercel.
 
 ---
