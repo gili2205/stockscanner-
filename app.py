@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v3.0.1"
+VERSION = "v3.0.2"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -41,7 +41,7 @@ HTML = """<!DOCTYPE html>
 :root{{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;}}
 *{{box-sizing:border-box;margin:0;padding:0;}}
 body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}}
-.header{{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;}}
+.header{{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;min-height:56px;}}
 .header h1{{font-size:16px;font-weight:600;}}.header p{{color:var(--muted);font-size:11px;margin-top:1px;}}
 .hright{{display:flex;align-items:center;gap:10px;}}
 .ver{{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}}
@@ -1068,8 +1068,11 @@ def api_perf(ticker):
         price  = closes[-1]
 
         def pct(n):
-            if len(closes) > n:
-                return round((price - closes[-n-1]) / closes[-n-1] * 100, 1)
+            # closes[-n] = price n days ago; need at least n+1 points (current + n back)
+            if len(closes) >= n and n > 0:
+                base = closes[-n]
+                if base and base > 0:
+                    return round((price - base) / base * 100, 1)
             return None
 
         mc     = getattr(tk.fast_info, 'market_cap', None)
@@ -1105,9 +1108,11 @@ ANALYTICS_HTML = """<!DOCTYPE html>
 :root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
-.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;min-height:56px;}
 .header h1{font-size:16px;font-weight:600;}
 .header p{font-size:11px;color:var(--muted);margin-top:1px;}
+.hright{display:flex;align-items:center;gap:10px;}
+.ver{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}
 .nav-pills{display:flex;gap:6px;align-items:center;}
 .nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
 .nav-pill:hover{color:var(--text);border-color:var(--blue);}
@@ -1204,7 +1209,7 @@ var fdb = firebase.database();
     <h1>📊 Scanner Analytics</h1>
     <p>Historical performance of scanner picks — does the logic actually find winners?</p>
   </div>
-  <div style="display:flex;align-items:center;gap:10px">
+  <div class="hright">
     <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a></div>
     <span class="ver"><!--VERSION--></span>
     <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
@@ -1741,9 +1746,11 @@ SMART_MONEY_HTML = """<!DOCTYPE html>
 :root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;--purple:#9b59b6;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
-.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;min-height:56px;}
 .header h1{font-size:16px;font-weight:600;}
 .header p{font-size:11px;color:var(--muted);margin-top:1px;}
+.hright{display:flex;align-items:center;gap:10px;}
+.ver{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}
 .nav-pills{display:flex;gap:6px;align-items:center;}
 .nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
 .nav-pill:hover{color:var(--text);border-color:var(--blue);}
@@ -1807,7 +1814,7 @@ var fdb = firebase.database();
     <h1>🏦 Smart Money Tracker</h1>
     <p>Insider transactions &amp; hedge fund holdings — see what big players are buying</p>
   </div>
-  <div style="display:flex;align-items:center;gap:10px">
+  <div class="hright">
     <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a></div>
     <span class="ver"><!--VERSION--></span>
     <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
