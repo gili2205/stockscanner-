@@ -101,51 +101,84 @@ def xml_val(elem, tag):
 # ── Form 4 — Insider Buying ───────────────────────────────────────────────────
 
 def get_recent_form4_filings(days_back=14):
-    """Get recent Form 4 filing accession numbers from EDGAR full-text search.
+    """Get recent Form 4 filing accession numbers from EDGAR Atom feed.
 
-    Uses the EDGAR EFTS API. q='""' (empty phrase) bypasses the date filter
-    and returns oldest filings first — use a real search term so the dateRange
-    filter is applied correctly.  'transactionCode' appears in every Form 4 XML.
-    Results are also filtered client-side by file_date as a safety net.
+    Uses the EDGAR browse-edgar Atom feed (action=getcurrent&type=4) which
+    returns filings newest-first with correct dates — avoids the EFTS date-
+    filter bug where q='' returns oldest filings regardless of startdt.
+    Paginates via the 'dateb' param until we've covered the full date window.
     """
     start = (date.today() - timedelta(days=days_back)).isoformat()
-    end   = date.today().isoformat()
     log.info(f"Fetching Form 4 filings since {start}...")
 
-    r = sec_get(
-        "https://efts.sec.gov/LATEST/search-index",
-        params={
-            "q":         "transactionCode",   # real term → date filter applies
-            "forms":     "4",
-            "dateRange": "custom",
-            "startdt":   start,
-            "enddt":     end,
-        }
-    )
-    if not r:
-        return []
+    ns = "http://www.w3.org/2005/Atom"
+    filings = []
+    dateb   = ""   # empty = today; set to oldest date seen each page
 
-    try:
-        data = r.json()
-        hits = data.get("hits", {}).get("hits", [])
-        filings = []
-        for hit in hits[:MAX_INSIDER_FILINGS]:
-            src       = hit.get("_source", {})
-            accession = src.get("adsh", "")
-            file_date = src.get("file_date", "")
-            # client-side date guard — reject anything outside our window
-            if not accession or file_date < start:
-                continue
-            filings.append({
-                "accession": accession,
-                "entity":    src.get("display_names", ""),
-                "file_date": file_date,
-            })
-        log.info(f"Found {len(filings)} Form 4 filings in date range")
-        return filings
-    except Exception as e:
-        log.error(f"Failed to parse Form 4 search results: {e}")
-        return []
+    for page in range(10):   # up to 10 pages × 200 = 2000 filings
+        r = sec_get(
+            "https://www.sec.gov/cgi-bin/browse-edgar",
+            params={
+                "action":      "getcurrent",
+                "type":        "4",
+                "dateb":       dateb,
+                "owner":       "include",
+                "count":       "200",
+                "search_text": "",
+                "output":      "atom",
+            }
+        )
+        if not r:
+            break
+
+        try:
+            root    = ET.fromstring(r.content)
+            entries = root.findall(f"{{{ns}}}entry")
+            if not entries:
+                break
+
+            reached_old = False
+            for entry in entries:
+                # Filing date is in <updated> tag (ISO format)
+                updated = entry.find(f"{{{ns}}}updated")
+                file_date = (updated.text or "")[:10] if updated is not None else ""
+
+                if file_date and file_date < start:
+                    reached_old = True
+                    break
+
+                # Accession number is in <id>: urn:tag:sec.gov,...=XXXXXXXXXX-YY-ZZZZZZ
+                id_el = entry.find(f"{{{ns}}}id")
+                if id_el is None or not id_el.text:
+                    continue
+                # Extract after last "="
+                raw = id_el.text.strip()
+                accession = raw.split("=")[-1] if "=" in raw else ""
+                if not accession:
+                    continue
+
+                title_el = entry.find(f"{{{ns}}}title")
+                entity   = title_el.text.strip() if title_el is not None and title_el.text else ""
+
+                filings.append({
+                    "accession": accession,
+                    "entity":    entity,
+                    "file_date": file_date,
+                })
+                dateb = file_date   # keep track of oldest date seen
+
+            if reached_old or len(entries) < 200:
+                break   # no need to fetch more pages
+
+        except Exception as e:
+            log.error(f"Failed to parse Form 4 Atom feed (page {page+1}): {e}")
+            break
+
+        if len(filings) >= MAX_INSIDER_FILINGS:
+            break
+
+    log.info(f"Found {len(filings)} Form 4 filings in date range")
+    return filings[:MAX_INSIDER_FILINGS]
 
 
 def parse_form4_xml(accession):
