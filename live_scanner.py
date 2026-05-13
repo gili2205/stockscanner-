@@ -574,13 +574,16 @@ def push_results(results, sess, scan_time, elapsed):
     for r in top10:
         if r["ticker"] in rsi_map: r["rsi"] = rsi_map[r["ticker"]]
 
-    # Fetch fundamentals for top 10 only
-    fund_data = get_fundamentals_fast(top10_tickers)
-    for r in top10:
+    # Fetch fundamentals for top 50 (sector + market_cap for filter breadth)
+    top50_tickers = [r["ticker"] for r in results[:50]]
+    fund_data = get_fundamentals_fast(top50_tickers)
+    for r in results[:50]:
         if r["ticker"] in fund_data:
             fd = fund_data[r["ticker"]]
-            if not r.get("pe_ratio"):     r["pe_ratio"]     = fd.get("pe_ratio")
+            if not r.get("pe_ratio"):       r["pe_ratio"]       = fd.get("pe_ratio")
             if not r.get("analyst_target"): r["analyst_target"] = fd.get("analyst_target")
+            if not r.get("sector"):         r["sector"]         = fd.get("sector","")
+            if not r.get("market_cap"):     r["market_cap"]     = fd.get("market_cap_str","")
 
     now_et = datetime.now(ET)
     payload = {

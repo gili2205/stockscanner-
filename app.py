@@ -324,7 +324,7 @@ function resetAll() {{
 // ── Quick presets ─────────────────────────────────────────────────────────────
 var PRESETS = {{
   safe:      {{ size:["mega","large"], risk:["low","med"], setup:["breakout","prebreak"], momentum:[], sector:[] }},
-  bigtech:   {{ size:["mega","large"], risk:[],            setup:[],                      momentum:["strong","hot"], sector:["Technology","Communication Services"] }},
+  bigtech:   {{ size:["mega","large"], risk:[],            setup:[],                      momentum:["strong","hot"], sector:[] }},
   earnings:  {{ size:[],              risk:[],            setup:["earnings","catalyst"],  momentum:[], sector:[] }},
   explosive: {{ size:["small","mid"], risk:["high"],      setup:["bullflag","breakout"],  momentum:["strong","hot"], sector:[] }},
 }};
