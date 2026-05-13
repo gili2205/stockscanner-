@@ -87,13 +87,19 @@ def sec_get(url, params=None, retries=3):
     return None
 
 def xml_val(elem, tag):
-    """Safely get text value from an XML element by tag name."""
+    """Safely get text value from an XML element by tag name.
+
+    Form 4 XML stores numeric fields with a <value> child element:
+        <transactionPricePerShare><value>25.50</value></transactionPricePerShare>
+    The parent element's .text is whitespace-only in that case, so we must
+    skip whitespace-only direct text and fall through to the <value> child.
+    """
     found = elem.find(f".//{tag}")
-    if found is not None and found.text:
+    if found is not None and found.text and found.text.strip():
         return found.text.strip()
-    # Try with <value> child
+    # Try with <value> child (standard Form 4 XML schema pattern)
     found = elem.find(f".//{tag}/value")
-    if found is not None and found.text:
+    if found is not None and found.text and found.text.strip():
         return found.text.strip()
     return None
 
