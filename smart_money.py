@@ -134,19 +134,15 @@ def get_recent_form4_filings(days_back=14):
     #   74-85: CIK (12 chars)
     #   86-97: Date Filed YYYY-MM-DD (12 chars)
     #   98+:   Filename (e.g. edgar/data/CIK/ACCNO.txt)
+    # form.idx is served without a text/* content-type so iter_lines returns bytes.
+    # Decode explicitly to str before slicing.
     filings = []
-    debug_lines = []   # first 10 raw lines for debugging
-    total_lines = 0
-    form4_lines = 0
-    for raw in r.iter_lines(decode_unicode=True):
-        total_lines += 1
-        if total_lines <= 10:
-            debug_lines.append(repr(raw))
+    for raw in r.iter_lines():
+        if isinstance(raw, bytes):
+            raw = raw.decode("latin-1", errors="replace")
         if not raw or len(raw) < 98:
             continue
         form_type = raw[:12].strip()
-        if form_type == "4":
-            form4_lines += 1
         if form_type != "4":
             continue
 
@@ -174,8 +170,7 @@ def get_recent_form4_filings(days_back=14):
             log.info(f"  Reached {MAX_INSIDER_FILINGS} cap — stopping early")
             break
 
-    log.info(f"Index stats: {total_lines} total lines, {form4_lines} Form 4 lines, {len(filings)} in date range")
-    log.info(f"First 10 raw lines:\n" + "\n".join(debug_lines))
+    log.info(f"Found {len(filings)} Form 4 filings in date range")
     return filings[:MAX_INSIDER_FILINGS]
 
 
