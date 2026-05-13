@@ -2095,6 +2095,21 @@ def approve_optimizer_suggestion():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/run-ai-analysis', methods=['POST'])
+def run_ai_analysis():
+    """Set Firebase flag to trigger AI optimizer on the VM."""
+    try:
+        import datetime as dt
+        db_url = FIREBASE_CONFIG.get('databaseURL', '')
+        requests.put(
+            f"{db_url}/scanner/run_ai_requested.json",
+            json={'status': 'pending', 'requested_at': dt.datetime.now().isoformat()},
+            timeout=10
+        )
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 AI_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -2292,12 +2307,12 @@ var FACTOR_WEIGHT_MAP = {
   'Status = WATCH':         'threshold_watch'
 };
 
-var optReports = {}, aiRecs = {}, currentAiId = null;
+var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null;
 
-// Load both data sources in parallel
-var loaded = {opt: false, ai: false};
+// Load all data sources in parallel
+var loaded = {opt: false, ai: false, flag: false};
 function checkReady() {
-  if (loaded.opt && loaded.ai) renderPage();
+  if (loaded.opt && loaded.ai && loaded.flag) renderPage();
 }
 
 fdb.ref('/scanner/optimization_reports').on('value', function(snap) {
@@ -2312,6 +2327,13 @@ fdb.ref('/scanner/ai_recommendations').on('value', function(snap) {
   if (!currentAiId || !aiRecs[currentAiId]) currentAiId = ids[0] || null;
   loaded.ai = true;
   checkReady();
+});
+
+fdb.ref('/scanner/run_ai_requested').on('value', function(snap) {
+  aiFlag = snap.val();
+  loaded.flag = true;
+  // Re-render just the button area if already loaded
+  if (loaded.opt && loaded.ai) renderPage();
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -2471,17 +2493,28 @@ function renderPage() {
   h += '<div class="section-head">';
   h += '<div><div class="section-title">&#129504; AI Analysis <span class="badge badge-ai">Claude claude-opus-4-5</span></div>';
   h += '<div class="section-sub">Claude analyzes backtest data and suggests weight changes — shadow-backtested on 180 days</div></div>';
-  var aiIds = Object.keys(aiRecs).sort().reverse();
-  if (aiIds.length > 1) {
-    h += '<span style="font-size:11px;color:var(--muted)">'+aiIds.length+' recommendations</span>';
-  }
+  // Run button with live status
+  var aiStatus = aiFlag ? (aiFlag.status || 'idle') : 'idle';
+  var btnLabel, btnDisabled, btnCls;
+  if      (aiStatus === 'pending')  { btnLabel='&#9203; Queued...';  btnDisabled=true;  btnCls='btn-disabled'; }
+  else if (aiStatus === 'running')  { btnLabel='&#128260; Running...'; btnDisabled=true;  btnCls='btn-disabled'; }
+  else if (aiStatus === 'done')     { btnLabel='&#10003; Done &mdash; Run Again'; btnDisabled=false; btnCls='btn-approve'; }
+  else                              { btnLabel='&#129504; Run AI Analysis'; btnDisabled=false; btnCls='btn-approve'; }
+  h += '<button class="btn '+btnCls+'" '+(btnDisabled?'disabled':'')+' onclick="triggerAiRun()" id="run-ai-btn">'+btnLabel+'</button>';
   h += '</div>';
   h += '<div class="section-body">';
-
+  if (aiStatus === 'pending' || aiStatus === 'running') {
+    h += '<div style="background:var(--bg3);border-radius:10px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:12px;font-size:13px;">';
+    h += '<span style="font-size:20px">'+( aiStatus==='running'?'&#128260;':'&#9203;')+'</span>';
+    h += '<div><strong>'+(aiStatus==='running'?'AI analysis running...':'Waiting for VM to pick up request...')+'</strong>';
+    h += '<div style="font-size:11px;color:var(--muted);margin-top:3px;">The VM checks every 5 minutes. Results will appear automatically when done.</div></div>';
+    h += '</div>';
+  }
+  var aiIds = Object.keys(aiRecs).sort().reverse();
   if (!aiIds.length) {
     h += '<div class="empty-state"><h3>No AI recommendations yet</h3>';
-    h += '<p>Add your Anthropic API key and run the AI optimizer:</p>';
-    h += '<div class="cmd-block">echo \'ANTHROPIC_API_KEY=your_key\' >> /home/scanner/.env<br>/home/scanner/venv/bin/python ai_optimizer.py</div></div>';
+    h += '<p>Click <strong style="color:var(--purple)">Run AI Analysis</strong> above to generate your first recommendation.</p>';
+    h += '<p style="margin-top:8px;font-size:11px;color:var(--muted)">Make sure ANTHROPIC_API_KEY is set in /home/scanner/.env on the VM.</p></div>';
   } else {
     // History list if multiple
     if (aiIds.length > 1) {
@@ -2570,6 +2603,18 @@ function renderPage() {
 }
 
 function selectAiRec(id) { currentAiId = id; renderPage(); }
+
+// ── Trigger AI run ────────────────────────────────────────────────────────────
+async function triggerAiRun() {
+  var btn = document.getElementById('run-ai-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Queuing...'; }
+  try {
+    var resp = await fetch('/api/run-ai-analysis', {method: 'POST'});
+    var data = await resp.json();
+    if (!data.ok) { alert('Error: ' + (data.error || 'Unknown')); renderPage(); }
+    // Firebase listener will update aiFlag and re-render automatically
+  } catch(e) { alert('Network error: ' + e.message); renderPage(); }
+}
 
 // ── Optimizer approve/reject ──────────────────────────────────────────────────
 async function approveOptSugs() {

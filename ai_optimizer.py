@@ -546,16 +546,41 @@ def run_analysis(window="1m"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AI Scanner Optimizer")
-    parser.add_argument("--window",      default="1m",
+    parser.add_argument("--window",        default="1m",
                         help="Return window: 1w, 2w, 1m, 2m, 3m (default: 1m)")
-    parser.add_argument("--all-windows", action="store_true",
+    parser.add_argument("--all-windows",   action="store_true",
                         help="Run for all windows and pick best projected improvement")
-    parser.add_argument("--apply",       action="store_true",
+    parser.add_argument("--apply",         action="store_true",
                         help="Apply latest APPROVED recommendation to live_scanner.py")
+    parser.add_argument("--check-and-run", action="store_true",
+                        help="Check Firebase flag and run analysis if requested (for cron)")
     args = parser.parse_args()
 
     if args.apply:
         apply_approved_recommendation()
+        sys.exit(0)
+
+    if args.check_and_run:
+        flag_ref = db.reference("/scanner/run_ai_requested")
+        flag = flag_ref.get()
+        if not flag or flag.get("status") != "pending":
+            log.info("No pending AI analysis request — nothing to do.")
+            sys.exit(0)
+        log.info("Pending AI request found — starting analysis...")
+        flag_ref.update({"status": "running", "started_at": datetime.now().isoformat()})
+        try:
+            rec = run_analysis(window="1m")
+            if rec:
+                flag_ref.set({"status": "done", "completed_at": datetime.now().isoformat()})
+                log.info("AI analysis complete. Flag reset to 'done'.")
+            else:
+                flag_ref.set({"status": "error", "error": "Not enough pick data",
+                              "completed_at": datetime.now().isoformat()})
+                log.warning("Analysis skipped — not enough data.")
+        except Exception as e:
+            flag_ref.set({"status": "error", "error": str(e),
+                          "completed_at": datetime.now().isoformat()})
+            log.error(f"AI analysis failed: {e}")
         sys.exit(0)
 
     windows = ["1w", "1m", "2m", "3m"] if args.all_windows else [args.window]
