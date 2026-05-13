@@ -233,6 +233,13 @@ def get_fundamentals_fast(tickers):
                         earn_days = (ed - date.today()).days
             except: pass
 
+            mc     = info.get("marketCap")
+            mc_str = None
+            if mc:
+                if   mc >= 1e12: mc_str = f"{mc/1e12:.1f}T"
+                elif mc >= 1e9:  mc_str = f"{mc/1e9:.1f}B"
+                else:            mc_str = f"{mc/1e6:.0f}M"
+
             _funds_cache[t] = {
                 "pe_ratio":           round(float(pe),1) if pe and pe>0 else None,
                 "analyst_target":     round(float(target),2) if target else None,
@@ -241,10 +248,13 @@ def get_fundamentals_fast(tickers):
                 "eps_growth_yoy":     round(float(eps_g)*100,1) if eps_g else None,
                 "short_interest_pct": round(float(short)*100,1) if short else None,
                 "days_to_earnings":   earn_days,
+                "sector":             info.get("sector", ""),
+                "market_cap_str":     mc_str,
             }
         except:
             _funds_cache[t] = {"pe_ratio":None,"analyst_target":None,"analyst_buy_pct":None,
-                "revenue_growth_yoy":None,"eps_growth_yoy":None,"days_to_earnings":None}
+                "revenue_growth_yoy":None,"eps_growth_yoy":None,"days_to_earnings":None,
+                "sector":"","market_cap_str":None}
         _funds_ts[t] = now
 
     return {t: _funds_cache.get(t, {}) for t in tickers}
@@ -517,6 +527,7 @@ def score_stock(ticker, df, live_price=None, fund=None):
             "rank":             0,
             "name":             ticker,
             "sector":           fund.get("sector",""),
+            "market_cap":       fund.get("market_cap_str",""),
             "pe_ratio":         fund.get("pe_ratio"),
             "analyst_target":   target,
             "rsi":              None,
@@ -563,13 +574,16 @@ def push_results(results, sess, scan_time, elapsed):
     for r in top10:
         if r["ticker"] in rsi_map: r["rsi"] = rsi_map[r["ticker"]]
 
-    # Fetch fundamentals for top 10 only
-    fund_data = get_fundamentals_fast(top10_tickers)
-    for r in top10:
+    # Fetch fundamentals for top 50 (sector + market_cap for filter breadth)
+    top50_tickers = [r["ticker"] for r in results[:50]]
+    fund_data = get_fundamentals_fast(top50_tickers)
+    for r in results[:50]:
         if r["ticker"] in fund_data:
             fd = fund_data[r["ticker"]]
-            if not r.get("pe_ratio"):     r["pe_ratio"]     = fd.get("pe_ratio")
+            if not r.get("pe_ratio"):       r["pe_ratio"]       = fd.get("pe_ratio")
             if not r.get("analyst_target"): r["analyst_target"] = fd.get("analyst_target")
+            if not r.get("sector"):         r["sector"]         = fd.get("sector","")
+            if not r.get("market_cap"):     r["market_cap"]     = fd.get("market_cap_str","")
 
     now_et = datetime.now(ET)
     payload = {
