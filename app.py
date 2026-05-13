@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v3.0.0"
+VERSION = "v3.0.1"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -632,7 +632,7 @@ function makeCard(s, rank) {{
     tfLabel:tfIcon+' '+tfLabel,tfColor:tfColor}};
 
   var h='';
-  h += '<div class="card '+(s.pre_breakout?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
+  h += '<div class="card '+(s.status==='READY'?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
 
   // ── Click-to-fold header ──────────────────────────────────────────────────
   var tgtCol2=upsidePct!=null&&upsidePct>5?'var(--green)':upsidePct!=null&&upsidePct<-5?'var(--red)':'var(--muted)';
@@ -1061,7 +1061,7 @@ def api_perf(ticker):
         return jsonify({'error': 'Invalid ticker'}), 400
     try:
         tk   = yf.Ticker(ticker)
-        hist = tk.history(period='6mo', interval='1d')
+        hist = tk.history(period='1y', interval='1d')
         if hist.empty:
             return jsonify({'error': 'No data'}), 404
         closes = hist['Close'].tolist()
@@ -1105,9 +1105,9 @@ ANALYTICS_HTML = """<!DOCTYPE html>
 :root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
-.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;}
-.header h1{font-size:18px;font-weight:700;}
-.header p{font-size:11px;color:var(--muted);margin-top:2px;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;}
+.header h1{font-size:16px;font-weight:600;}
+.header p{font-size:11px;color:var(--muted);margin-top:1px;}
 .nav-pills{display:flex;gap:6px;align-items:center;}
 .nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
 .nav-pill:hover{color:var(--text);border-color:var(--blue);}
@@ -1741,9 +1741,9 @@ SMART_MONEY_HTML = """<!DOCTYPE html>
 :root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;--purple:#9b59b6;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
-.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;}
-.header h1{font-size:18px;font-weight:700;}
-.header p{font-size:11px;color:var(--muted);margin-top:2px;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;}
+.header h1{font-size:16px;font-weight:600;}
+.header p{font-size:11px;color:var(--muted);margin-top:1px;}
 .nav-pills{display:flex;gap:6px;align-items:center;}
 .nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
 .nav-pill:hover{color:var(--text);border-color:var(--blue);}
