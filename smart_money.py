@@ -66,7 +66,7 @@ HEDGE_FUNDS = {
 }
 
 MIN_INSIDER_VALUE = 100_000   # $100K minimum transaction value
-MAX_INSIDER_FILINGS = 200     # max Form 4 filings to scan per run
+MAX_INSIDER_FILINGS = 1000    # max Form 4 filings to scan per run
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -101,128 +101,113 @@ def xml_val(elem, tag):
 # ── Form 4 — Insider Buying ───────────────────────────────────────────────────
 
 def get_recent_form4_filings(days_back=14):
-    """Get recent Form 4 filing accession numbers from EDGAR Atom feed.
+    """Get recent Form 4 filings from EDGAR daily index files.
 
-    Uses the EDGAR browse-edgar Atom feed (action=getcurrent&type=4) which
-    returns filings newest-first with correct dates — avoids the EFTS date-
-    filter bug where q='' returns oldest filings regardless of startdt.
-    Paginates via the 'dateb' param until we've covered the full date window.
+    Downloads SEC's form{YYYYMMDD}.idx for each recent trading day.
+    These index files list EVERY Form 4 filed that day (hundreds per day),
+    giving far better coverage than the Atom feed (which returns only ~100
+    total regardless of date range due to throttling/aggregation on SEC's end).
+
+    The CIK in the daily index is the FILER (reporting person) CIK, which is
+    the correct CIK for the archive URL — no mismatch issues.
     """
-    start = (date.today() - timedelta(days=days_back)).isoformat()
-    log.info(f"Fetching Form 4 filings since {start}...")
-
-    ns = "http://www.w3.org/2005/Atom"
     filings = []
-    dateb   = ""   # empty = today; set to oldest date seen each page
+    today   = date.today()
 
-    for page in range(10):   # up to 10 pages × 200 = 2000 filings
-        r = sec_get(
-            "https://www.sec.gov/cgi-bin/browse-edgar",
-            params={
-                "action":      "getcurrent",
-                "type":        "4",
-                "dateb":       dateb,
-                "owner":       "include",
-                "count":       "200",
-                "search_text": "",
-                "output":      "atom",
-            }
-        )
+    for i in range(days_back + 7):   # +7 to handle weekends / holidays
+        d = today - timedelta(days=i)
+        if d.weekday() >= 5:          # skip Saturday / Sunday
+            continue
+
+        quarter  = (d.month - 1) // 3 + 1
+        date_str = d.strftime("%Y%m%d")
+        idx_url  = (f"https://www.sec.gov/Archives/edgar/daily-index/"
+                    f"{d.year}/QTR{quarter}/form{date_str}.idx")
+
+        r = sec_get(idx_url)
         if not r:
-            break
+            log.info(f"  {d.isoformat()}: index not available (holiday / weekend)")
+            continue
 
-        try:
-            root    = ET.fromstring(r.content)
-            entries = root.findall(f"{{{ns}}}entry")
-            if not entries:
-                break
+        day_count = 0
+        for line in r.text.splitlines():
+            if len(line) < 100:
+                continue
+            form_type = line[:12].strip()
+            if form_type != "4":
+                continue
 
-            reached_old = False
-            for entry in entries:
-                # Filing date from <updated>
-                updated   = entry.find(f"{{{ns}}}updated")
-                file_date = (updated.text or "")[:10] if updated is not None else ""
+            company  = line[12:74].strip()
+            cik      = line[74:86].strip()
+            filed    = line[86:98].strip()
+            filename = line[98:].strip()   # e.g. edgar/data/CIK/XXXXXXXXXX-YY-ZZZZZZ.txt
 
-                if file_date and file_date < start:
-                    reached_old = True
-                    break
+            # Accession number is embedded in the filename path
+            m = re.search(r'(\d{10}-\d{2}-\d{6})', filename)
+            if not m:
+                continue
+            accession_clean = m.group(1).replace("-", "")
 
-                # Extract company CIK + accession_clean from the <link> href.
-                # href format: .../Archives/edgar/data/{CIK}/{accession_clean}/...
-                # This gives the COMPANY CIK (not the filer/agent CIK that's in
-                # the accession number prefix) — critical for building the right URL.
-                link_el = entry.find(f"{{{ns}}}link")
-                href    = link_el.get("href", "") if link_el is not None else ""
-                m = re.search(r"/Archives/edgar/data/(\d+)/(\d{18})", href)
-                if not m:
-                    continue
-                company_cik    = m.group(1)
-                accession_clean = m.group(2)
+            filings.append({
+                "company_cik":     cik,
+                "accession_clean": accession_clean,
+                "entity":          company,
+                "file_date":       filed,
+            })
+            day_count += 1
 
-                title_el = entry.find(f"{{{ns}}}title")
-                entity   = title_el.text.strip() if title_el is not None and title_el.text else ""
-
-                filings.append({
-                    "company_cik":    company_cik,
-                    "accession_clean": accession_clean,
-                    "entity":         entity,
-                    "file_date":      file_date,
-                })
-                dateb = file_date
-
-            if reached_old or len(entries) < 200:
-                break
-
-        except Exception as e:
-            log.error(f"Failed to parse Form 4 Atom feed (page {page+1}): {e}")
-            break
+        log.info(f"  {d.isoformat()}: {day_count} Form 4 filings")
 
         if len(filings) >= MAX_INSIDER_FILINGS:
             break
 
-    log.info(f"Found {len(filings)} Form 4 filings in date range")
+    log.info(f"Found {len(filings)} Form 4 filings total")
     return filings[:MAX_INSIDER_FILINGS]
 
 
 def parse_form4_xml(company_cik, accession_clean, verbose=False):
     """
     Fetch and parse a Form 4 XML filing.
-    Accepts company_cik and accession_clean (18-digit, no dashes) extracted
-    directly from the Atom feed link — avoids CIK mismatch between the
-    filing agent (accession prefix) and the actual archive path (company CIK).
-    Returns list of transaction dicts (only purchases with value > MIN_INSIDER_VALUE).
+    Tries 'ownership.xml' directly first (standard filename for all electronic
+    Form 4 filings under the EDGAR Ownership Schema) — avoids the extra
+    directory-listing HTTP request that was slowing us down and failing for
+    many filings. Falls back to directory listing only if needed.
+    Returns list of purchase transaction dicts with value > MIN_INSIDER_VALUE.
     """
-    import re as _re
+    base_url    = f"https://www.sec.gov/Archives/edgar/data/{company_cik}/{accession_clean}/"
+    xml_content = None
 
-    base_url = f"https://www.sec.gov/Archives/edgar/data/{company_cik}/{accession_clean}/"
-    r_dir = sec_get(base_url)
-    if not r_dir:
-        log.warning(f"  [MISS] Directory fetch failed: {base_url}")
-        return []
-
-    # Look for XML files in the directory listing (EDGAR uses both quoted variants)
-    xml_links = _re.findall(r'href="([^"]*\.xml)"', r_dir.text, _re.IGNORECASE)
-    if not xml_links:
+    # Most Form 4 filings use 'ownership.xml' — try it directly first
+    r = sec_get(f"{base_url}ownership.xml")
+    if r and r.status_code == 200 and b"ownershipDocument" in r.content:
+        xml_content = r.content
         if verbose:
-            log.info(f"  [MISS] No XML files in directory: {base_url}")
-            # Show all hrefs so we can see what's actually in the directory
-            all_hrefs = _re.findall(r'href="([^"]*)"', r_dir.text, _re.IGNORECASE)
-            log.info(f"  All hrefs: {all_hrefs[:20]}")
-        return []
+            log.info(f"  [XML] {base_url}ownership.xml")
+    else:
+        # Fall back: fetch directory listing to find the actual XML filename
+        r_dir = sec_get(base_url)
+        if not r_dir:
+            if verbose:
+                log.info(f"  [MISS] Directory unreachable: {base_url}")
+            return []
+        xml_links = re.findall(r'href="([^"]*\.xml)"', r_dir.text, re.IGNORECASE)
+        if not xml_links:
+            if verbose:
+                log.info(f"  [MISS] No XML in directory: {base_url}")
+            return []
+        xml_file = xml_links[0].split("/")[-1]
+        r2 = sec_get(f"{base_url}{xml_file}")
+        if not r2:
+            return []
+        xml_content = r2.content
+        if verbose:
+            log.info(f"  [XML] {base_url}{xml_file} (via directory fallback)")
 
-    # Form 4 filings typically have one primary XML — take the first one
-    xml_file = xml_links[0].split("/")[-1]
-    xml_url = f"{base_url}{xml_file}"
-    if verbose:
-        log.info(f"  [XML] Fetching: {xml_url}")
-
-    r = sec_get(xml_url)
-    if not r:
-        log.warning(f"  [MISS] XML fetch failed: {xml_url}")
+    if not xml_content:
         return []
 
     try:
-        root = ET.fromstring(r.content)
+        root = ET.fromstring(xml_content)
 
         # Issuer info
         ticker  = xml_val(root, "issuerTradingSymbol") or ""
@@ -235,23 +220,21 @@ def parse_form4_xml(company_cik, accession_clean, verbose=False):
         is_10pct= xml_val(root, "isTenPercentOwner") == "1"
 
         if not title:
-            if is_dir:   title = "Director"
+            if is_dir:    title = "Director"
             elif is_10pct: title = "10% Owner"
-            else:        title = "Insider"
+            else:         title = "Insider"
 
-        # Count all nonDerivativeTransaction elements before filtering
         all_txns = root.findall(".//nonDerivativeTransaction")
         if verbose:
             log.info(f"  [TXN] {ticker or '?'} — {len(all_txns)} nonDerivativeTransaction(s)")
 
         transactions = []
-
         for txn in all_txns:
-            code  = xml_val(txn, "transactionCode")
-            adc   = xml_val(txn, "transactionAcquiredDisposedCode")
+            code = xml_val(txn, "transactionCode")
+            adc  = xml_val(txn, "transactionAcquiredDisposedCode")
 
-            # Only purchases: code P or code M with Acquired
-            if code not in ("P",) and not (code == "M" and adc == "A"):
+            # Only open-market purchases (code P)
+            if code != "P":
                 if verbose:
                     log.info(f"    skip code={code} adc={adc}")
                 continue
@@ -280,16 +263,16 @@ def parse_form4_xml(company_cik, accession_clean, verbose=False):
                 continue
 
             transactions.append({
-                "ticker":     ticker.upper().strip(),
-                "company":    company,
-                "insider":    insider,
-                "title":      title,
-                "date":       tx_date,
-                "shares":     int(shares_f),
-                "price":      round(price_f, 2),
-                "value":      value,
+                "ticker":      ticker.upper().strip(),
+                "company":     company,
+                "insider":     insider,
+                "title":       title,
+                "date":        tx_date,
+                "shares":      int(shares_f),
+                "price":       round(price_f, 2),
+                "value":       value,
                 "owned_after": int(float(owned)) if owned else None,
-                "accession":  accession_clean,
+                "accession":   accession_clean,
             })
 
         return transactions
