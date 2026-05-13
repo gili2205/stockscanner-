@@ -1,3 +1,4 @@
+import os
 import json
 import requests
 import yfinance as yf
@@ -7,15 +8,29 @@ app = Flask(__name__)
 
 VERSION = "v2.5.2"
 
-FIREBASE_CONFIG = {
-    "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
-    "authDomain": "stockscanner-f9f81.firebaseapp.com",
-    "databaseURL": "https://stockscanner-f9f81-default-rtdb.firebaseio.com",
-    "projectId": "stockscanner-f9f81",
-    "storageBucket": "stockscanner-f9f81.firebasestorage.app",
-    "messagingSenderId": "1066582982090",
-    "appId": "1:1066582982090:web:359e1c670b8c3ca8222333"
+FIREBASE_CONFIGS = {
+    "production": {
+        "apiKey": "AIzaSyAi_mL9BbKwwknyOm38B9lL68wI7wwLcaw",
+        "authDomain": "stockscanner-f9f81.firebaseapp.com",
+        "databaseURL": "https://stockscanner-f9f81-default-rtdb.firebaseio.com",
+        "projectId": "stockscanner-f9f81",
+        "storageBucket": "stockscanner-f9f81.firebasestorage.app",
+        "messagingSenderId": "1066582982090",
+        "appId": "1:1066582982090:web:359e1c670b8c3ca8222333"
+    },
+    "staging": {
+        "apiKey": "AIzaSyA-zd6GX6QB_-q0x2HvVUSdYVsjtNqcuTk",
+        "authDomain": "stockscanner-staging.firebaseapp.com",
+        "databaseURL": "https://stockscanner-staging-default-rtdb.firebaseio.com",
+        "projectId": "stockscanner-staging",
+        "storageBucket": "stockscanner-staging.firebasestorage.app",
+        "messagingSenderId": "342956679780",
+        "appId": "1:342956679780:web:573fc062c897cbb3e8b571"
+    }
 }
+
+FLASK_ENV = os.environ.get("FLASK_ENV", "production")
+FIREBASE_CONFIG = FIREBASE_CONFIGS.get(FLASK_ENV, FIREBASE_CONFIGS["production"])
 
 HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -114,7 +129,9 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <p>Scans 2,000+ stocks &middot; Multi-filter &middot; P/E &middot; RSI &middot; Analyst Target &middot; Updates every 60s</p>
   </div>
   <div class="hright">
-    <a href="/analytics" style="font-size:11px;color:var(--blue);text-decoration:none;margin-right:8px">📊 Analytics</a><span class="ver" id="verspan">{ver}</span>
+    <a href="/analytics" style="font-size:11px;color:var(--blue);text-decoration:none;margin-right:8px">📊 Analytics</a>
+    <a href="/smart-money" style="font-size:11px;color:var(--blue);text-decoration:none;margin-right:8px">🏦 Smart Money</a>
+    <span class="ver" id="verspan">{ver}</span>
     <span class="regime closed" id="regime">&#9679; Connecting...</span>
   </div>
 </div>
@@ -1047,6 +1064,11 @@ select,input[type=number]{background:var(--bg3);color:var(--text);border:1px sol
 .signal-bar-val{font-size:11px;font-weight:600;width:40px;text-align:right;flex-shrink:0;}
 .signal-diff{font-size:11px;color:var(--muted);margin-top:4px;}
 
+/* Sort buttons */
+.sort-btn{background:var(--bg3);color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.sort-btn:hover{border-color:var(--blue);color:var(--text);}
+.sort-btn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+
 /* Picks table */
 .picks-table{width:100%;border-collapse:collapse;font-size:12px;}
 .picks-table th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;}
@@ -1161,6 +1183,19 @@ var fdb = firebase.database();
         Each stock shown once — from the <strong style="color:var(--text)">first time the scanner flagged it</strong>.
         Returns measured from that entry date.
       </p>
+      <!-- Table sort + search -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Sort:</span>
+        <button class="sort-btn active" id="sort-btn-date"  onclick="setSort('scan_date')">📅 Date</button>
+        <button class="sort-btn"        id="sort-btn-abc"   onclick="setSort('ticker_asc')">🔤 A–Z</button>
+        <button class="sort-btn"        id="sort-btn-score" onclick="setSort('score')">⭐ Score</button>
+        <button class="sort-btn"        id="sort-btn-ret1w" onclick="setSort('ret_1w')">1W Return</button>
+        <button class="sort-btn"        id="sort-btn-ret1m" onclick="setSort('ret_1m')">1M Return</button>
+        <button class="sort-btn"        id="sort-btn-ret3m" onclick="setSort('ret_3m')">3M Return</button>
+        <div style="margin-left:auto;">
+          <input type="text" id="ticker-search" placeholder="🔍 Search ticker…" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;outline:none;width:150px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();page=0;render()">
+        </div>
+      </div>
       <table class="picks-table">
         <thead>
           <tr>
@@ -1200,10 +1235,63 @@ var sortAsc  = false;
 var page     = 0;
 var pageSize = 50;
 
+var CACHE_KEY     = 'scanner_analytics_v1';
+var CACHE_TS_KEY  = 'scanner_analytics_ts_v1';
+var CACHE_DAYS_KEY= 'scanner_analytics_days_v1';
+
+function getCached() {
+  try {
+    var raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+
+function setCached(picks, knownDays) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(picks));
+    localStorage.setItem(CACHE_TS_KEY, Date.now().toString());
+    localStorage.setItem(CACHE_DAYS_KEY, JSON.stringify(knownDays));
+  } catch(e) {}
+}
+
+function getCachedDays() {
+  try {
+    var raw = localStorage.getItem(CACHE_DAYS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
+function buildPicks(rawPicks) {
+  var daysCount = {};
+  rawPicks.forEach(function(p) {
+    daysCount[p.ticker] = (daysCount[p.ticker] || 0) + 1;
+  });
+  var firstMap = {};
+  rawPicks.forEach(function(p) {
+    if (!firstMap[p.ticker] || p.scan_date < firstMap[p.ticker].scan_date) {
+      firstMap[p.ticker] = p;
+    }
+  });
+  return Object.values(firstMap).map(function(p) {
+    return Object.assign({}, p, {days_on_list: daysCount[p.ticker] || 1});
+  });
+}
+
+function processAndRender(rawPicks, nDays) {
+  allPicks = buildPicks(rawPicks);
+  document.getElementById('data-info').textContent =
+    allPicks.length + ' unique stocks · first flagged across ' + nDays + ' scan days';
+  render();
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+}
+
 function loadData() {
   document.getElementById('loading').style.display = 'block';
+  document.getElementById('loading').innerHTML = '⏳ Loading historical data...';
   document.getElementById('content').style.display = 'none';
 
+  // Step 1: get list of available dates (shallow fetch — very fast)
   fdb.ref('scanner/history').once('value', function(snap) {
     var data = snap.val();
     if (!data) {
@@ -1211,42 +1299,62 @@ function loadData() {
         '<div class="error">No historical data yet. Run the backtest on the VM.</div>';
       return;
     }
-    // Build flat list of all picks across all days
+
+    var allDates   = Object.keys(data).sort();
+    var cachedDays = getCachedDays();
+    var cachedPicks= getCached() || [];
+    var newDates   = allDates.filter(function(d) { return cachedDays.indexOf(d) === -1; });
+
+    if (newDates.length === 0) {
+      // Everything is cached — instant load
+      document.getElementById('data-info').textContent =
+        'Loaded from cache · ' + cachedPicks.length + ' unique stocks · ' + allDates.length + ' scan days';
+      allPicks = cachedPicks;
+      render();
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      return;
+    }
+
+    // Step 2: fetch only missing dates
+    document.getElementById('loading').innerHTML =
+      '⏳ Fetching ' + newDates.length + ' new scan day' + (newDates.length > 1 ? 's' : '') + '…';
+
+    // Build raw picks from cached + new data
     var rawPicks = [];
-    Object.keys(data).sort().forEach(function(date) {
-      var day = data[date];
-      if (!day || typeof day !== 'object') return;
-      Object.keys(day).forEach(function(ticker) {
-        var r = day[ticker];
-        if (r && r.price_at_scan) {
-          rawPicks.push(Object.assign({}, r, {scan_date: date}));
-        }
-      });
-    });
 
-    // Count how many scan days each ticker appeared on
-    var daysCount = {};
-    rawPicks.forEach(function(p) {
-      daysCount[p.ticker] = (daysCount[p.ticker] || 0) + 1;
-    });
-
-    // Keep only the FIRST time each ticker was flagged (earliest scan_date)
-    var firstMap = {};
-    rawPicks.forEach(function(p) {
-      if (!firstMap[p.ticker] || p.scan_date < firstMap[p.ticker].scan_date) {
-        firstMap[p.ticker] = p;
+    // Restore cached raw picks (we keep them as allPicks so rebuild from stored picks)
+    // Expand stored first-seen picks back to rawPicks format
+    cachedPicks.forEach(function(p) {
+      for (var i = 0; i < (p.days_on_list || 1); i++) {
+        rawPicks.push(p);
       }
     });
-    allPicks = Object.values(firstMap).map(function(p) {
-      return Object.assign({}, p, {days_on_list: daysCount[p.ticker] || 1});
+
+    var pending = newDates.length;
+    if (pending === 0) {
+      processAndRender(rawPicks, allDates.length);
+      setCached(buildPicks(rawPicks), allDates);
+      return;
+    }
+
+    newDates.forEach(function(date) {
+      var dayData = data[date];
+      if (dayData && typeof dayData === 'object') {
+        Object.keys(dayData).forEach(function(ticker) {
+          var r = dayData[ticker];
+          if (r && r.price_at_scan) {
+            rawPicks.push(Object.assign({}, r, {scan_date: date}));
+          }
+        });
+      }
+      pending--;
+      if (pending === 0) {
+        processAndRender(rawPicks, allDates.length);
+        setCached(buildPicks(rawPicks), allDates);
+      }
     });
 
-    var nDays = new Set(rawPicks.map(function(p) { return p.scan_date; })).size;
-    document.getElementById('data-info').textContent =
-      allPicks.length + ' unique stocks · first flagged across ' + nDays + ' scan days';
-    render();
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('content').style.display = 'block';
   }, function(err) {
     document.getElementById('loading').innerHTML =
       '<div class="error">Firebase error: ' + err.message + '</div>';
@@ -1254,32 +1362,54 @@ function loadData() {
 }
 
 function getFiltered() {
-  var tf        = document.getElementById('tf-select').value;
-  var status    = document.getElementById('status-filter').value;
-  var minScore  = parseInt(document.getElementById('min-score').value) || 0;
-  var setup     = document.getElementById('setup-filter').value;
+  var status   = document.getElementById('status-filter').value;
+  var minScore = parseInt(document.getElementById('min-score').value) || 0;
+  var setup    = document.getElementById('setup-filter').value;
+  var search   = (document.getElementById('ticker-search').value || '').trim().toUpperCase();
 
   return allPicks.filter(function(p) {
     if (status !== 'all' && p.status !== status) return false;
     if (p.score < minScore) return false;
     if (setup === 'pre_breakout' && !p.pre_breakout) return false;
     if (setup === 'bull_flag'    && !p.bull_flag)    return false;
+    if (search && p.ticker.indexOf(search) === -1)   return false;
     return true;
   });
 }
 
+function setSort(col) {
+  sortCol = col;
+  sortAsc = (col === 'ticker_asc');  // A-Z is ascending, everything else descending
+  // Update button styles
+  var btns = ['date','abc','score','ret1w','ret1m','ret3m'];
+  var map  = {scan_date:'date', ticker_asc:'abc', score:'score', ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m'};
+  btns.forEach(function(b) { document.getElementById('sort-btn-'+b).classList.remove('active'); });
+  var active = map[col];
+  if (active) document.getElementById('sort-btn-'+active).classList.add('active');
+  page = 0;
+  render();
+}
+
 function render() {
-  var tf   = document.getElementById('tf-select').value;
+  var tf = document.getElementById('tf-select').value;
   filtered = getFiltered();
   filtered.sort(function(a,b) {
-    var va = a[sortCol] != null ? a[sortCol] : (sortAsc ? Infinity : -Infinity);
-    var vb = b[sortCol] != null ? b[sortCol] : (sortAsc ? Infinity : -Infinity);
+    // A-Z sort
+    if (sortCol === 'ticker_asc') {
+      return a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0;
+    }
+    // Return sorts
     if (sortCol.startsWith('ret_')) {
       var key = sortCol.replace('ret_','');
-      va = a.returns && a.returns[key] != null ? a.returns[key] : (sortAsc?Infinity:-Infinity);
-      vb = b.returns && b.returns[key] != null ? b.returns[key] : (sortAsc?Infinity:-Infinity);
+      var va = a.returns && a.returns[key] != null ? a.returns[key] : -Infinity;
+      var vb = b.returns && b.returns[key] != null ? b.returns[key] : -Infinity;
+      return vb - va;  // highest first
     }
-    return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+    // Standard sorts (highest first)
+    var va = a[sortCol] != null ? a[sortCol] : -Infinity;
+    var vb = b[sortCol] != null ? b[sortCol] : -Infinity;
+    if (sortCol === 'scan_date') return va < vb ? 1 : va > vb ? -1 : 0;  // newest first
+    return vb - va;
   });
 
   renderKPIs(tf);
@@ -1478,6 +1608,247 @@ def index():
         cfg=json.dumps(FIREBASE_CONFIG)
     )
     return html
+
+@app.route('/smart-money')
+def smart_money():
+    cfg_tag = '<script id="fb-cfg" type="application/json">' + json.dumps(FIREBASE_CONFIG) + '</script>'
+    return SMART_MONEY_HTML.replace('<!--FB_CONFIG-->', cfg_tag)
+
+
+SMART_MONEY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart Money Tracker</title>
+<style>
+:root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;--purple:#9b59b6;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;}
+.header h1{font-size:18px;font-weight:700;}
+.header p{font-size:11px;color:var(--muted);margin-top:2px;}
+.nav-link{color:var(--blue);text-decoration:none;font-size:12px;font-weight:600;}
+.page{padding:24px;}
+.loading{text-align:center;padding:60px;color:var(--muted);font-size:15px;}
+.error{color:var(--red);padding:20px;text-align:center;}
+.section{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:24px;}
+.section h2{font-size:15px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:8px;}
+.section .sub{font-size:11px;color:var(--muted);margin-bottom:16px;}
+.meta{font-size:11px;color:var(--muted);margin-bottom:16px;}
+/* Table */
+.sm-table{width:100%;border-collapse:collapse;font-size:12px;}
+.sm-table th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;}
+.sm-table td{padding:9px 10px;border-bottom:1px solid var(--border)22;vertical-align:middle;}
+.sm-table tr:hover td{background:#ffffff05;}
+.sm-table tr:last-child td{border-bottom:none;}
+.ticker-badge{font-size:13px;font-weight:700;color:var(--text);}
+.scanner-match{display:inline-block;font-size:9px;background:#1a3d2b;color:var(--green);border:1px solid var(--green)44;border-radius:20px;padding:2px 7px;margin-left:6px;font-weight:600;}
+.value-big{font-size:13px;font-weight:700;color:var(--green);}
+.value-neg{color:var(--red);}
+.role-badge{font-size:9px;padding:2px 7px;border-radius:20px;font-weight:600;background:var(--bg3);color:var(--muted);}
+.role-badge.ceo{background:#1a2a3d;color:var(--blue);}
+.role-badge.dir{background:#2d1a3d;color:var(--purple);}
+.role-badge.own{background:#3d2e10;color:var(--amber);}
+/* Fund cards */
+.fund-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;}
+.fund-card{background:var(--bg3);border-radius:10px;padding:16px;}
+.fund-name{font-size:13px;font-weight:700;margin-bottom:2px;}
+.fund-meta{font-size:10px;color:var(--muted);margin-bottom:12px;}
+.holding-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)33;}
+.holding-row:last-child{border-bottom:none;}
+.h-ticker{font-size:13px;font-weight:700;width:60px;flex-shrink:0;}
+.h-name{font-size:11px;color:var(--muted);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.h-value{font-size:11px;font-weight:600;text-align:right;flex-shrink:0;}
+.h-bar{height:4px;background:var(--blue);border-radius:2px;margin-top:3px;}
+/* Search */
+.search-box{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;outline:none;width:180px;text-transform:uppercase;}
+.search-box:focus{border-color:var(--blue);}
+.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+.updated{font-size:11px;color:var(--muted);}
+</style>
+<!--FB_CONFIG-->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+var CFG = JSON.parse(document.getElementById('fb-cfg').textContent);
+try { firebase.initializeApp(CFG); } catch(e) {}
+var fdb = firebase.database();
+</script>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>🏦 Smart Money Tracker</h1>
+    <p>Insider transactions &amp; hedge fund holdings — see what big players are buying</p>
+  </div>
+  <a class="nav-link" href="/">← Back to Scanner</a>
+</div>
+
+<div class="page">
+  <div id="loading" class="loading">⏳ Loading smart money data...</div>
+  <div id="content" style="display:none">
+
+    <!-- Insider Buying -->
+    <div class="section">
+      <h2>👤 Insider Buying
+        <span id="insider-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
+      </h2>
+      <p class="sub">Form 4 filings — purchases &gt; $100K by executives, directors &amp; 10% owners. Updated daily.</p>
+      <div class="toolbar">
+        <input type="text" class="search-box" id="insider-search" placeholder="🔍 Search ticker…"
+          oninput="this.value=this.value.toUpperCase();renderInsiders()">
+        <span class="updated" id="last-updated"></span>
+      </div>
+      <table class="sm-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Ticker</th>
+            <th>Company</th>
+            <th>Insider</th>
+            <th>Role</th>
+            <th>Shares</th>
+            <th>Price</th>
+            <th>Value</th>
+            <th>Owns after</th>
+          </tr>
+        </thead>
+        <tbody id="insider-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Institutional Holdings -->
+    <div class="section">
+      <h2>🏛️ Hedge Fund Holdings
+        <span style="font-size:11px;color:var(--muted);font-weight:400"> — latest 13F filings</span>
+      </h2>
+      <p class="sub">Top 10 positions per fund. Quarterly data — filed 45 days after quarter end.</p>
+      <div id="fund-grid" class="fund-grid"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+var insiderData      = [];
+var institutionData  = [];
+var scannerTickers   = new Set();
+
+function fmtVal(v) {
+  if (!v) return '—';
+  if (v >= 1e9) return '$' + (v/1e9).toFixed(1) + 'B';
+  if (v >= 1e6) return '$' + (v/1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return '$' + (v/1e3).toFixed(0) + 'K';
+  return '$' + v;
+}
+
+function fmtShares(v) {
+  if (!v) return '—';
+  if (v >= 1e6) return (v/1e6).toFixed(2) + 'M';
+  if (v >= 1e3) return (v/1e3).toFixed(1) + 'K';
+  return v.toLocaleString();
+}
+
+function roleClass(title) {
+  var t = (title||'').toLowerCase();
+  if (t.includes('ceo') || t.includes('chief executive')) return 'ceo';
+  if (t.includes('director')) return 'dir';
+  if (t.includes('owner') || t.includes('10%')) return 'own';
+  return '';
+}
+
+function renderInsiders() {
+  var search = (document.getElementById('insider-search').value || '').trim();
+  var rows = insiderData.filter(function(r) {
+    if (search && r.ticker.indexOf(search) === -1 && (r.company||'').toUpperCase().indexOf(search) === -1) return false;
+    return true;
+  });
+
+  document.getElementById('insider-count').textContent = '— ' + rows.length + ' transactions';
+
+  var html = '';
+  rows.forEach(function(r) {
+    var match = scannerTickers.has(r.ticker);
+    var rc = roleClass(r.title);
+    html += '<tr>'
+      + '<td>' + (r.date||'—') + '</td>'
+      + '<td><span class="ticker-badge">' + r.ticker + '</span>'
+      + (match ? '<span class="scanner-match">📡 In scanner</span>' : '') + '</td>'
+      + '<td style="color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (r.company||'—') + '</td>'
+      + '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (r.insider||'—') + '</td>'
+      + '<td><span class="role-badge ' + rc + '">' + (r.title||'Insider') + '</span></td>'
+      + '<td>' + fmtShares(r.shares) + '</td>'
+      + '<td>' + (r.price ? '$' + r.price.toFixed(2) : '—') + '</td>'
+      + '<td class="value-big">' + fmtVal(r.value) + '</td>'
+      + '<td style="color:var(--muted)">' + fmtShares(r.owned_after) + '</td>'
+      + '</tr>';
+  });
+  document.getElementById('insider-body').innerHTML = html ||
+    '<tr><td colspan="9" style="color:var(--muted);text-align:center;padding:30px">No insider buys found matching your search.</td></tr>';
+}
+
+function renderInstitutions() {
+  var html = '';
+  institutionData.forEach(function(fund) {
+    var maxVal = fund.holdings && fund.holdings.length ? fund.holdings[0].value : 1;
+    html += '<div class="fund-card">';
+    html += '<div class="fund-name">' + fund.fund + '</div>';
+    html += '<div class="fund-meta">Filed: ' + (fund.filed||'—') + ' · Portfolio tracked: ' + fmtVal(fund.total_value) + '</div>';
+    (fund.holdings||[]).forEach(function(h) {
+      var match = h.ticker && scannerTickers.has(h.ticker);
+      var barW  = Math.round(h.value / maxVal * 100);
+      html += '<div class="holding-row">';
+      html += '<div><div class="h-ticker">' + (h.ticker || '—') + (match ? ' 📡' : '') + '</div>'
+            + '<div class="h-bar" style="width:' + barW + '%"></div></div>';
+      html += '<div class="h-name">' + h.name + '</div>';
+      html += '<div class="h-value">' + fmtVal(h.value) + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  document.getElementById('fund-grid').innerHTML = html ||
+    '<div style="color:var(--muted);padding:20px">No institutional data yet. Run smart_money.py on the VM.</div>';
+}
+
+function loadData() {
+  // Load current scanner tickers for cross-referencing
+  fdb.ref('scanner/all_stocks').once('value', function(snap) {
+    var stocks = snap.val() || {};
+    scannerTickers = new Set(Object.keys(stocks));
+  });
+
+  fdb.ref('scanner/smart_money').once('value', function(snap) {
+    var data = snap.val();
+    if (!data) {
+      document.getElementById('loading').innerHTML =
+        '<div class="error">No smart money data yet.<br><br>'
+        + '<code style="font-size:12px;color:var(--muted)">python smart_money.py</code><br>'
+        + '<span style="font-size:12px;color:var(--muted)">Run on the VM to populate data.</span></div>';
+      return;
+    }
+
+    insiderData     = data.insiders     || [];
+    institutionData = data.institutions || [];
+
+    var updated = data.last_updated ? new Date(data.last_updated).toLocaleString() : '—';
+    document.getElementById('last-updated').textContent = 'Last updated: ' + updated;
+
+    renderInsiders();
+    renderInstitutions();
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  }, function(err) {
+    document.getElementById('loading').innerHTML =
+      '<div class="error">Firebase error: ' + err.message + '</div>';
+  });
+}
+
+loadData();
+</script>
+</body>
+</html>"""
+
 
 @app.route('/api/analytics')
 def api_analytics():
