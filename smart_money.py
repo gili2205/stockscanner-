@@ -184,7 +184,7 @@ def get_recent_form4_filings(days_back=14):
     return filings[:MAX_INSIDER_FILINGS]
 
 
-def parse_form4_xml(company_cik, accession_clean):
+def parse_form4_xml(company_cik, accession_clean, verbose=False):
     """
     Fetch and parse a Form 4 XML filing.
     Accepts company_cik and accession_clean (18-digit, no dashes) extracted
@@ -197,19 +197,27 @@ def parse_form4_xml(company_cik, accession_clean):
     base_url = f"https://www.sec.gov/Archives/edgar/data/{company_cik}/{accession_clean}/"
     r_dir = sec_get(base_url)
     if not r_dir:
-        log.warning(f"  Could not fetch Form 4 directory: {base_url}")
+        log.warning(f"  [MISS] Directory fetch failed: {base_url}")
         return []
 
+    # Look for XML files in the directory listing (EDGAR uses both quoted variants)
     xml_links = _re.findall(r'href="([^"]*\.xml)"', r_dir.text, _re.IGNORECASE)
     if not xml_links:
+        if verbose:
+            log.info(f"  [MISS] No XML files in directory: {base_url}")
+            # Log first 500 chars of directory so we can see the format
+            log.info(f"  DIR snippet: {r_dir.text[:500]}")
         return []
 
     # Form 4 filings typically have one primary XML — take the first one
     xml_file = xml_links[0].split("/")[-1]
     xml_url = f"{base_url}{xml_file}"
+    if verbose:
+        log.info(f"  [XML] Fetching: {xml_url}")
 
     r = sec_get(xml_url)
     if not r:
+        log.warning(f"  [MISS] XML fetch failed: {xml_url}")
         return []
 
     try:
@@ -223,7 +231,6 @@ def parse_form4_xml(company_cik, accession_clean):
         insider = xml_val(root, "rptOwnerName") or ""
         title   = xml_val(root, "officerTitle") or ""
         is_dir  = xml_val(root, "isDirector") == "1"
-        is_off  = xml_val(root, "isOfficer")  == "1"
         is_10pct= xml_val(root, "isTenPercentOwner") == "1"
 
         if not title:
@@ -231,15 +238,21 @@ def parse_form4_xml(company_cik, accession_clean):
             elif is_10pct: title = "10% Owner"
             else:        title = "Insider"
 
+        # Count all nonDerivativeTransaction elements before filtering
+        all_txns = root.findall(".//nonDerivativeTransaction")
+        if verbose:
+            log.info(f"  [TXN] {ticker or '?'} — {len(all_txns)} nonDerivativeTransaction(s)")
+
         transactions = []
 
-        # Non-derivative transactions (actual stock purchases)
-        for txn in root.findall(".//nonDerivativeTransaction"):
+        for txn in all_txns:
             code  = xml_val(txn, "transactionCode")
             adc   = xml_val(txn, "transactionAcquiredDisposedCode")
 
             # Only purchases: code P or code M with Acquired
             if code not in ("P",) and not (code == "M" and adc == "A"):
+                if verbose:
+                    log.info(f"    skip code={code} adc={adc}")
                 continue
 
             tx_date = xml_val(txn, "transactionDate")
@@ -252,11 +265,17 @@ def parse_form4_xml(company_cik, accession_clean):
                 price_f  = float(price)  if price  else 0
                 value    = round(shares_f * price_f)
             except Exception:
+                if verbose:
+                    log.info(f"    skip — bad numbers shares={shares} price={price}")
                 continue
 
             if value < MIN_INSIDER_VALUE:
+                if verbose:
+                    log.info(f"    skip — value ${value:,} < ${MIN_INSIDER_VALUE:,}")
                 continue
             if not ticker or not tx_date:
+                if verbose:
+                    log.info(f"    skip — missing ticker={ticker} date={tx_date}")
                 continue
 
             transactions.append({
@@ -288,7 +307,8 @@ def fetch_insider_buys():
 
     all_buys = []
     for i, filing in enumerate(filings):
-        txns = parse_form4_xml(filing["company_cik"], filing["accession_clean"])
+        verbose = (i < 3)   # verbose for first 3 filings to debug
+        txns = parse_form4_xml(filing["company_cik"], filing["accession_clean"], verbose=verbose)
         all_buys.extend(txns)
         if (i + 1) % 20 == 0:
             log.info(f"  Processed {i+1}/{len(filings)} filings, {len(all_buys)} buys found")
