@@ -240,6 +240,17 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
       </div>
     </div>
 
+    <!-- Days on list -->
+    <div class="fgroup">
+      <div class="fgrouplabel">&#128197; On the list</div>
+      <div class="fchips">
+        <div class="fchip blue" data-group="streak" data-val="new" onclick="toggleChip(this)"><span class="fcheck"></span>New today</div>
+        <div class="fchip" data-group="streak" data-val="fresh" onclick="toggleChip(this)"><span class="fcheck"></span>1-5 days</div>
+        <div class="fchip amber" data-group="streak" data-val="building" onclick="toggleChip(this)"><span class="fcheck"></span>6-14 days</div>
+        <div class="fchip green" data-group="streak" data-val="proven" onclick="toggleChip(this)"><span class="fcheck"></span>15+ days</div>
+      </div>
+    </div>
+
     <!-- Quick presets -->
     <div class="fgroup">
       <div class="fgrouplabel">&#9889; Quick Presets</div>
@@ -285,7 +296,7 @@ var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}}, firstSe
 
 // ── Filter state — which chips are ON per group ───────────────────────────────
 // Empty set = no filter for that group (show all)
-var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[] }};
+var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[] }};
 
 function toggleChip(el) {{
   var group = el.dataset.group;
@@ -317,16 +328,16 @@ function setChip(group, val, on) {{
 
 function resetAll() {{
   document.querySelectorAll(".fchip[data-group]").forEach(function(c){{c.classList.remove("on");}});
-  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[] }};
+  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[] }};
   render();
 }}
 
 // ── Quick presets ─────────────────────────────────────────────────────────────
 var PRESETS = {{
-  safe:      {{ size:["mega","large"], risk:["low","med"], setup:["breakout","prebreak"], momentum:[], sector:[] }},
-  bigtech:   {{ size:["mega","large"], risk:[],            setup:[],                      momentum:["strong","hot"], sector:[] }},
-  earnings:  {{ size:[],              risk:[],            setup:["earnings","catalyst"],  momentum:[], sector:[] }},
-  explosive: {{ size:["small","mid"], risk:["high"],      setup:["bullflag","breakout"],  momentum:["strong","hot"], sector:[] }},
+  safe:      {{ size:["mega","large"], risk:["low","med"], setup:["breakout","prebreak"], momentum:[], sector:[], streak:[] }},
+  bigtech:   {{ size:["mega","large"], risk:[],            setup:[],                      momentum:["strong","hot"], sector:[], streak:[] }},
+  earnings:  {{ size:[],              risk:[],            setup:["earnings","catalyst"],  momentum:[], sector:[], streak:[] }},
+  explosive: {{ size:["small","mid"], risk:["high"],      setup:["bullflag","breakout"],  momentum:["strong","hot"], sector:[], streak:[] }},
 }};
 
 function applyPreset(name) {{
@@ -383,6 +394,22 @@ function passesFilters(s) {{
     if (!activeFilters.sector.includes(stockSector)) return false;
   }}
 
+  // Streak — filter by how many days the stock has been on the list
+  if (activeFilters.streak && activeFilters.streak.length > 0) {{
+    var fs = firstSeenData[s.ticker];
+    var days = null;
+    if (fs && fs.date) {{
+      var d0 = new Date(fs.date+'T00:00:00'), d1 = new Date(); d1.setHours(0,0,0,0);
+      days = Math.round((d1-d0)/86400000);
+    }}
+    var streakOk = false;
+    if (activeFilters.streak.includes("new")      && days === 0)           streakOk = true;
+    if (activeFilters.streak.includes("fresh")    && days !== null && days >= 1 && days <= 5)  streakOk = true;
+    if (activeFilters.streak.includes("building") && days !== null && days >= 6 && days <= 14) streakOk = true;
+    if (activeFilters.streak.includes("proven")   && days !== null && days >= 15)              streakOk = true;
+    if (!streakOk) return false;
+  }}
+
   // Momentum — use threshold logic (not exact bucket)
   // hot=30+, strong=15+, pos=0+, neg=<0 — pick the highest selected threshold
   if (activeFilters.momentum.length > 0) {{
@@ -413,6 +440,7 @@ function getActiveDesc() {{
   if (activeFilters.size.length)     parts.push(activeFilters.size.join(" or ").replace(/mega/g,"Mega").replace(/large/g,"Large").replace(/mid/g,"Mid").replace(/small/g,"Small")+" cap");
   if (activeFilters.risk.length)     parts.push(activeFilters.risk.join("/")+"-risk");
   if (activeFilters.sector && activeFilters.sector.length) parts.push(activeFilters.sector.join(" or "));
+  if (activeFilters.streak && activeFilters.streak.length) parts.push(activeFilters.streak.map(function(v){{return {{new:"New today",fresh:"1-5 days",building:"6-14 days",proven:"15+ days"}}[v]||v;}}).join(" or ")+" on list");
   if (activeFilters.setup.length)    parts.push(activeFilters.setup.map(function(v){{return {{breakout:"Breakout",catalyst:"Catalyst",bullflag:"Bull Flag",prebreak:"Pre-breakout",earnings:"Earnings soon"}}[v]||v;}}).join(" or "));
   if (activeFilters.momentum.length) parts.push({{hot:"Hot +30%",strong:"Strong +15%",pos:"Positive",neg:"Pullback"}}[activeFilters.momentum[0]]||activeFilters.momentum[0]);
   if (!parts.length) return "Showing all stocks \u2014 select filters above to narrow down";
@@ -686,10 +714,11 @@ function makeCard(s, rank) {{
     daysOnList = Math.round((today2 - fsDate) / 86400000);
   }}
   var daysLabel='', daysColor='var(--muted)';
-  if (daysOnList === 0) {{ daysLabel='&#127381; New today'; daysColor='var(--blue)'; }}
-  else if (daysOnList !== null && daysOnList <= 3) {{ daysLabel='&#128197; Day '+daysOnList; daysColor='var(--muted)'; }}
-  else if (daysOnList !== null && daysOnList <= 14) {{ daysLabel='&#128197; Day '+daysOnList; daysColor='var(--amber)'; }}
-  else if (daysOnList !== null) {{ daysLabel='&#128197; Day '+daysOnList; daysColor='var(--green)'; }}
+  if (daysOnList === 0) {{ daysLabel='New today'; daysColor='var(--blue)'; }}
+  else if (daysOnList === 1) {{ daysLabel='1 day on the list'; daysColor='var(--muted)'; }}
+  else if (daysOnList !== null && daysOnList <= 3) {{ daysLabel=daysOnList+' days on the list'; daysColor='var(--muted)'; }}
+  else if (daysOnList !== null && daysOnList <= 14) {{ daysLabel=daysOnList+' days on the list'; daysColor='var(--amber)'; }}
+  else if (daysOnList !== null) {{ daysLabel=daysOnList+' days on the list'; daysColor='var(--green)'; }}
 
   var h='';
   h += '<div class="card '+(s.status==='READY'?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
