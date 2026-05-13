@@ -157,19 +157,25 @@ def parse_form4_xml(accession):
 
     try:
         idx = r.json()
-        # Find the primary Form 4 XML document
+        # EDGAR filing index JSON uses "directory.item" format (not "documents").
+        # Each item has "name" (filename) and "type" (form type).
+        docs = idx.get("directory", {}).get("item", [])
         xml_file = None
-        for doc in idx.get("documents", []):
-            if doc.get("type") == "4" and doc.get("document", "").endswith(".xml"):
-                xml_file = doc["document"]
+        # First pass: look for a type-4 XML file
+        for doc in docs:
+            fname = doc.get("name", "")
+            if doc.get("type") == "4" and fname.lower().endswith(".xml"):
+                xml_file = fname
                 break
+        # Fallback: any XML file
         if not xml_file:
-            # Try to find any XML file
-            for doc in idx.get("documents", []):
-                if doc.get("document", "").endswith(".xml"):
-                    xml_file = doc["document"]
+            for doc in docs:
+                fname = doc.get("name", "")
+                if fname.lower().endswith(".xml"):
+                    xml_file = fname
                     break
         if not xml_file:
+            log.debug(f"No XML file found in index for {accession} (docs={len(docs)})")
             return []
     except Exception:
         return []
