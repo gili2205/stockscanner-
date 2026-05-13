@@ -101,17 +101,25 @@ def xml_val(elem, tag):
 # ── Form 4 — Insider Buying ───────────────────────────────────────────────────
 
 def get_recent_form4_filings(days_back=14):
-    """Get recent Form 4 filing accession numbers from EDGAR full-text search."""
+    """Get recent Form 4 filing accession numbers from EDGAR full-text search.
+
+    Uses the EDGAR EFTS API. q='""' (empty phrase) bypasses the date filter
+    and returns oldest filings first — use a real search term so the dateRange
+    filter is applied correctly.  'transactionCode' appears in every Form 4 XML.
+    Results are also filtered client-side by file_date as a safety net.
+    """
     start = (date.today() - timedelta(days=days_back)).isoformat()
+    end   = date.today().isoformat()
     log.info(f"Fetching Form 4 filings since {start}...")
 
     r = sec_get(
         "https://efts.sec.gov/LATEST/search-index",
         params={
-            "q": '""',       # quoted empty string (%22%22) — empty q= returns 0 documents
-            "forms": "4",
+            "q":         "transactionCode",   # real term → date filter applies
+            "forms":     "4",
             "dateRange": "custom",
-            "startdt": start,
+            "startdt":   start,
+            "enddt":     end,
         }
     )
     if not r:
@@ -122,15 +130,18 @@ def get_recent_form4_filings(days_back=14):
         hits = data.get("hits", {}).get("hits", [])
         filings = []
         for hit in hits[:MAX_INSIDER_FILINGS]:
-            src = hit.get("_source", {})
-            accession = src.get("adsh", "")          # field is "adsh", not "accession_no"
-            if accession:
-                filings.append({
-                    "accession": accession,
-                    "entity":    src.get("display_names", ""),  # field is "display_names"
-                    "file_date": src.get("file_date", ""),
-                })
-        log.info(f"Found {len(filings)} Form 4 filings")
+            src       = hit.get("_source", {})
+            accession = src.get("adsh", "")
+            file_date = src.get("file_date", "")
+            # client-side date guard — reject anything outside our window
+            if not accession or file_date < start:
+                continue
+            filings.append({
+                "accession": accession,
+                "entity":    src.get("display_names", ""),
+                "file_date": file_date,
+            })
+        log.info(f"Found {len(filings)} Form 4 filings in date range")
         return filings
     except Exception as e:
         log.error(f"Failed to parse Form 4 search results: {e}")
