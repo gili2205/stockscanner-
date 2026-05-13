@@ -119,6 +119,16 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .cup{{color:var(--green);}}.cdn{{color:var(--red);}}
 .empty{{text-align:center;padding:60px;color:var(--muted);font-size:14px;line-height:2;}}
 .pgfoot{{padding:14px 24px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);text-align:center;margin-top:8px;}}
+.nav-pills{{display:flex;gap:6px;align-items:center;}}
+.nav-pill{{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}}
+.nav-pill:hover{{color:var(--text);border-color:var(--blue);}}
+.nav-pill.active{{background:var(--blue);color:#fff;border-color:var(--blue);}}
+.mcap-badge{{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg3);color:var(--muted);border:1px solid var(--border);vertical-align:middle;margin-left:6px;font-weight:400;}}
+.perf-row{{display:flex;border-top:1px solid var(--border);margin-top:10px;padding-top:10px;}}
+.perf-item{{flex:1;text-align:center;border-right:1px solid var(--border);}}
+.perf-item:last-child{{border-right:none;}}
+.perf-lbl{{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}}
+.perf-val{{font-size:13px;font-weight:600;}}
 @media(max-width:700px){{.grid{{padding:10px;gap:8px;}}.fold-metrics{{display:none;}}.filterpanel{{padding:10px 14px;}}}}
 </style>
 </head>
@@ -129,8 +139,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <p>Scans 2,000+ stocks &middot; Multi-filter &middot; P/E &middot; RSI &middot; Analyst Target &middot; Updates every 60s</p>
   </div>
   <div class="hright">
-    <a href="/analytics" style="font-size:11px;color:var(--blue);text-decoration:none;margin-right:8px">📊 Analytics</a>
-    <a href="/smart-money" style="font-size:11px;color:var(--blue);text-decoration:none;margin-right:8px">🏦 Smart Money</a>
+    <div class="nav-pills"><a class="nav-pill active" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a></div>
     <span class="ver" id="verspan">{ver}</span>
     <span class="regime closed" id="regime">&#9679; Connecting...</span>
   </div>
@@ -633,7 +642,7 @@ function makeCard(s, rank) {{
   h += '<div style="display:flex;align-items:center;gap:12px">';
   h += '<div class="card-rank '+(isTop?'top':'')+'">'+rank+'</div>';
   h += '<div>';
-  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
+  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
   h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span></div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
@@ -663,6 +672,15 @@ function makeCard(s, rank) {{
 
   // Score bar
   h += '<div style="height:4px;background:var(--bg3)"><div style="height:100%;width:'+Math.min(100,unifiedScore)+'%;background:'+color+';transition:width .3s"></div></div>';
+
+  // Performance row — 1D from scanner data, 1W/1M/3M/6M loaded async
+  h += '<div class="perf-row">';
+  h += '<div class="perf-item"><div class="perf-lbl">1D</div><div class="perf-val '+(chg>=0?'fg':'fr')+'">'+chgStr+'</div></div>';
+  h += '<div class="perf-item"><div class="perf-lbl">1W</div><div class="perf-val" id="p1w-'+s.ticker+'">&mdash;</div></div>';
+  h += '<div class="perf-item"><div class="perf-lbl">1M</div><div class="perf-val" id="p1m-'+s.ticker+'">&mdash;</div></div>';
+  h += '<div class="perf-item"><div class="perf-lbl">3M</div><div class="perf-val" id="p3m-'+s.ticker+'">&mdash;</div></div>';
+  h += '<div class="perf-item"><div class="perf-lbl">6M</div><div class="perf-val" id="p6m-'+s.ticker+'">&mdash;</div></div>';
+  h += '</div>';
 
   // ── Expandable body ───────────────────────────────────────────────────────
   h += '<div class="card-body" id="body-'+s.ticker+'" style="display:none">';
@@ -838,7 +856,49 @@ function prefetchAllFundamentals() {{
   // Then fetch missing ones with small stagger
   needFetch.forEach(function(ticker, i) {{
     setTimeout(function() {{ fetchFundamentals(ticker); }}, i * 150);
+    setTimeout(function() {{ fetchPerf(ticker); }}, i * 150 + 75);
   }});
+  // Apply cached perf data immediately
+  headers.forEach(function(hdr) {{
+    var ticker = hdr.getAttribute('data-ticker');
+    if(ticker && _perfData[ticker]) applyPerf(ticker);
+  }});
+}}
+
+// ── Performance (market cap + 1W/1M/3M/6M) ───────────────────────────────────
+var _perfData  = {{}};
+var _perfCache = {{}};
+
+function applyPerf(ticker) {{
+  var d = _perfData[ticker];
+  if (!d) return;
+  var mcap = document.getElementById('mcap-'+ticker);
+  if (mcap && d.market_cap) mcap.textContent = d.market_cap;
+  function setPct(id, val) {{
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (val == null) {{ el.textContent = '—'; el.className = 'perf-val'; return; }}
+    el.textContent = (val >= 0 ? '+' : '') + val.toFixed(1) + '%';
+    el.className = 'perf-val ' + (val >= 0 ? 'fg' : 'fr');
+  }}
+  setPct('p1w-'+ticker, d.change_1w);
+  setPct('p1m-'+ticker, d.change_1m);
+  setPct('p3m-'+ticker, d.change_3m);
+  setPct('p6m-'+ticker, d.change_6m);
+}}
+
+async function fetchPerf(ticker) {{
+  if (_perfData[ticker]) {{ applyPerf(ticker); return; }}
+  if (_perfCache[ticker]) return;
+  _perfCache[ticker] = true;
+  try {{
+    var resp = await fetch('/api/perf/' + ticker);
+    if (!resp.ok) {{ _perfCache[ticker] = false; return; }}
+    var d = await resp.json();
+    if (d.error) {{ _perfCache[ticker] = false; return; }}
+    _perfData[ticker] = d;
+    applyPerf(ticker);
+  }} catch(e) {{ _perfCache[ticker] = false; }}
 }}
 
 function doChart(btn) {{
@@ -996,6 +1056,43 @@ def lookup():
 
 
 
+@app.route('/api/perf/<ticker>')
+def api_perf(ticker):
+    """Return market cap + 1W/1M/3M/6M performance for a ticker."""
+    ticker = ticker.upper().strip()
+    if not ticker or len(ticker) > 6:
+        return jsonify({'error': 'Invalid ticker'}), 400
+    try:
+        tk   = yf.Ticker(ticker)
+        hist = tk.history(period='6mo', interval='1d')
+        if hist.empty:
+            return jsonify({'error': 'No data'}), 404
+        closes = hist['Close'].tolist()
+        price  = closes[-1]
+
+        def pct(n):
+            if len(closes) > n:
+                return round((price - closes[-n-1]) / closes[-n-1] * 100, 1)
+            return None
+
+        mc     = getattr(tk.fast_info, 'market_cap', None)
+        mc_str = None
+        if mc:
+            if   mc >= 1e12: mc_str = f"{mc/1e12:.1f}T"
+            elif mc >= 1e9:  mc_str = f"{mc/1e9:.1f}B"
+            else:             mc_str = f"{mc/1e6:.0f}M"
+
+        return jsonify({
+            'market_cap': mc_str,
+            'change_1w':  pct(5),
+            'change_1m':  pct(21),
+            'change_3m':  pct(63),
+            'change_6m':  pct(126),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/analytics')
 def analytics():
     cfg_tag = '<script id="fb-cfg" type="application/json">' + json.dumps(FIREBASE_CONFIG) + '</script>'
@@ -1014,8 +1111,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .header{background:var(--bg2);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;}
 .header h1{font-size:18px;font-weight:700;}
 .header p{font-size:11px;color:var(--muted);margin-top:2px;}
-.nav-link{color:var(--blue);text-decoration:none;font-size:12px;font-weight:600;}
-.nav-link:hover{text-decoration:underline;}
+.nav-pills{display:flex;gap:6px;align-items:center;}
+.nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
+.nav-pill:hover{color:var(--text);border-color:var(--blue);}
+.nav-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
 .page{padding:24px;}
 .loading{text-align:center;padding:80px;color:var(--muted);font-size:16px;}
 .error{color:var(--red);padding:20px;text-align:center;}
@@ -1102,7 +1201,7 @@ var fdb = firebase.database();
     <h1>📊 Scanner Analytics</h1>
     <p>Historical performance of scanner picks — does the logic actually find winners?</p>
   </div>
-  <a class="nav-link" href="/">← Back to Scanner</a>
+  <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a></div>
 </div>
 
 <div class="page">
@@ -1627,7 +1726,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .header{background:var(--bg2);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;}
 .header h1{font-size:18px;font-weight:700;}
 .header p{font-size:11px;color:var(--muted);margin-top:2px;}
-.nav-link{color:var(--blue);text-decoration:none;font-size:12px;font-weight:600;}
+.nav-pills{display:flex;gap:6px;align-items:center;}
+.nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
+.nav-pill:hover{color:var(--text);border-color:var(--blue);}
+.nav-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
 .page{padding:24px;}
 .loading{text-align:center;padding:60px;color:var(--muted);font-size:15px;}
 .error{color:var(--red);padding:20px;text-align:center;}
@@ -1681,7 +1783,7 @@ var fdb = firebase.database();
     <h1>🏦 Smart Money Tracker</h1>
     <p>Insider transactions &amp; hedge fund holdings — see what big players are buying</p>
   </div>
-  <a class="nav-link" href="/">← Back to Scanner</a>
+  <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a></div>
 </div>
 
 <div class="page">
