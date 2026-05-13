@@ -19,7 +19,7 @@ Usage:
     python smart_money.py --institutions # only 13F data
 """
 
-import os, time, json, logging, argparse
+import os, re, time, json, logging, argparse
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -139,36 +139,39 @@ def get_recent_form4_filings(days_back=14):
 
             reached_old = False
             for entry in entries:
-                # Filing date is in <updated> tag (ISO format)
-                updated = entry.find(f"{{{ns}}}updated")
+                # Filing date from <updated>
+                updated   = entry.find(f"{{{ns}}}updated")
                 file_date = (updated.text or "")[:10] if updated is not None else ""
 
                 if file_date and file_date < start:
                     reached_old = True
                     break
 
-                # Accession number is in <id>: urn:tag:sec.gov,...=XXXXXXXXXX-YY-ZZZZZZ
-                id_el = entry.find(f"{{{ns}}}id")
-                if id_el is None or not id_el.text:
+                # Extract company CIK + accession_clean from the <link> href.
+                # href format: .../Archives/edgar/data/{CIK}/{accession_clean}/...
+                # This gives the COMPANY CIK (not the filer/agent CIK that's in
+                # the accession number prefix) — critical for building the right URL.
+                link_el = entry.find(f"{{{ns}}}link")
+                href    = link_el.get("href", "") if link_el is not None else ""
+                m = re.search(r"/Archives/edgar/data/(\d+)/(\d{18})", href)
+                if not m:
                     continue
-                # Extract after last "="
-                raw = id_el.text.strip()
-                accession = raw.split("=")[-1] if "=" in raw else ""
-                if not accession:
-                    continue
+                company_cik    = m.group(1)
+                accession_clean = m.group(2)
 
                 title_el = entry.find(f"{{{ns}}}title")
                 entity   = title_el.text.strip() if title_el is not None and title_el.text else ""
 
                 filings.append({
-                    "accession": accession,
-                    "entity":    entity,
-                    "file_date": file_date,
+                    "company_cik":    company_cik,
+                    "accession_clean": accession_clean,
+                    "entity":         entity,
+                    "file_date":      file_date,
                 })
-                dateb = file_date   # keep track of oldest date seen
+                dateb = file_date
 
             if reached_old or len(entries) < 200:
-                break   # no need to fetch more pages
+                break
 
         except Exception as e:
             log.error(f"Failed to parse Form 4 Atom feed (page {page+1}): {e}")
@@ -181,22 +184,17 @@ def get_recent_form4_filings(days_back=14):
     return filings[:MAX_INSIDER_FILINGS]
 
 
-def parse_form4_xml(accession):
+def parse_form4_xml(company_cik, accession_clean):
     """
     Fetch and parse a Form 4 XML filing.
+    Accepts company_cik and accession_clean (18-digit, no dashes) extracted
+    directly from the Atom feed link — avoids CIK mismatch between the
+    filing agent (accession prefix) and the actual archive path (company CIK).
     Returns list of transaction dicts (only purchases with value > MIN_INSIDER_VALUE).
     """
     import re as _re
 
-    # Normalise accession number — EFTS search returns CIK without zero-padding
-    # (e.g. "1536411-26-000001") but the archive URL requires 18-digit form
-    # ("000153641126000001"). Zero-pad the first segment to 10 digits.
-    parts = accession.split("-")
-    cik = str(int(parts[0]))                          # CIK without leading zeros (for URL path)
-    accession_clean = parts[0].zfill(10) + "".join(parts[1:])  # always 18 digits
-
-    # Fetch the filing directory listing to find the Form 4 XML.
-    base_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_clean}/"
+    base_url = f"https://www.sec.gov/Archives/edgar/data/{company_cik}/{accession_clean}/"
     r_dir = sec_get(base_url)
     if not r_dir:
         log.warning(f"  Could not fetch Form 4 directory: {base_url}")
@@ -290,7 +288,7 @@ def fetch_insider_buys():
 
     all_buys = []
     for i, filing in enumerate(filings):
-        txns = parse_form4_xml(filing["accession"])
+        txns = parse_form4_xml(filing["company_cik"], filing["accession_clean"])
         all_buys.extend(txns)
         if (i + 1) % 20 == 0:
             log.info(f"  Processed {i+1}/{len(filings)} filings, {len(all_buys)} buys found")
