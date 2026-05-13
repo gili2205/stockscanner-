@@ -205,8 +205,9 @@ def parse_form4_xml(company_cik, accession_clean, verbose=False):
     if not xml_links:
         if verbose:
             log.info(f"  [MISS] No XML files in directory: {base_url}")
-            # Log first 500 chars of directory so we can see the format
-            log.info(f"  DIR snippet: {r_dir.text[:500]}")
+            # Show all hrefs so we can see what's actually in the directory
+            all_hrefs = _re.findall(r'href="([^"]*)"', r_dir.text, _re.IGNORECASE)
+            log.info(f"  All hrefs: {all_hrefs[:20]}")
         return []
 
     # Form 4 filings typically have one primary XML — take the first one
