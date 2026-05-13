@@ -240,6 +240,17 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
       </div>
     </div>
 
+    <!-- Days on list -->
+    <div class="fgroup">
+      <div class="fgrouplabel">&#128197; On the list</div>
+      <div class="fchips">
+        <div class="fchip blue" data-group="streak" data-val="new" onclick="toggleChip(this)"><span class="fcheck"></span>New today</div>
+        <div class="fchip" data-group="streak" data-val="fresh" onclick="toggleChip(this)"><span class="fcheck"></span>1-5 days</div>
+        <div class="fchip amber" data-group="streak" data-val="building" onclick="toggleChip(this)"><span class="fcheck"></span>6-14 days</div>
+        <div class="fchip green" data-group="streak" data-val="proven" onclick="toggleChip(this)"><span class="fcheck"></span>15+ days</div>
+      </div>
+    </div>
+
     <!-- Quick presets -->
     <div class="fgroup">
       <div class="fgrouplabel">&#9889; Quick Presets</div>
@@ -281,11 +292,11 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 var VER = "{ver}";
 var CFG = {cfg};
 var connected = false, lastDataTime = null, watchdogTimer = null;
-var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}};
+var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}}, firstSeenData = {{}};
 
 // ── Filter state — which chips are ON per group ───────────────────────────────
 // Empty set = no filter for that group (show all)
-var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[] }};
+var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[] }};
 
 function toggleChip(el) {{
   var group = el.dataset.group;
@@ -317,16 +328,16 @@ function setChip(group, val, on) {{
 
 function resetAll() {{
   document.querySelectorAll(".fchip[data-group]").forEach(function(c){{c.classList.remove("on");}});
-  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[] }};
+  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[] }};
   render();
 }}
 
 // ── Quick presets ─────────────────────────────────────────────────────────────
 var PRESETS = {{
-  safe:      {{ size:["mega","large"], risk:["low","med"], setup:["breakout","prebreak"], momentum:[], sector:[] }},
-  bigtech:   {{ size:["mega","large"], risk:[],            setup:[],                      momentum:["strong","hot"], sector:[] }},
-  earnings:  {{ size:[],              risk:[],            setup:["earnings","catalyst"],  momentum:[], sector:[] }},
-  explosive: {{ size:["small","mid"], risk:["high"],      setup:["bullflag","breakout"],  momentum:["strong","hot"], sector:[] }},
+  safe:      {{ size:["mega","large"], risk:["low","med"], setup:["breakout","prebreak"], momentum:[], sector:[], streak:[] }},
+  bigtech:   {{ size:["mega","large"], risk:[],            setup:[],                      momentum:["strong","hot"], sector:[], streak:[] }},
+  earnings:  {{ size:[],              risk:[],            setup:["earnings","catalyst"],  momentum:[], sector:[], streak:[] }},
+  explosive: {{ size:["small","mid"], risk:["high"],      setup:["bullflag","breakout"],  momentum:["strong","hot"], sector:[], streak:[] }},
 }};
 
 function applyPreset(name) {{
@@ -383,6 +394,22 @@ function passesFilters(s) {{
     if (!activeFilters.sector.includes(stockSector)) return false;
   }}
 
+  // Streak — filter by how many days the stock has been on the list
+  if (activeFilters.streak && activeFilters.streak.length > 0) {{
+    var fs = firstSeenData[s.ticker];
+    var days = null;
+    if (fs && fs.date) {{
+      var d0 = new Date(fs.date+'T00:00:00'), d1 = new Date(); d1.setHours(0,0,0,0);
+      days = Math.round((d1-d0)/86400000);
+    }}
+    var streakOk = false;
+    if (activeFilters.streak.includes("new")      && days === 0)           streakOk = true;
+    if (activeFilters.streak.includes("fresh")    && days !== null && days >= 1 && days <= 5)  streakOk = true;
+    if (activeFilters.streak.includes("building") && days !== null && days >= 6 && days <= 14) streakOk = true;
+    if (activeFilters.streak.includes("proven")   && days !== null && days >= 15)              streakOk = true;
+    if (!streakOk) return false;
+  }}
+
   // Momentum — use threshold logic (not exact bucket)
   // hot=30+, strong=15+, pos=0+, neg=<0 — pick the highest selected threshold
   if (activeFilters.momentum.length > 0) {{
@@ -413,6 +440,7 @@ function getActiveDesc() {{
   if (activeFilters.size.length)     parts.push(activeFilters.size.join(" or ").replace(/mega/g,"Mega").replace(/large/g,"Large").replace(/mid/g,"Mid").replace(/small/g,"Small")+" cap");
   if (activeFilters.risk.length)     parts.push(activeFilters.risk.join("/")+"-risk");
   if (activeFilters.sector && activeFilters.sector.length) parts.push(activeFilters.sector.join(" or "));
+  if (activeFilters.streak && activeFilters.streak.length) parts.push(activeFilters.streak.map(function(v){{return {{new:"New today",fresh:"1-5 days",building:"6-14 days",proven:"15+ days"}}[v]||v;}}).join(" or ")+" on list");
   if (activeFilters.setup.length)    parts.push(activeFilters.setup.map(function(v){{return {{breakout:"Breakout",catalyst:"Catalyst",bullflag:"Bull Flag",prebreak:"Pre-breakout",earnings:"Earnings soon"}}[v]||v;}}).join(" or "));
   if (activeFilters.momentum.length) parts.push({{hot:"Hot +30%",strong:"Strong +15%",pos:"Positive",neg:"Pullback"}}[activeFilters.momentum[0]]||activeFilters.momentum[0]);
   if (!parts.length) return "Showing all stocks \u2014 select filters above to narrow down";
@@ -489,6 +517,7 @@ fdb.ref("/scanner").on("value", function(snap) {{
 
   if (d.all_stocks&&Object.keys(d.all_stocks).length>0) allStockData=d.all_stocks;
   else if (d.stocks&&Object.keys(d.stocks).length>0) allStockData=d.stocks;
+  if (d.first_seen) firstSeenData = d.first_seen;
 
   if (d.stocks) {{
     var nr = [];
@@ -676,6 +705,21 @@ function makeCard(s, rank) {{
     entry:entryNum.toFixed(2),stop:stopNum.toFixed(2),
     tfLabel:tfIcon+' '+tfLabel,tfColor:tfColor}};
 
+  // Days on list
+  var daysOnList = null;
+  var fsEntry = firstSeenData[s.ticker];
+  if (fsEntry && fsEntry.date) {{
+    var fsDate = new Date(fsEntry.date + 'T00:00:00');
+    var today2 = new Date(); today2.setHours(0,0,0,0);
+    daysOnList = Math.round((today2 - fsDate) / 86400000);
+  }}
+  var daysLabel='', daysColor='var(--muted)';
+  if (daysOnList === 0) {{ daysLabel='New today'; daysColor='var(--blue)'; }}
+  else if (daysOnList === 1) {{ daysLabel='1 day on the list'; daysColor='var(--muted)'; }}
+  else if (daysOnList !== null && daysOnList <= 3) {{ daysLabel=daysOnList+' days on the list'; daysColor='var(--muted)'; }}
+  else if (daysOnList !== null && daysOnList <= 14) {{ daysLabel=daysOnList+' days on the list'; daysColor='var(--amber)'; }}
+  else if (daysOnList !== null) {{ daysLabel=daysOnList+' days on the list'; daysColor='var(--green)'; }}
+
   var h='';
   h += '<div class="card '+(s.status==='READY'?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
 
@@ -688,7 +732,7 @@ function makeCard(s, rank) {{
   h += '<div class="card-rank '+(isTop?'top':'')+'">'+rank+'</div>';
   h += '<div>';
   h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
-  h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span></div>';
+  h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
   h += '<div id="'+scoreId+'" style="font-size:32px;font-weight:700;color:'+color+';cursor:pointer;line-height:1" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
