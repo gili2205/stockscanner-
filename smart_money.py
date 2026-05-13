@@ -142,49 +142,27 @@ def parse_form4_xml(accession):
     Fetch and parse a Form 4 XML filing.
     Returns list of transaction dicts (only purchases with value > MIN_INSIDER_VALUE).
     """
+    import re as _re
+
     # Derive filer CIK from accession number (first 10 digits)
     cik = str(int(accession.split("-")[0]))
     accession_clean = accession.replace("-", "")
 
-    # Get filing index to find the primary XML document
-    index_url = (
-        f"https://www.sec.gov/Archives/edgar/data/{cik}/"
-        f"{accession_clean}/{accession}-index.json"
-    )
-    r = sec_get(index_url)
-    if not r:
+    # Fetch the filing directory listing to find the Form 4 XML.
+    # (Same approach as 13F — the {accession}-index.json URL does not exist for Form 4.)
+    base_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_clean}/"
+    r_dir = sec_get(base_url)
+    if not r_dir:
         return []
 
-    try:
-        idx = r.json()
-        # EDGAR filing index JSON uses "directory.item" format (not "documents").
-        # Each item has "name" (filename) and "type" (form type).
-        docs = idx.get("directory", {}).get("item", [])
-        xml_file = None
-        # First pass: look for a type-4 XML file
-        for doc in docs:
-            fname = doc.get("name", "")
-            if doc.get("type") == "4" and fname.lower().endswith(".xml"):
-                xml_file = fname
-                break
-        # Fallback: any XML file
-        if not xml_file:
-            for doc in docs:
-                fname = doc.get("name", "")
-                if fname.lower().endswith(".xml"):
-                    xml_file = fname
-                    break
-        if not xml_file:
-            log.debug(f"No XML file found in index for {accession} (docs={len(docs)})")
-            return []
-    except Exception:
+    xml_links = _re.findall(r'href="([^"]*\.xml)"', r_dir.text, _re.IGNORECASE)
+    if not xml_links:
         return []
 
-    # Fetch and parse the XML
-    xml_url = (
-        f"https://www.sec.gov/Archives/edgar/data/{cik}/"
-        f"{accession_clean}/{xml_file}"
-    )
+    # Form 4 filings typically have one primary XML — take the first one
+    xml_file = xml_links[0].split("/")[-1]
+    xml_url = f"{base_url}{xml_file}"
+
     r = sec_get(xml_url)
     if not r:
         return []
