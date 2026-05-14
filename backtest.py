@@ -475,12 +475,12 @@ def run_backtest(n_days: int = None, specific_date: date = None, experiment: str
         log.info(f"\n--- Processing {day} ---")
         day_t = time.time()
 
-        # Check if already done (skip for experiments — always re-run)
-        if not experiment:
-            existing = hist_ref.child(day.isoformat()).get()
-            if existing and len(existing) > 50:
-                log.info(f"  Already have {len(existing)} records for {day}, skipping")
-                continue
+        # Skip dates already processed (works for both production and experiments)
+        check_ref = write_ref.child(day.isoformat())
+        existing = check_ref.get()
+        if existing and len(existing) > 50:
+            log.info(f"  Already have {len(existing)} records for {day}, skipping")
+            continue
 
         # Score all stocks as of this day
         results = []
