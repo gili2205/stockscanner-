@@ -712,9 +712,9 @@ function makeCard(s, rank) {{
   // Timeframe
   // Compute timeframe from signals (scanner rarely sets s.timeframe)
   var tf = s.timeframe || (
-    (earn!=null&&earn>=0&&earn<=7) ? 'short' :           // earnings ≤7d → quick catalyst
-    ((s.rs_percentile||0)>=85 && (s.vol_contraction||1)<=0.55 && ema_stack==='full') ? 'long' :  // top RS + tight base + full EMA → multi-month trend
-    'mid'                                                 // standard breakout
+    (earn!=null&&earn>=0&&earn<=7) ? 'short' :
+    ((s.rs_percentile||0)>=85 && (s.vol_contraction||1)<=0.55 && (s.ema_stack||'')==='full') ? 'long' :
+    'mid'
   );
   var tfLabel=tf==='short'?'Short (1-2w)':tf==='long'?'Long (3-12m)':'Mid (1-3m)';
   var tfColor=tf==='short'?'#e74c3c':tf==='long'?'#3498db':'#e67e22';
