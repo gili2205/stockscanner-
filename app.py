@@ -1015,8 +1015,35 @@ async function lookupTicker() {{
   var wrap=document.getElementById('lookup-wrap'),result=document.getElementById('lookup-result');
   wrap.style.display='block';
   result.innerHTML='<div style="color:var(--muted);padding:12px 0">&#9203; Fetching '+ticker+'...</div>';
-  if(allStockData&&allStockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in scanner</div>'+makeCard(allStockData[ticker],'&mdash;');return;}}
-  if(stockData&&stockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in top 10</div>'+makeCard(stockData[ticker],'&mdash;');return;}}
+  var baseData = (allStockData&&allStockData[ticker]) ? allStockData[ticker]
+               : (stockData&&stockData[ticker])       ? stockData[ticker]
+               : null;
+  var foundLabel = (allStockData&&allStockData[ticker]) ? '&#10003; Found in scanner'
+                 : (stockData&&stockData[ticker])       ? '&#10003; Found in top 10'
+                 : null;
+  if(baseData) {{
+    // Always fetch fresh market data so RSI / PE / analyst fields are populated
+    var enriched = Object.assign({{}}, baseData);
+    try {{
+      var resp2 = await fetch('/lookup?t='+ticker);
+      if(resp2.ok) {{
+        var d2 = await resp2.json();
+        if(!d2.error) {{
+          // Lookup wins on market data; scanner wins on score/status/signals
+          enriched.price          = d2.price          || enriched.price;
+          enriched.change_pct     = d2.change_pct     != null ? d2.change_pct : enriched.change_pct;
+          enriched.rsi            = d2.rsi            != null ? d2.rsi : enriched.rsi;
+          enriched.pe_ratio       = d2.pe_ratio       != null ? d2.pe_ratio : enriched.pe_ratio;
+          enriched.analyst_target = d2.analyst_target != null ? d2.analyst_target : enriched.analyst_target;
+          enriched.analyst_upside = d2.analyst_upside != null ? String(d2.analyst_upside) : enriched.analyst_upside;
+          enriched.name           = d2.name           || enriched.name;
+          enriched.sector         = d2.sector         || enriched.sector;
+        }}
+      }}
+    }} catch(e) {{/* use scanner data only */}}
+    result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">'+foundLabel+'</div>'+makeCard(enriched,'&mdash;');
+    return;
+  }}
   try {{
     var resp=await fetch('/lookup?t='+ticker);
     if(!resp.ok)throw new Error('HTTP '+resp.status);
