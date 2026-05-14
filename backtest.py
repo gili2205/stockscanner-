@@ -57,6 +57,13 @@ firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_URL})
 hist_ref  = db.reference("/scanner/history")
 first_ref = db.reference("/scanner/first_seen")
 
+# ── Scoring version ────────────────────────────────────────────────────────────
+# Bump this string whenever the scoring logic in score_stock_historical() changes.
+# Format: "v{N}_{short_description}"
+# Every pick stored in Firebase carries this tag so the optimizer can filter
+# by version and experiments can be compared apples-to-apples.
+SCORING_VERSION = "v1_qullamaggie"
+
 # ── Universe ──────────────────────────────────────────────────────────────────
 def get_universe():
     """Get NASDAQ tickers from SEC EDGAR."""
@@ -275,25 +282,26 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         status = "READY" if score >= 72 else "WATCH" if score >= 55 else "BUILDING"
 
         return {
-            "ticker":          ticker,
-            "scan_date":       as_of.isoformat(),
-            "price_at_scan":   round(price, 2),
-            "score":           score,
-            "status":          status,
-            "track":           "BREAKOUT",
-            "ema_stack":       ema_stack,
-            "atr":             atr_c,
-            "vol_contraction": vol_c,
-            "vol_ratio":       vol_ratio,
-            "level":           level,
-            "dist_to_level":   dist,
-            "hh_hl":           hh_hl,
-            "momentum_1m":     mom1m,
-            "momentum_3m":     mom3m,
-            "pre_breakout":    pre_breakout,
-            "bull_flag":       bull_flag,
-            "rs_percentile":   None,  # computed after scoring all stocks
-            "returns":         {}
+            "ticker":           ticker,
+            "scan_date":        as_of.isoformat(),
+            "price_at_scan":    round(price, 2),
+            "score":            score,
+            "status":           status,
+            "track":            "BREAKOUT",
+            "scoring_version":  SCORING_VERSION,   # ← version tag for experiment tracking
+            "ema_stack":        ema_stack,
+            "atr":              atr_c,
+            "vol_contraction":  vol_c,
+            "vol_ratio":        vol_ratio,
+            "level":            level,
+            "dist_to_level":    dist,
+            "hh_hl":            hh_hl,
+            "momentum_1m":      mom1m,
+            "momentum_3m":      mom3m,
+            "pre_breakout":     pre_breakout,
+            "bull_flag":        bull_flag,
+            "rs_percentile":    None,  # computed after scoring all stocks
+            "returns":          {}
         }
     except Exception as e:
         return None
@@ -327,8 +335,34 @@ def compute_returns(price_at_scan: float, ticker: str,
 
 
 # ── Main backtest runner ───────────────────────────────────────────────────────
-def run_backtest(n_days: int = 30, specific_date: date = None):
-    log.info(f"=== BACKTEST START: {n_days} trading days ===")
+def run_backtest(n_days: int = 30, specific_date: date = None, experiment: str = None):
+    """
+    Run the historical backtest.
+
+    experiment : str | None
+        If provided, results are written to
+          /scanner/experiments/{experiment}/history/{date}/{ticker}
+        instead of /scanner/history. Experiment metadata (scoring version,
+        date range, status) is saved to /scanner/experiments/{experiment}/meta.
+        first_seen is NOT updated during experiment runs — only production
+        runs touch that path.
+        Use this to test scoring logic changes before promoting to production.
+    """
+    if experiment:
+        write_ref = db.reference(f"/scanner/experiments/{experiment}/history")
+        meta_ref  = db.reference(f"/scanner/experiments/{experiment}/meta")
+        meta_ref.set({
+            "created_at":      datetime.now().isoformat(),
+            "scoring_version": SCORING_VERSION,
+            "n_days":          n_days,
+            "specific_date":   specific_date.isoformat() if specific_date else None,
+            "status":          "running",
+        })
+        log.info(f"=== EXPERIMENT BACKTEST: {experiment} (scoring={SCORING_VERSION}) ===")
+    else:
+        write_ref = hist_ref
+        log.info(f"=== BACKTEST START: {n_days} trading days (scoring={SCORING_VERSION}) ===")
+
     t_total = time.time()
 
     # Get trading dates (skip weekends)
@@ -367,11 +401,12 @@ def run_backtest(n_days: int = 30, specific_date: date = None):
         log.info(f"\n--- Processing {day} ---")
         day_t = time.time()
 
-        # Check if already done
-        existing = hist_ref.child(day.isoformat()).get()
-        if existing and len(existing) > 50:
-            log.info(f"  Already have {len(existing)} records for {day}, skipping")
-            continue
+        # Check if already done (skip for experiments — always re-run)
+        if not experiment:
+            existing = hist_ref.child(day.isoformat()).get()
+            if existing and len(existing) > 50:
+                log.info(f"  Already have {len(existing)} records for {day}, skipping")
+                continue
 
         # Score all stocks as of this day
         results = []
@@ -403,31 +438,39 @@ def run_backtest(n_days: int = 30, specific_date: date = None):
                     r["price_at_scan"], ticker, prices[ticker], day
                 )
 
-        # Write to Firebase
-        day_str  = day.isoformat()
-        hist_ref.child(day_str).set({r["ticker"]: r for r in top200})
+        # Write to Firebase (experiment path or production)
+        day_str = day.isoformat()
+        write_ref.child(day_str).set({r["ticker"]: r for r in top200})
 
-        # Update first_seen
+        # Update first_seen — production only
         new_first = {}
-        for r in top200:
-            t = r["ticker"]
-            if t not in existing_first:
-                new_first[t] = {
-                    "date":  day_str,
-                    "price": r["price_at_scan"],
-                    "score": r["score"],
-                }
-                existing_first[t] = new_first[t]
-        if new_first:
-            first_ref.update(new_first)
+        if not experiment:
+            for r in top200:
+                t = r["ticker"]
+                if t not in existing_first:
+                    new_first[t] = {
+                        "date":  day_str,
+                        "price": r["price_at_scan"],
+                        "score": r["score"],
+                    }
+                    existing_first[t] = new_first[t]
+            if new_first:
+                first_ref.update(new_first)
 
         elapsed = round(time.time() - day_t, 1)
-        log.info(f"  {day}: {len(top200)} picks stored, "
-                 f"{len(new_first)} new first-seen | {elapsed}s")
+        seen_msg = f", {len(new_first)} new first-seen" if not experiment else ""
+        log.info(f"  {day}: {len(top200)} picks stored{seen_msg} | {elapsed}s")
 
     total_elapsed = round((time.time() - t_total) / 60, 1)
-    log.info(f"\n=== BACKTEST COMPLETE in {total_elapsed} min ===")
-    log.info("Now run: python update_returns.py  (to fill in any missing forward returns)")
+
+    if experiment:
+        meta_ref.update({"status": "complete", "completed_at": datetime.now().isoformat()})
+        log.info(f"\n=== EXPERIMENT COMPLETE in {total_elapsed} min ===")
+        log.info(f"Analyze results:  python optimizer.py --experiment {experiment}")
+        log.info(f"Compare vs prod:  python optimizer.py --compare {experiment}")
+    else:
+        log.info(f"\n=== BACKTEST COMPLETE in {total_elapsed} min ===")
+        log.info("Now run: python backtest.py --update-returns  (to fill in forward returns)")
 
 
 def update_all_returns():
@@ -480,15 +523,24 @@ def update_all_returns():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--days",   type=int, default=30)
-    parser.add_argument("--date",   type=str, default=None)
+    parser = argparse.ArgumentParser(description="Scanner backtest engine")
+    parser.add_argument("--days",       type=int, default=30,
+                        help="Number of trading days to backtest (default: 30)")
+    parser.add_argument("--date",       type=str, default=None,
+                        help="Backtest a single specific date (YYYY-MM-DD)")
     parser.add_argument("--update-returns", action="store_true",
                         help="Only update forward returns, don't rerun backtest")
+    parser.add_argument("--experiment", type=str, default=None,
+                        help=(
+                            "Run as an experiment — results go to "
+                            "/scanner/experiments/{NAME}/history instead of production. "
+                            "Use this to test scoring changes before promoting to main. "
+                            "Example: --experiment v2_momentum_reweight"
+                        ))
     args = parser.parse_args()
 
     if args.update_returns:
         update_all_returns()
     else:
         specific = date.fromisoformat(args.date) if args.date else None
-        run_backtest(n_days=args.days, specific_date=specific)
+        run_backtest(n_days=args.days, specific_date=specific, experiment=args.experiment)
