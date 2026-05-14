@@ -1083,6 +1083,7 @@ async function lookupTicker() {{
       }}
     }} catch(e) {{/* use scanner data only */}}
     result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">'+foundLabel+'</div>'+makeCard(enriched,'&mdash;');
+    setTimeout(function(){{ fetchPerf(ticker); }}, 50);
     return;
   }}
   try {{
@@ -1112,6 +1113,7 @@ async function lookupTicker() {{
       pe_ratio:data.pe_ratio||null,rsi:data.rsi||null,analyst_target:data.analyst_target||null,
       analyst_upside:data.analyst_upside!=null?String(data.analyst_upside):null,track:'BREAKOUT'}};
     result.innerHTML='<div style="color:var(--amber);font-size:12px;margin-bottom:8px">&#9889; Live lookup &mdash; Yahoo Finance 60d</div>'+makeCard(s,'&mdash;');
+    setTimeout(function(){{ fetchPerf(ticker); }}, 50);
   }} catch(e) {{
     result.innerHTML='<div style="color:var(--red);padding:12px 0">Could not fetch <strong>'+ticker+'</strong>: '+e.message+'</div>';
   }}
