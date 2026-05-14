@@ -893,7 +893,7 @@ function toggleCard(ticker) {{
   if (!body) return;
   var isOpen = body.style.display === 'block';
   body.style.display = isOpen ? 'none' : 'block';
-  if (!isOpen) fetchFundamentals(ticker);
+  if (isOpen) {{ closeChart(ticker); }} else {{ fetchFundamentals(ticker); }}
 }}
 
 function showBreakdown(el) {{
