@@ -171,7 +171,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
   <div class="lookup-divider"></div>
   <span class="lookup-hint">&#9889; Full analysis on <strong>any stock</strong> &mdash; even outside top 200</span>
 </div>
-<div id="lookup-wrap" style="display:none"><div class="lookup-result" id="lookup-result"></div></div>
+<div id="lookup-wrap" style="display:none;position:relative"><button onclick="document.getElementById('lookup-wrap').style.display='none';document.getElementById('lookup-input').value=''" style="position:absolute;top:10px;right:16px;background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;z-index:10" title="Close">&times;</button><div class="lookup-result" id="lookup-result"></div></div>
 
 <!-- __ Multi-select filter panel __ -->
 <div class="filterpanel">
@@ -251,6 +251,16 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
       </div>
     </div>
 
+    <!-- Timeframe -->
+    <div class="fgroup">
+      <div class="fgrouplabel">&#128336; Timeframe</div>
+      <div class="fchips">
+        <div class="fchip red"   data-group="timeframe" data-val="short" onclick="toggleChip(this)"><span class="fcheck"></span>&#9889; Short 1-2w</div>
+        <div class="fchip amber" data-group="timeframe" data-val="mid"   onclick="toggleChip(this)"><span class="fcheck"></span>&#128197; Mid 1-3m</div>
+        <div class="fchip blue"  data-group="timeframe" data-val="long"  onclick="toggleChip(this)"><span class="fcheck"></span>&#128336; Long 3m+</div>
+      </div>
+    </div>
+
     <!-- Quick presets -->
     <div class="fgroup">
       <div class="fgrouplabel">&#9889; Quick Presets</div>
@@ -296,7 +306,7 @@ var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}}, firstSe
 
 // ── Filter state — which chips are ON per group ───────────────────────────────
 // Empty set = no filter for that group (show all)
-var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[] }};
+var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[] }};
 
 function toggleChip(el) {{
   var group = el.dataset.group;
@@ -328,7 +338,7 @@ function setChip(group, val, on) {{
 
 function resetAll() {{
   document.querySelectorAll(".fchip[data-group]").forEach(function(c){{c.classList.remove("on");}});
-  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[] }};
+  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[] }};
   render();
 }}
 
@@ -432,6 +442,16 @@ function passesFilters(s) {{
     if (!setupOk) return false;
   }}
 
+  if (activeFilters.timeframe && activeFilters.timeframe.length > 0) {{
+    var earn2 = s.days_to_earnings;
+    var tf2 = s.timeframe || (
+      (earn2!=null&&earn2>=0&&earn2<=7) ? 'short' :
+      ((s.rs_percentile||0)>=85 && (s.vol_contraction||1)<=0.55 && (s.ema_stack||'')==='full') ? 'long' :
+      'mid'
+    );
+    if (!activeFilters.timeframe.includes(tf2)) return false;
+  }}
+
   return true;
 }}
 
@@ -442,6 +462,7 @@ function getActiveDesc() {{
   if (activeFilters.sector && activeFilters.sector.length) parts.push(activeFilters.sector.join(" or "));
   if (activeFilters.streak && activeFilters.streak.length) parts.push(activeFilters.streak.map(function(v){{return {{new:"New today",fresh:"1-5 days",building:"6-14 days",proven:"15+ days"}}[v]||v;}}).join(" or ")+" on list");
   if (activeFilters.setup.length)    parts.push(activeFilters.setup.map(function(v){{return {{breakout:"Breakout",catalyst:"Catalyst",bullflag:"Bull Flag",prebreak:"Pre-breakout",earnings:"Earnings soon"}}[v]||v;}}).join(" or "));
+  if (activeFilters.timeframe && activeFilters.timeframe.length) parts.push(activeFilters.timeframe.map(function(v){{return {{short:"Short (1-2w)",mid:"Mid (1-3m)",long:"Long (3m+)"}}[v]||v;}}).join(" or "));
   if (activeFilters.momentum.length) parts.push({{hot:"Hot +30%",strong:"Strong +15%",pos:"Positive",neg:"Pullback"}}[activeFilters.momentum[0]]||activeFilters.momentum[0]);
   if (!parts.length) return "Showing all stocks \u2014 select filters above to narrow down";
   return "Filters: " + parts.join(" \u00b7 ");
@@ -591,16 +612,31 @@ function render() {{
   if (!top10.length) {{
     grid.innerHTML = '<div class="empty">No stocks match this combination.<br><span style="font-size:12px;color:var(--muted)">Try removing some filters or click <strong style="color:var(--blue)">Show all</strong> to reset.</span></div>';
   }} else {{
-  // Save which cards are open before rebuild
-  var openCards = {{}};
+  // Save which cards and charts are open before rebuild
+  var openCards  = {{}};
+  var openCharts = {{}};
   document.querySelectorAll('.card-body').forEach(function(b) {{
     if(b.style.display==='block') openCards[b.id]=true;
+  }});
+  document.querySelectorAll('[id^="cpanel-"]').forEach(function(p) {{
+    if(p.style.display==='block') openCharts[p.id.replace('cpanel-','')]=true;
   }});
   grid.innerHTML = top10.map(function(s,i){{return makeCard(s,i+1);}}).join("");
   // Restore open cards
   Object.keys(openCards).forEach(function(id) {{
     var el=document.getElementById(id);
     if(el) el.style.display='block';
+  }});
+  // Restore open charts (re-inject iframe src so TV widget reloads)
+  Object.keys(openCharts).forEach(function(ticker) {{
+    var panel=document.getElementById('cpanel-'+ticker);
+    var frame=document.getElementById('cframe-'+ticker);
+    var btn=document.getElementById('cbtn-'+ticker);
+    if(panel&&frame) {{
+      panel.style.display='block';
+      frame.src='https://s.tradingview.com/widgetembed/?symbol=NASDAQ%3A'+ticker+'&interval=D&theme=dark&style=1&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&toolbarbg=1a1d26&show_popup_button=0';
+      if(btn){{btn.className='chart-btn open';btn.innerHTML='&times; Close';}}
+    }}
   }});
   setTimeout(prefetchAllFundamentals, 100);
   }}
@@ -674,7 +710,12 @@ function makeCard(s, rank) {{
   var rewardBg=rp>=3?'#1a3d2b':rp>=2?'#3d2e10':'#3d1a1a';
 
   // Timeframe
-  var tf=s.timeframe||'mid';
+  // Compute timeframe from signals (scanner rarely sets s.timeframe)
+  var tf = s.timeframe || (
+    (earn!=null&&earn>=0&&earn<=7) ? 'short' :           // earnings ≤7d → quick catalyst
+    ((s.rs_percentile||0)>=85 && (s.vol_contraction||1)<=0.55 && ema_stack==='full') ? 'long' :  // top RS + tight base + full EMA → multi-month trend
+    'mid'                                                 // standard breakout
+  );
   var tfLabel=tf==='short'?'Short (1-2w)':tf==='long'?'Long (3-12m)':'Mid (1-3m)';
   var tfColor=tf==='short'?'#e74c3c':tf==='long'?'#3498db':'#e67e22';
   var tfIcon=tf==='short'?'&#9889;':tf==='long'?'&#128336;':'&#128197;';
