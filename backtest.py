@@ -386,7 +386,7 @@ def compute_returns(price_at_scan: float, ticker: str,
 
 
 # ── Main backtest runner ───────────────────────────────────────────────────────
-def run_backtest(n_days: int = 30, specific_date: date = None, experiment: str = None):
+def run_backtest(n_days: int = None, specific_date: date = None, experiment: str = None):
     """
     Run the historical backtest.
 
@@ -398,36 +398,59 @@ def run_backtest(n_days: int = 30, specific_date: date = None, experiment: str =
         first_seen is NOT updated during experiment runs — only production
         runs touch that path.
         Use this to test scoring logic changes before promoting to production.
+
+        When experiment is set and n_days is None (the default), the backtest
+        automatically reads all dates present in production /scanner/history
+        and scores those exact same dates — so the comparison is always
+        apples-to-apples against v1 production data.
     """
     if experiment:
         write_ref = db.reference(f"/scanner/experiments/{experiment}/history")
         meta_ref  = db.reference(f"/scanner/experiments/{experiment}/meta")
-        meta_ref.set({
-            "created_at":      datetime.now().isoformat(),
-            "scoring_version": SCORING_VERSION,
-            "n_days":          n_days,
-            "specific_date":   specific_date.isoformat() if specific_date else None,
-            "status":          "running",
-        })
         log.info(f"=== EXPERIMENT BACKTEST: {experiment} (scoring={SCORING_VERSION}) ===")
     else:
         write_ref = hist_ref
-        log.info(f"=== BACKTEST START: {n_days} trading days (scoring={SCORING_VERSION}) ===")
+        log.info(f"=== BACKTEST START: {n_days or 30} trading days (scoring={SCORING_VERSION}) ===")
 
     t_total = time.time()
 
-    # Get trading dates (skip weekends)
-    end_date   = date.today()
-    all_dates  = []
-    d = end_date - timedelta(days=1)
-    while len(all_dates) < n_days:
-        if d.weekday() < 5:  # Mon-Fri
-            all_dates.append(d)
-        d -= timedelta(days=1)
-    all_dates.reverse()
-
+    # Determine which dates to process
     if specific_date:
         all_dates = [specific_date]
+    elif experiment and n_days is None:
+        # Mirror production history dates exactly
+        log.info("Experiment mode: reading production history dates from Firebase...")
+        prod_history = hist_ref.get() or {}
+        all_dates = sorted(
+            date.fromisoformat(d) for d in prod_history.keys()
+            if isinstance(prod_history[d], dict) and len(prod_history[d]) > 0
+        )
+        if not all_dates:
+            log.error("No production history dates found — run backtest.py without --experiment first")
+            return
+        log.info(f"Found {len(all_dates)} dates in production history "
+                 f"({all_dates[0]} → {all_dates[-1]})")
+    else:
+        # Standard n_days rolling window
+        days = n_days or 30
+        end_date  = date.today()
+        all_dates = []
+        d = end_date - timedelta(days=1)
+        while len(all_dates) < days:
+            if d.weekday() < 5:
+                all_dates.append(d)
+            d -= timedelta(days=1)
+        all_dates.reverse()
+
+    if experiment:
+        meta_ref.set({
+            "created_at":      datetime.now().isoformat(),
+            "scoring_version": SCORING_VERSION,
+            "n_days":          len(all_dates),
+            "specific_date":   specific_date.isoformat() if specific_date else None,
+            "mirrored_prod":   (n_days is None and specific_date is None),
+            "status":          "running",
+        })
 
     log.info(f"Backtest dates: {all_dates[0]} to {all_dates[-1]} ({len(all_dates)} days)")
 
@@ -575,8 +598,9 @@ def update_all_returns():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scanner backtest engine")
-    parser.add_argument("--days",       type=int, default=30,
-                        help="Number of trading days to backtest (default: 30)")
+    parser.add_argument("--days",       type=int, default=None,
+                        help="Number of trading days to backtest (default: 30, or mirrors "
+                             "production history when --experiment is used without --days)")
     parser.add_argument("--date",       type=str, default=None,
                         help="Backtest a single specific date (YYYY-MM-DD)")
     parser.add_argument("--update-returns", action="store_true",
@@ -594,4 +618,5 @@ if __name__ == "__main__":
         update_all_returns()
     else:
         specific = date.fromisoformat(args.date) if args.date else None
-        run_backtest(n_days=args.days, specific_date=specific, experiment=args.experiment)
+        n = args.days if args.days else (30 if not args.experiment else None)
+        run_backtest(n_days=n, specific_date=specific, experiment=args.experiment)
