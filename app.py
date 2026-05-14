@@ -280,6 +280,31 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
   </div>
 </div>
 
+<!-- ── Layer weight controls ── -->
+<div style="background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+  <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Score weights</span>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span style="font-size:11px;color:#3498db">&#128202; Technical</span>
+    <input type="range" id="w-tech" min="0" max="100" value="50" step="10" oninput="onWeightChange()" style="width:80px;accent-color:#3498db">
+    <span id="wl-tech" style="font-size:11px;color:var(--text);width:32px">50%</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span style="font-size:11px;color:#27ae60">&#127807; Fundamental</span>
+    <input type="range" id="w-fund" min="0" max="100" value="30" step="10" oninput="onWeightChange()" style="width:80px;accent-color:#27ae60">
+    <span id="wl-fund" style="font-size:11px;color:var(--text);width:32px">30%</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span style="font-size:11px;color:#e67e22">&#9889; Catalyst</span>
+    <input type="range" id="w-cat" min="0" max="100" value="20" step="10" oninput="onWeightChange()" style="width:80px;accent-color:#e67e22">
+    <span id="wl-cat" style="font-size:11px;color:var(--text);width:32px">20%</span>
+  </div>
+  <div style="display:flex;gap:8px;margin-left:auto">
+    <button onclick="setPreset('breakout')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">&#9889; Pure Breakout</button>
+    <button onclick="setPreset('quality')"  style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">&#127807; Quality Growth</button>
+    <button onclick="setPreset('full')"     style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">&#127919; Full Signal</button>
+  </div>
+</div>
+
 <div class="sortrow">
   <select id="ssort" onchange="render()">
     <option value="score">Sort: score</option>
@@ -303,6 +328,50 @@ var VER = "{ver}";
 var CFG = {cfg};
 var connected = false, lastDataTime = null, watchdogTimer = null;
 var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}}, firstSeenData = {{}};
+var smartMoneyTickers = {{}};  // ticker → {{insider: bool, institution: bool}}
+
+// ── Layer weights (0–100 each, frontend re-blends scores) ────────────────────
+var layerWeights = {{ tech: 50, fund: 30, cat: 20 }};
+
+function setPreset(name) {{
+  var presets = {{
+    breakout:  {{ tech:100, fund:0,  cat:0  }},
+    quality:   {{ tech:50,  fund:50, cat:0  }},
+    full:      {{ tech:50,  fund:30, cat:20 }},
+  }};
+  if (!presets[name]) return;
+  layerWeights = Object.assign({{}}, presets[name]);
+  document.getElementById('w-tech').value = layerWeights.tech;
+  document.getElementById('w-fund').value = layerWeights.fund;
+  document.getElementById('w-cat').value  = layerWeights.cat;
+  updateWeightLabels();
+  render();
+}}
+
+function updateWeightLabels() {{
+  document.getElementById('wl-tech').textContent = layerWeights.tech+'%';
+  document.getElementById('wl-fund').textContent = layerWeights.fund+'%';
+  document.getElementById('wl-cat').textContent  = layerWeights.cat+'%';
+}}
+
+function onWeightChange() {{
+  layerWeights.tech = parseInt(document.getElementById('w-tech').value)||0;
+  layerWeights.fund = parseInt(document.getElementById('w-fund').value)||0;
+  layerWeights.cat  = parseInt(document.getElementById('w-cat').value)||0;
+  updateWeightLabels();
+  render();
+}}
+
+function blendScore(s) {{
+  // Use stored layer scores if available, else fall back to legacy score
+  var tech = s.score_technical  != null ? s.score_technical  : (s.breakout_score||s.score||0);
+  var fund = s.score_fundamental != null ? s.score_fundamental : 0;
+  var cat  = s.score_catalyst    != null ? s.score_catalyst   : (s.catalyst_score||0);
+  var tw = layerWeights.tech, fw = layerWeights.fund, cw = layerWeights.cat;
+  var total = tw + fw + cw;
+  if (total === 0) return s.score || 0;
+  return Math.min(100, Math.round((tw*tech + fw*fund + cw*cat) / total));
+}}
 
 // ── Filter state — which chips are ON per group ───────────────────────────────
 // Empty set = no filter for that group (show all)
@@ -561,6 +630,17 @@ fdb.ref("/scanner").on("value", function(snap) {{
 
 startWatchdog();
 
+// ── Load smart money tickers for badge display ────────────────────────────────
+fdb.ref('/scanner/smart_money').once('value', function(snap) {{
+  var d = snap.val() || {{}};
+  // Insider buys
+  (d.insiders || []).forEach(function(b) {{ if(b.ticker) smartMoneyTickers[b.ticker] = smartMoneyTickers[b.ticker] || {{}}; if(b.ticker) smartMoneyTickers[b.ticker].insider = true; }});
+  // Institutional holdings
+  (d.institutions || []).forEach(function(fund) {{
+    (fund.holdings || []).forEach(function(h) {{ if(h.ticker) {{ smartMoneyTickers[h.ticker] = smartMoneyTickers[h.ticker] || {{}}; smartMoneyTickers[h.ticker].institution = true; }} }});
+  }});
+}});
+
 // ── Render ────────────────────────────────────────────────────────────────────
 function render() {{
   var sortBy   = document.getElementById("ssort").value;
@@ -591,7 +671,7 @@ function render() {{
     var au=up>=40?12:up>=25?9:up>=10?5:up>0?2:up<-10?-5:0;
     var ab=bp>=80?10:bp>=65?7:bp>=50?4:bp>0?1:0;
     var ac=na>=10?8:na>=5?5:na>=2?2:0;
-    s._unified=Math.min(100,Math.round(tr+tv+ta+tl+Math.min(30,ce+cv+cm)+Math.min(30,Math.max(0,au+ab+ac))));
+    s._unified=blendScore(s);
   }});
   var fns = {{
     score:    function(a,b){{ return (b._unified||0)-(a._unified||0); }},
@@ -671,21 +751,11 @@ function makeCard(s, rank) {{
   var earn   = s.days_to_earnings;
   var upColor = upsidePct!=null&&upsidePct>5?'#27ae60':upsidePct!=null&&upsidePct<-5?'#e74c3c':'#8892a4';
 
-  // Unified score
-  var t_rs  = Math.min(16,Math.round((s.rs_percentile||0)/100*16));
-  var t_vol = (s.vol_contraction||1)<=0.5?12:(s.vol_contraction||1)<=0.7?8:(s.vol_contraction||1)<=0.9?4:0;
-  var t_atr = (s.atr||1)<=0.2?8:(s.atr||1)<=0.3?5:(s.atr||1)<=0.4?2:0;
-  var t_lvl = (s.level||'').indexOf('ATH')>=0?4:(s.level||'').indexOf('multi')>=0?3:1;
-  var techScore = t_rs+t_vol+t_atr+t_lvl;
-  var c_earn = earn!=null&&earn>=0&&earn<=7?15:earn!=null&&earn>=0&&earn<=14?10:earn!=null&&earn>=0&&earn<=30?5:0;
-  var c_vol  = (s.vol_ratio||1)>=3?10:(s.vol_ratio||1)>=2?6:(s.vol_ratio||1)>=1.5?3:0;
-  var c_mom  = (s.momentum_1m||0)>=30?5:(s.momentum_1m||0)>=15?3:(s.momentum_1m||0)>=5?1:0;
-  var catalystScore = Math.min(30,c_earn+c_vol+c_mom);
-  var a_upside = upsidePct!=null?(upsidePct>=40?12:upsidePct>=25?9:upsidePct>=10?5:upsidePct>0?2:upsidePct<-10?-5:0):0;
-  var a_buy    = buyPct>=80?10:buyPct>=65?7:buyPct>=50?4:buyPct>0?1:0;
-  var a_cov    = numAna>=10?8:numAna>=5?5:numAna>=2?2:0;
-  var analystScore = Math.min(30,Math.max(0,a_upside+a_buy+a_cov));
-  var unifiedScore = Math.min(100,Math.round(techScore+catalystScore+analystScore));
+  // Scores — use stored layer scores if available, else estimate from signals
+  var techScore     = s.score_technical   != null ? s.score_technical   : s.breakout_score || s.score || 0;
+  var fundScore     = s.score_fundamental != null ? s.score_fundamental : 0;
+  var catalystScore = s.score_catalyst    != null ? s.score_catalyst    : s.catalyst_score || 0;
+  var unifiedScore  = blendScore(s);
 
   // Stop/entry
   var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
@@ -742,7 +812,7 @@ function makeCard(s, rank) {{
 
   // Store breakdown
   var scoreId='sc-'+s.ticker;
-  cardBreakdowns[scoreId]={{tech:techScore,cat:catalystScore,ana:analystScore,
+  cardBreakdowns[scoreId]={{tech:techScore,fund:fundScore,cat:catalystScore,
     entry:entryNum.toFixed(2),stop:stopNum.toFixed(2),
     tfLabel:tfIcon+' '+tfLabel,tfColor:tfColor}};
 
@@ -772,7 +842,9 @@ function makeCard(s, rank) {{
   h += '<div style="display:flex;align-items:center;gap:12px">';
   h += '<div class="card-rank '+(isTop?'top':'')+'">'+rank+'</div>';
   h += '<div>';
-  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
+  var sm = smartMoneyTickers[s.ticker];
+  var smBadge = sm ? '<span title="'+(sm.insider&&sm.institution?'Insider buy + hedge fund holding':sm.insider?'Insider buy':'Hedge fund holding')+'" style="font-size:13px;margin-left:6px;cursor:help">&#127968;</span>' : '';
+  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+smBadge+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
   h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
@@ -901,12 +973,12 @@ function showBreakdown(el) {{
   if(!d) return;
   var p = document.getElementById('breakdown-popup');
   if(!p) return;
-  document.getElementById('bp-tech').textContent = d.tech+'/40';
-  document.getElementById('bp-cat').textContent  = d.cat+'/30';
-  document.getElementById('bp-ana').textContent  = d.ana+'/30';
-  document.getElementById('bp-tech-bar').style.width = Math.round(d.tech/40*100)+'%';
-  document.getElementById('bp-cat-bar').style.width  = Math.round(d.cat/30*100)+'%';
-  document.getElementById('bp-ana-bar').style.width  = Math.round(d.ana/30*100)+'%';
+  document.getElementById('bp-tech').textContent = d.tech+'/100';
+  document.getElementById('bp-cat').textContent  = d.cat+'/100';
+  document.getElementById('bp-ana').textContent  = d.fund+'/100';
+  document.getElementById('bp-tech-bar').style.width = Math.round(d.tech)+'%';
+  document.getElementById('bp-cat-bar').style.width  = Math.round(d.cat)+'%';
+  document.getElementById('bp-ana-bar').style.width  = Math.round(d.fund||0)+'%';
   document.getElementById('bp-entry').textContent = '$'+d.entry;
   document.getElementById('bp-stop').textContent  = '$'+d.stop;
   document.getElementById('bp-tf').innerHTML = '<span style="color:'+d.tfColor+'">'+d.tfLabel+'</span>';
@@ -1129,14 +1201,14 @@ async function lookupTicker() {{
     <span class="bp-val" id="bp-tech"></span>
   </div>
   <div class="bp-row">
+    <span class="bp-label">&#127807; Fundamental</span>
+    <div class="bp-bar"><div class="bp-fill" id="bp-ana-bar" style="background:#27ae60"></div></div>
+    <span class="bp-val" id="bp-ana"></span>
+  </div>
+  <div class="bp-row">
     <span class="bp-label">&#9889; Catalyst</span>
     <div class="bp-bar"><div class="bp-fill" id="bp-cat-bar" style="background:#e67e22"></div></div>
     <span class="bp-val" id="bp-cat"></span>
-  </div>
-  <div class="bp-row">
-    <span class="bp-label">&#128101; Analyst</span>
-    <div class="bp-bar"><div class="bp-fill" id="bp-ana-bar" style="background:#27ae60"></div></div>
-    <span class="bp-val" id="bp-ana"></span>
   </div>
   <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">

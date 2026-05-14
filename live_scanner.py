@@ -377,122 +377,153 @@ def score_stock(ticker, df, live_price=None, fund=None):
         upside = round((target-price)/price*100,1) if target and price else None
 
         # ════════════════════════════════════════════════════════════════
-        # TRACK A: BREAKOUT SETUP SCORE (0-95)
+        # LAYER 1: TECHNICAL SETUP SCORE (0-100)
+        # Quality of the coil / base near a key level
         # ════════════════════════════════════════════════════════════════
-        # Skip falling knives
-        if mom3m < -30: breakout_score = 0
-        else:
-            ba = 0
+        ta = 0
 
-            # 1. Momentum (28 pts) — stock must be in uptrend
-            if   mom1m>=25: ba+=28
-            elif mom1m>=15: ba+=22
-            elif mom1m>=8:  ba+=15
-            elif mom1m>=3:  ba+=9
-            elif mom1m>=0:  ba+=4
-            else:           ba+=0
+        # EMA trend structure (25 pts)
+        if   ema=="full":    ta+=25
+        elif ema=="partial": ta+=15
+        elif ema=="weak":    ta+=5
 
-            # 2. Trend structure (22 pts)
-            if   ema=="full":    ba+=22
-            elif ema=="partial": ba+=12
-            if   hh_hl>=0.85:   ba+=6
-            elif hh_hl>=0.70:   ba+=3
+        # HH/HL structure (12 pts)
+        if   hh_hl>=0.85: ta+=12
+        elif hh_hl>=0.70: ta+=8
+        elif hh_hl>=0.55: ta+=4
 
-            # 3. Base tightness (20 pts) — coiling before explosion
-            if   atr_c<=0.20: ba+=12
-            elif atr_c<=0.25: ba+=9
-            elif atr_c<=0.30: ba+=6
-            elif atr_c<=0.40: ba+=2
-            if   vc<=0.50:    ba+=8
-            elif vc<=0.65:    ba+=5
-            elif vc<=0.80:    ba+=2
+        # ATR compression (20 pts) — tighter base = higher score
+        if   atr_c<=0.20: ta+=20
+        elif atr_c<=0.25: ta+=15
+        elif atr_c<=0.30: ta+=10
+        elif atr_c<=0.40: ta+=5
 
-            # 4. Breakout proximity (18 pts) — how close to the level?
-            if   dist<=1.0: ba+=18
-            elif dist<=2.0: ba+=14
-            elif dist<=3.5: ba+=9
-            elif dist<=6.0: ba+=4
-            elif dist<=10:  ba+=1
+        # Volume contraction (15 pts)
+        if   vc<=0.50: ta+=15
+        elif vc<=0.65: ta+=10
+        elif vc<=0.80: ta+=5
 
-            # 5. Liquidity (7 pts)
-            if   avg_dollar_vol>=200_000_000: ba+=7
-            elif avg_dollar_vol>=50_000_000:  ba+=5
-            elif avg_dollar_vol>=20_000_000:  ba+=3
-            else:                             ba+=1
+        # Distance to level (20 pts) — near the pivot = low risk entry
+        if   dist<=1.0: ta+=20
+        elif dist<=2.0: ta+=16
+        elif dist<=3.5: ta+=11
+        elif dist<=6.0: ta+=5
+        elif dist<=10:  ta+=1
 
-            # Penalties
-            if ema=="weak":   ba=max(0,ba-18)
-            if dist>15:       ba=max(0,ba-12)
-            if mom1m<-5:      ba=max(0,ba-12)
-            # Only penalize high volatility if momentum is NOT strong
-            # (NVDA/META rallying = high ATR is OK)
-            if atr_c>0.7 and mom1m<10: ba=max(0,ba-8)
+        # Liquidity (8 pts)
+        if   avg_dollar_vol>=200_000_000: ta+=8
+        elif avg_dollar_vol>=50_000_000:  ta+=6
+        elif avg_dollar_vol>=20_000_000:  ta+=4
+        else:                             ta+=2
 
-            breakout_score = min(95, ba)
+        # Penalties
+        if ema=="weak":            ta=max(0,ta-18)
+        if dist>15:                ta=max(0,ta-12)
+        if mom1m<-5:               ta=max(0,ta-10)
+        if atr_c>0.7 and mom1m<10: ta=max(0,ta-8)
+
+        score_technical = min(100, ta)
 
         # ════════════════════════════════════════════════════════════════
-        # TRACK B: CATALYST PLAY SCORE (0-95)
+        # LAYER 2: FUNDAMENTAL QUALITY SCORE (0-100)
+        # Is the business worth owning?
         # ════════════════════════════════════════════════════════════════
-        # Needs either earnings coming OR very strong analyst consensus
+        fa = 0
+
+        # Revenue growth YoY (25 pts)
+        if rev_growth is not None:
+            if   rev_growth>=50: fa+=25
+            elif rev_growth>=25: fa+=18
+            elif rev_growth>=10: fa+=10
+            elif rev_growth>=0:  fa+=4
+            else:                fa-=8   # shrinking revenue
+
+        # EPS growth (20 pts)
+        if eps_growth is not None:
+            if   eps_growth>=50: fa+=20
+            elif eps_growth>=25: fa+=14
+            elif eps_growth>=10: fa+=7
+            elif eps_growth<0:   fa-=5
+
+        # Analyst upside to price target (25 pts)
+        if upside is not None:
+            if   upside>=50: fa+=25
+            elif upside>=30: fa+=18
+            elif upside>=20: fa+=12
+            elif upside>=10: fa+=6
+            elif upside>=5:  fa+=2
+            elif upside<-10: fa-=8   # analysts are bearish
+
+        # Buy consensus (20 pts)
+        if buy_pct is not None:
+            if   buy_pct>=85: fa+=20
+            elif buy_pct>=70: fa+=14
+            elif buy_pct>=55: fa+=8
+            elif buy_pct>=40: fa+=3
+
+        # Valuation — PE ratio (10 pts)
+        pe = fund.get("pe_ratio")
+        if pe and pe > 0:
+            if   pe<15:  fa+=10   # cheap
+            elif pe<25:  fa+=7
+            elif pe<40:  fa+=3
+            # >40 = no bonus (expensive but may be growth)
+
+        score_fundamental = min(100, max(0, fa))
+
+        # ════════════════════════════════════════════════════════════════
+        # LAYER 3: CATALYST SCORE (0-100)
+        # Time-sensitive triggers that could move the stock soon
+        # ════════════════════════════════════════════════════════════════
         ca = 0
 
-        # 1. Earnings catalyst (35 pts) — THE biggest driver
+        # Earnings proximity (50 pts) — the strongest catalyst
         if days_earn is not None and days_earn >= 0:
-            if   days_earn<=1:  ca+=35  # Reporting tomorrow!
-            elif days_earn<=3:  ca+=30  # This week
-            elif days_earn<=7:  ca+=22  # Next week
-            elif days_earn<=14: ca+=12  # Two weeks
-            elif days_earn<=21: ca+=5   # Three weeks
+            if   days_earn<=1:  ca+=50
+            elif days_earn<=3:  ca+=40
+            elif days_earn<=7:  ca+=28
+            elif days_earn<=14: ca+=15
+            elif days_earn<=21: ca+=5
 
-        # 2. Analyst upside (25 pts) — how much room to target?
-        if upside is not None:
-            if   upside>=50: ca+=25
-            elif upside>=30: ca+=20
-            elif upside>=20: ca+=15
-            elif upside>=10: ca+=8
-            elif upside>=5:  ca+=3
+        # Momentum surge (25 pts) — stock already moving
+        if   mom1m>=30: ca+=25
+        elif mom1m>=15: ca+=18
+        elif mom1m>=8:  ca+=10
+        elif mom1m>=3:  ca+=5
 
-        # 3. Analyst buy consensus (20 pts)
-        if buy_pct is not None:
-            if   buy_pct>=85: ca+=20
-            elif buy_pct>=70: ca+=14
-            elif buy_pct>=55: ca+=8
-            elif buy_pct>=40: ca+=3
+        # Volume surge (15 pts) — unusual buying interest
+        if   vr>=5.0: ca+=15
+        elif vr>=3.0: ca+=10
+        elif vr>=2.0: ca+=5
 
-        # 4. Business quality (15 pts)
-        if rev_growth is not None:
-            if   rev_growth>=50: ca+=8
-            elif rev_growth>=25: ca+=5
-            elif rev_growth>=10: ca+=2
-            elif rev_growth<0:   ca-=5
+        # Short squeeze potential (10 pts)
+        if short_pct:
+            if   short_pct>=20: ca+=10
+            elif short_pct>=15: ca+=5
 
-        if eps_growth is not None and eps_growth>=25:
-            ca+=7
+        # Penalty: strong downtrend kills catalyst
+        if mom3m<-30: ca=max(0,ca-20)
 
-        # 5. Technical bonus (not required but helps)
-        if ema=="full":   ca+=5
-        if mom1m>=10:     ca+=3
-        if dist<=8:       ca+=4   # Relatively close to level
+        score_catalyst = min(100, ca)
 
-        # Short squeeze potential bonus
-        if short_pct and short_pct>=15: ca+=5
+        # ── Default blend (50% tech / 30% fund / 20% catalyst) ───────
+        # Frontend can override with user-selected weights
+        score = round(0.50*score_technical + 0.30*score_fundamental + 0.20*score_catalyst)
 
-        # Penalties for catalyst track
-        if mom3m<-30:     ca=max(0,ca-15)  # Very bad trend = skeptical
-        if price<MIN_PRICE: ca=0
-
-        catalyst_score = min(95, ca)
-
-        # ── Pick best track ───────────────────────────────────────────
-        if breakout_score >= catalyst_score:
-            score = breakout_score
-            track = "BREAKOUT"
-        else:
-            score = catalyst_score
+        # Determine dominant track for labelling
+        if score_catalyst >= 60 and score_catalyst > score_technical:
             track = "CATALYST"
+        elif score_fundamental >= 60 and score_fundamental > score_technical:
+            track = "FUNDAMENTAL"
+        else:
+            track = "BREAKOUT"
 
-        # Must score at least 30 on chosen track
-        if score < 30: return None
+        # Keep legacy fields for backward compatibility
+        breakout_score = score_technical
+        catalyst_score = score_catalyst
+
+        # Must score at least 25
+        if score < 25: return None
 
         status = "READY" if score>=72 else "WATCH" if score>=55 else "BUILDING"
         pre    = (atr_c<=0.32 and vc<=0.80 and dist<=5.0
@@ -521,6 +552,9 @@ def score_stock(ticker, df, live_price=None, fund=None):
             "analyst_buy_pct":  buy_pct,
             "revenue_growth":   rev_growth,
             "analyst_upside":   upside,
+            "score_technical":   score_technical,
+            "score_fundamental": score_fundamental,
+            "score_catalyst":    score_catalyst,
             "breakout_score":   breakout_score,
             "catalyst_score":   catalyst_score,
             "rs_percentile":    70,
