@@ -891,7 +891,7 @@ function makeCard(s, rank) {{
 function toggleCard(ticker) {{
   var body = document.getElementById('body-'+ticker);
   if (!body) return;
-  var isOpen = body.style.display === 'block';
+  var isOpen = body.offsetHeight > 0 && body.style.display !== 'none';
   body.style.display = isOpen ? 'none' : 'block';
   if (isOpen) {{ closeChart(ticker); }} else {{ fetchFundamentals(ticker); }}
 }}
