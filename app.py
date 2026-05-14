@@ -261,6 +261,16 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
       </div>
     </div>
 
+    <!-- Score focus -->
+    <div class="fgroup">
+      <div class="fgrouplabel">&#127919; Score focus</div>
+      <div class="fchips">
+        <div class="fchip blue"  id="preset-breakout" onclick="setPreset('breakout')"><span class="fcheck"></span>&#128202; Technical</div>
+        <div class="fchip green" id="preset-quality"  onclick="setPreset('quality')"><span class="fcheck"></span>&#127807; Tech + Fundamental</div>
+        <div class="fchip amber on" id="preset-full"  onclick="setPreset('full')"><span class="fcheck"></span>&#127919; All signals</div>
+      </div>
+    </div>
+
     <!-- Quick presets -->
     <div class="fgroup">
       <div class="fgrouplabel">&#9889; Quick Presets</div>
@@ -280,30 +290,6 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
   </div>
 </div>
 
-<!-- ── Layer weight controls ── -->
-<div style="background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
-  <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Score weights</span>
-  <div style="display:flex;align-items:center;gap:8px">
-    <span style="font-size:11px;color:#3498db">&#128202; Technical</span>
-    <input type="range" id="w-tech" min="0" max="100" value="50" step="10" oninput="onWeightChange()" style="width:80px;accent-color:#3498db">
-    <span id="wl-tech" style="font-size:11px;color:var(--text);width:32px">50%</span>
-  </div>
-  <div style="display:flex;align-items:center;gap:8px">
-    <span style="font-size:11px;color:#27ae60">&#127807; Fundamental</span>
-    <input type="range" id="w-fund" min="0" max="100" value="30" step="10" oninput="onWeightChange()" style="width:80px;accent-color:#27ae60">
-    <span id="wl-fund" style="font-size:11px;color:var(--text);width:32px">30%</span>
-  </div>
-  <div style="display:flex;align-items:center;gap:8px">
-    <span style="font-size:11px;color:#e67e22">&#9889; Catalyst</span>
-    <input type="range" id="w-cat" min="0" max="100" value="20" step="10" oninput="onWeightChange()" style="width:80px;accent-color:#e67e22">
-    <span id="wl-cat" style="font-size:11px;color:var(--text);width:32px">20%</span>
-  </div>
-  <div style="display:flex;gap:8px;margin-left:auto">
-    <button onclick="setPreset('breakout')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">&#9889; Pure Breakout</button>
-    <button onclick="setPreset('quality')"  style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">&#127807; Quality Growth</button>
-    <button onclick="setPreset('full')"     style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">&#127919; Full Signal</button>
-  </div>
-</div>
 
 <div class="sortrow">
   <select id="ssort" onchange="render()">
@@ -335,30 +321,17 @@ var layerWeights = {{ tech: 50, fund: 30, cat: 20 }};
 
 function setPreset(name) {{
   var presets = {{
-    breakout:  {{ tech:100, fund:0,  cat:0  }},
-    quality:   {{ tech:50,  fund:50, cat:0  }},
-    full:      {{ tech:50,  fund:30, cat:20 }},
+    breakout: {{ tech:100, fund:0,  cat:0  }},
+    quality:  {{ tech:50,  fund:50, cat:0  }},
+    full:     {{ tech:50,  fund:30, cat:20 }},
   }};
   if (!presets[name]) return;
   layerWeights = Object.assign({{}}, presets[name]);
-  document.getElementById('w-tech').value = layerWeights.tech;
-  document.getElementById('w-fund').value = layerWeights.fund;
-  document.getElementById('w-cat').value  = layerWeights.cat;
-  updateWeightLabels();
-  render();
-}}
-
-function updateWeightLabels() {{
-  document.getElementById('wl-tech').textContent = layerWeights.tech+'%';
-  document.getElementById('wl-fund').textContent = layerWeights.fund+'%';
-  document.getElementById('wl-cat').textContent  = layerWeights.cat+'%';
-}}
-
-function onWeightChange() {{
-  layerWeights.tech = parseInt(document.getElementById('w-tech').value)||0;
-  layerWeights.fund = parseInt(document.getElementById('w-fund').value)||0;
-  layerWeights.cat  = parseInt(document.getElementById('w-cat').value)||0;
-  updateWeightLabels();
+  // Highlight active chip, clear others
+  ['breakout','quality','full'].forEach(function(p) {{
+    var el = document.getElementById('preset-'+p);
+    if (el) el.classList.toggle('on', p === name);
+  }});
   render();
 }}
 
