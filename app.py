@@ -335,11 +335,44 @@ function setPreset(name) {{
   render();
 }}
 
+function estimateTech(s) {{
+  // Estimate technical score from existing Firebase fields (pre-v3 data)
+  var t = 0;
+  var es = s.ema_stack||'';
+  if (es==='full') t+=25; else if (es==='partial') t+=15; else if (es==='weak') t+=5;
+  var hh = s.hh_hl||0;
+  if (hh>=0.85) t+=12; else if (hh>=0.70) t+=8; else if (hh>=0.55) t+=4;
+  var ac = s.atr||1;
+  if (ac<=0.20) t+=20; else if (ac<=0.25) t+=15; else if (ac<=0.30) t+=10; else if (ac<=0.40) t+=5;
+  var vc = s.vol_contraction||1;
+  if (vc<=0.50) t+=15; else if (vc<=0.65) t+=10; else if (vc<=0.80) t+=5;
+  var d = s.dist_to_level||99;
+  if (d<=1) t+=20; else if (d<=2) t+=16; else if (d<=3.5) t+=11; else if (d<=6) t+=5; else if (d<=10) t+=1;
+  var adv = (s.avg_dollar_vol||0);
+  if (adv>=200000000) t+=8; else if (adv>=50000000) t+=6; else if (adv>=20000000) t+=4; else t+=2;
+  if (es==='weak') t=Math.max(0,t-18);
+  if (d>15) t=Math.max(0,t-12);
+  if ((s.momentum_1m||0)<-5) t=Math.max(0,t-10);
+  return Math.min(100,t);
+}}
+
+function estimateCat(s) {{
+  // Estimate catalyst score from existing Firebase fields (pre-v3 data)
+  var c = 0;
+  var m = s.momentum_1m||s.change_pct||0;
+  if (m>=30) c+=25; else if (m>=15) c+=18; else if (m>=8) c+=10; else if (m>=3) c+=5;
+  var vr = s.vol_ratio||1;
+  if (vr>=5) c+=15; else if (vr>=3) c+=10; else if (vr>=2) c+=5;
+  var m3 = s.momentum_3m||0;
+  if (m3<-30) c=Math.max(0,c-20);
+  return Math.min(100,c);
+}}
+
 function blendScore(s) {{
-  // Use stored layer scores if available, else fall back to legacy score
-  var tech = s.score_technical  != null ? s.score_technical  : (s.breakout_score||s.score||0);
+  // Use stored layer scores if available; otherwise estimate from existing fields
+  var tech = s.score_technical  != null ? s.score_technical  : estimateTech(s);
   var fund = s.score_fundamental != null ? s.score_fundamental : 0;
-  var cat  = s.score_catalyst    != null ? s.score_catalyst   : (s.catalyst_score||0);
+  var cat  = s.score_catalyst    != null ? s.score_catalyst   : estimateCat(s);
   var tw = layerWeights.tech, fw = layerWeights.fund, cw = layerWeights.cat;
   var total = tw + fw + cw;
   if (total === 0) return s.score || 0;
