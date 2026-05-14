@@ -62,7 +62,7 @@ first_ref = db.reference("/scanner/first_seen")
 # Format: "v{N}_{short_description}"
 # Every pick stored in Firebase carries this tag so the optimizer can filter
 # by version and experiments can be compared apples-to-apples.
-SCORING_VERSION = "v1_qullamaggie"
+SCORING_VERSION = "v2_base_setup"
 
 # ── Universe ──────────────────────────────────────────────────────────────────
 def get_universe():
@@ -210,24 +210,39 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         elif price > e50:
             ema_stack = "weak"
 
-        # ATR compression (20-day)
+        # True Range + ATR EMA series
         tr = pd.concat([
             high - low,
             (high - close.shift(1)).abs(),
             (low  - close.shift(1)).abs()
         ], axis=1).max(axis=1)
-        atr14 = float(tr.ewm(span=14, adjust=False).mean().iloc[-1])
-        atr_c = round(atr14 / price, 3) if price > 0 else 1.0
+        atr_ema = tr.ewm(span=14, adjust=False).mean()
+        atr14   = float(atr_ema.iloc[-1])
 
-        # Volume contraction (last 5 vs last 20)
-        avg5  = float(volume.iloc[-5:].mean())
+        # ATR as % of price — used only for flag threshold checks
+        atr_pct = round(atr14 / price, 4) if price > 0 else 1.0
+
+        # ATR compression ratio: recent (last 5 bars) vs prior (bars -25..-10)
+        # Values <1.0 mean the stock is coiling; lower = tighter base
+        if len(atr_ema) >= 25:
+            atr_recent = float(atr_ema.iloc[-5:].mean())
+            atr_hist   = float(atr_ema.iloc[-25:-10].mean())
+            atr_c = round(atr_recent / atr_hist, 2) if atr_hist > 0 else 1.0
+        else:
+            atr_c = 1.0  # not enough history — treat as no compression
+        # Expose atr_c clamped for storage
+        atr_c = min(atr_c, 2.0)
+
+        # Volume contraction: last 8 bars vs prior 17 (bars -25..-8)
+        avg8  = float(volume.iloc[-8:].mean())
+        avg25_ref = float(volume.iloc[-25:-8].mean()) if len(volume) >= 25 else float(volume.mean())
+        vol_c = round(avg8 / avg25_ref, 2) if avg25_ref > 0 else 1.0
+
+        # Volume ratio (today vs 20-day avg — kept for display)
         avg20 = float(volume.iloc[-20:].mean())
-        vol_c = round(avg5 / avg20, 2) if avg20 > 0 else 1.0
-
-        # Volume ratio (today vs 20-day avg)
         vol_ratio = round(float(volume.iloc[-1]) / avg20, 2) if avg20 > 0 else 1.0
 
-        # 52-week level
+        # Distance to 52-week high (proximity to key level)
         h52  = float(high.iloc[-252:].max()) if len(high) >= 252 else float(high.max())
         dist = round((h52 - price) / price * 100, 2) if h52 > 0 else 0.0
         if   dist <= 1:   level = "ATH"
@@ -235,8 +250,7 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         elif dist <= 15:  level = "52-week high"
         else:             level = "prior resistance"
 
-        # HH/HL (last 20 bars)
-        hh_hl = 0.0
+        # HH/HL structure (last 20 bars)
         bars = min(20, len(df))
         hh_count = sum(
             1 for i in range(1, bars)
@@ -251,33 +265,69 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         mom3m = round((price - float(close.iloc[-63])) / float(close.iloc[-63]) * 100, 1) \
                 if len(close) >= 63 else 0.0
 
-        # Pre-breakout / bull flag
-        pre_breakout = (atr_c <= 0.03 and vol_c <= 0.7 and dist <= 5
+        # Pre-breakout / bull flag (use atr_pct for absolute tightness check)
+        pre_breakout = (atr_pct <= 0.03 and vol_c <= 0.7 and dist <= 5
                         and ema_stack in ("full", "partial"))
-        bull_flag    = (atr_c <= 0.025 and vol_c <= 0.65 and mom1m >= 8
+        bull_flag    = (atr_pct <= 0.025 and vol_c <= 0.65 and mom1m >= 8
                         and ema_stack in ("full", "partial"))
 
-        # Qullamaggie score
+        # ── v2_base_setup scoring ─────────────────────────────────────────────
+        # Designed to surface stocks in a tight base near a key level
+        # after a prior move — the Qullamaggie "buyable" pattern.
+        #
+        # Component breakdown (max = 95):
+        #   EMA structure      18   (trend direction / table stakes)
+        #   HH/HL structure    10   (orderly consolidation structure)
+        #   ATR compression    20   (tight coiling — key signal)
+        #   Distance to level  18   (near a pivot = low-risk entry)
+        #   Volume contraction 12   (institutions quietly accumulating)
+        #   3M prior momentum  10   (prior move before base)
+        #   Pre-breakout flag   4   (all-of-the-above tightness bonus)
+        #   Bull-flag flag      3   (momentum + tight base combo)
+        #                    ----
+        #                      95
+        # ─────────────────────────────────────────────────────────────────────
         score = 0
-        if ema_stack == "full":    score += 30
-        elif ema_stack == "partial": score += 18
-        elif ema_stack == "weak":  score += 8
-        if hh_hl >= 0.85: score += 20
-        elif hh_hl >= 0.70: score += 13
-        elif hh_hl >= 0.55: score += 7
-        if atr_c <= 0.25: score += 15
-        elif atr_c <= 0.35: score += 11
-        elif atr_c <= 0.45: score += 7
-        elif atr_c <= 0.55: score += 3
-        if level == "ATH":           score += 10
-        elif level == "multi-year high": score += 8
-        elif level == "52-week high": score += 6
-        elif level == "prior resistance": score += 3
-        if vol_c <= 0.5: score += 10
-        elif vol_c <= 0.7: score += 6
-        elif vol_c <= 0.9: score += 2
-        if pre_breakout: score += 5
-        if bull_flag:    score += 5
+
+        # EMA structure (18 pts)
+        if   ema_stack == "full":    score += 18
+        elif ema_stack == "partial": score += 11
+        elif ema_stack == "weak":    score += 5
+
+        # HH/HL structure (10 pts)
+        if   hh_hl >= 0.85: score += 10
+        elif hh_hl >= 0.70: score += 7
+        elif hh_hl >= 0.55: score += 3
+
+        # ATR compression ratio (20 pts) — lower ratio = tighter coil
+        if   atr_c <= 0.65: score += 20
+        elif atr_c <= 0.75: score += 15
+        elif atr_c <= 0.85: score += 9
+        elif atr_c <= 0.95: score += 4
+
+        # Distance to 52-week high / key level (18 pts)
+        if   dist <= 1:  score += 18
+        elif dist <= 3:  score += 14
+        elif dist <= 6:  score += 9
+        elif dist <= 10: score += 4
+        elif dist <= 15: score += 1
+
+        # Volume contraction (12 pts)
+        if   vol_c <= 0.50: score += 12
+        elif vol_c <= 0.65: score += 8
+        elif vol_c <= 0.80: score += 4
+
+        # 3-month prior momentum (10 pts) — prior move before base
+        if   mom3m >= 30: score += 10
+        elif mom3m >= 15: score += 7
+        elif mom3m >= 5:  score += 3
+        elif mom3m < -5:  score -= 5   # downtrend penalty
+
+        # Setup flags (4 + 3 pts)
+        if pre_breakout: score += 4
+        if bull_flag:    score += 3
+
+        score = min(score, 95)  # hard cap
 
         status = "READY" if score >= 72 else "WATCH" if score >= 55 else "BUILDING"
 
@@ -288,9 +338,10 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
             "score":            score,
             "status":           status,
             "track":            "BREAKOUT",
-            "scoring_version":  SCORING_VERSION,   # ← version tag for experiment tracking
+            "scoring_version":  SCORING_VERSION,
             "ema_stack":        ema_stack,
-            "atr":              atr_c,
+            "atr":              atr_c,        # compression ratio (v2: <1 = tight)
+            "atr_pct":          atr_pct,      # ATR as % of price (for reference)
             "vol_contraction":  vol_c,
             "vol_ratio":        vol_ratio,
             "level":            level,
@@ -300,7 +351,7 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
             "momentum_3m":      mom3m,
             "pre_breakout":     pre_breakout,
             "bull_flag":        bull_flag,
-            "rs_percentile":    None,  # computed after scoring all stocks
+            "rs_percentile":    None,
             "returns":          {}
         }
     except Exception as e:

@@ -68,19 +68,21 @@ Penalties: weak EMA (−18), dist >15% (−12), mom <−5% (−12), high ATR + l
 | EPS growth | 7 | ≥25%=7 |
 | Technical bonus | 7 | EMA full=5, mom≥10%=3, dist≤8%=4 (combined max 7) |
 
-### Backtest scoring (backtest.py) — v1_qullamaggie
+### Backtest scoring (backtest.py) — v2_base_setup
 
-`backtest.py` uses the original Qullamaggie formula (simpler, no fundamentals needed):
+`backtest.py` scores the "base before breakout" setup — no fundamentals needed.
+ATR is measured as a **compression ratio** (recent ATR EMA ÷ prior ATR EMA); values below 1.0 mean the stock is coiling.
 
 | Factor | Max pts | Logic |
 |--------|---------|-------|
-| EMA stack | 30 | full=30, partial=18, weak=8 |
-| HH/HL structure | 20 | ≥85%=20, ≥70%=13, ≥55%=7 |
-| ATR compression | 15 | ≤0.25=15, ≤0.35=11, ≤0.45=7, ≤0.55=3 |
-| Level | 10 | ATH=10, multi-year=8, 52-week=6, prior=3 |
-| Volume contraction | 10 | ≤50%=10, ≤70%=6, ≤90%=2 |
-| Pre-breakout flag | 5 | ATR≤3%, vol≤70%, dist≤5%, EMA full/partial |
-| Bull flag | 5 | ATR≤2.5%, vol≤65%, mom1m≥8%, EMA full/partial |
+| EMA structure | 18 | full=18, partial=11, weak=5 |
+| HH/HL structure | 10 | ≥85%=10, ≥70%=7, ≥55%=3 |
+| ATR compression ratio | 20 | ≤0.65=20, ≤0.75=15, ≤0.85=9, ≤0.95=4 |
+| Distance to 52-week high | 18 | ≤1%=18, ≤3%=14, ≤6%=9, ≤10%=4, ≤15%=1 |
+| Volume contraction | 12 | ≤50%=12, ≤65%=8, ≤80%=4 |
+| 3M prior momentum | 10 | ≥30%=10, ≥15%=7, ≥5%=3, <-5%=−5 |
+| Pre-breakout flag | 4 | ATR%≤3%, vol≤70%, dist≤5%, EMA full/partial |
+| Bull flag | 3 | ATR%≤2.5%, vol≤65%, mom1m≥8%, EMA full/partial |
 
 Every pick stored by backtest.py carries a `scoring_version` field (e.g. `"v1_qullamaggie"`). Bump `SCORING_VERSION` in backtest.py whenever the scoring logic changes.
 
@@ -276,7 +278,8 @@ The shadow backtest inside ai_optimizer is a fast estimate (re-scores existing p
 
 | Version | Description | File |
 |---------|-------------|------|
-| `v1_qullamaggie` | Original Qullamaggie formula (EMA+HH/HL+ATR+Level+Vol) | backtest.py |
+| `v1_qullamaggie` | Original Qullamaggie formula (EMA+HH/HL+ATR+Level+Vol) | backtest.py (retired) |
+| `v2_base_setup` | Rebalanced: ATR compression ratio + dist-to-level + 3M momentum + vol contraction | backtest.py (current) |
 | `v2_two_track` | Two-track BREAKOUT+CATALYST scoring with fundamentals | live_scanner.py |
 
 ---
