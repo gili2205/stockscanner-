@@ -2295,6 +2295,9 @@ function loadSMWatchlist(cb) {
     smWatchlist = snap.val() || {};
     renderInsiders();  // re-render to update star states
     if (cb) { cb(); cb = null; }
+  }, function(err) {
+    smWatchlist = {};
+    if (cb) { cb(); cb = null; }
   });
 }
 function toggleSMWatch(ticker) {
@@ -2600,6 +2603,10 @@ var watchlist = {};  // ticker → true
 function loadWatchlist(cb) {
   fdb.ref('/scanner/watchlist').once('value', function(snap) {
     watchlist = snap.val() || {};
+    if (cb) cb();
+  }, function(err) {
+    // Watchlist unavailable (e.g. rules) — proceed without it
+    watchlist = {};
     if (cb) cb();
   });
 }
