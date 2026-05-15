@@ -663,9 +663,27 @@ fdb.ref("/scanner").on("value", function(snap) {{
 
 startWatchdog();
 
+// ── sessionStorage cache helper (10-min TTL) ─────────────────────────────────
+function fbCached(path, ttl, onData) {{
+  var key = 'fb|' + path;
+  try {{
+    var raw = sessionStorage.getItem(key);
+    if (raw) {{
+      var obj = JSON.parse(raw);
+      if (Date.now() - obj.ts < ttl) {{ onData(obj.data); return; }}
+    }}
+  }} catch(e) {{}}
+  fdb.ref(path).once('value', function(snap) {{
+    var data = snap.val();
+    try {{ sessionStorage.setItem(key, JSON.stringify({{ts: Date.now(), data: data}})); }} catch(e) {{}}
+    onData(data);
+  }});
+}}
+var BADGE_CACHE_TTL = 10 * 60 * 1000; // 10 min
+
 // ── Load smart money tickers for badge display ────────────────────────────────
-fdb.ref('/scanner/smart_money').once('value', function(snap) {{
-  var d = snap.val() || {{}};
+fbCached('/scanner/smart_money', BADGE_CACHE_TTL, function(d) {{
+  d = d || {{}};
   (d.insiders || []).forEach(function(b) {{ if(b.ticker) {{ smartMoneyTickers[b.ticker] = smartMoneyTickers[b.ticker] || {{}}; smartMoneyTickers[b.ticker].insider = true; }} }});
   (d.institutions || []).forEach(function(fund) {{
     (fund.holdings || []).forEach(function(h) {{ if(h.ticker) {{ smartMoneyTickers[h.ticker] = smartMoneyTickers[h.ticker] || {{}}; smartMoneyTickers[h.ticker].institution = true; }} }});
@@ -674,8 +692,8 @@ fdb.ref('/scanner/smart_money').once('value', function(snap) {{
 
 // ── Load sentiment data for buzz badge ───────────────────────────────────────
 var sentimentData = {{}};
-fdb.ref('/scanner/sentiment').once('value', function(snap) {{
-  var d = snap.val() || {{}};
+fbCached('/scanner/sentiment', BADGE_CACHE_TTL, function(d) {{
+  d = d || {{}};
   Object.keys(d).forEach(function(k) {{ if(k !== '_updated' && d[k]) sentimentData[k] = d[k]; }});
 }});
 
@@ -2290,6 +2308,24 @@ var institutionData  = [];
 var scannerTickers   = new Set();
 var smWatchlist      = {};  // ticker → true
 
+// ── sessionStorage cache (avoids re-fetching on tab navigation) ───────────────
+var SM_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+function fbCached(path, ttl, onData, onErr) {
+  var key = 'fb|' + path;
+  try {
+    var raw = sessionStorage.getItem(key);
+    if (raw) {
+      var obj = JSON.parse(raw);
+      if (Date.now() - obj.ts < ttl) { onData(obj.data); return; }
+    }
+  } catch(e) {}
+  fdb.ref(path).once('value', function(snap) {
+    var data = snap.val();
+    try { sessionStorage.setItem(key, JSON.stringify({ts: Date.now(), data: data})); } catch(e) {}
+    onData(data);
+  }, function(err) { if (onErr) onErr(err); });
+}
+
 function loadSMWatchlist(cb) {
   fdb.ref('/scanner/watchlist').on('value', function(snap) {
     smWatchlist = snap.val() || {};
@@ -2392,16 +2428,14 @@ function renderInstitutions() {
 }
 
 function loadData() {
-  // Load current scanner tickers for cross-referencing
-  fdb.ref('scanner/all_stocks').once('value', function(snap) {
-    var stocks = snap.val() || {};
-    scannerTickers = new Set(Object.keys(stocks));
+  // Load current scanner tickers (cached 10 min — changes rarely)
+  fbCached('scanner/all_stocks', SM_CACHE_TTL, function(stocks) {
+    scannerTickers = new Set(Object.keys(stocks || {}));
   });
   // Load watchlist (live subscription so star states update in real time)
   loadSMWatchlist();
 
-  fdb.ref('scanner/smart_money').once('value', function(snap) {
-    var data = snap.val();
+  fbCached('scanner/smart_money', SM_CACHE_TTL, function(data) {
     if (!data) {
       document.getElementById('loading').innerHTML =
         '<div class="error">No smart money data yet.<br><br>'
@@ -2414,7 +2448,7 @@ function loadData() {
     institutionData = data.institutions || [];
 
     var updated = data.last_updated ? new Date(data.last_updated).toLocaleString() : '—';
-    document.getElementById('last-updated').textContent = 'Last updated: ' + updated;
+    document.getElementById('last-updated').textContent = 'Last updated: ' + updated + ' (cached)';
 
     renderInsiders();
     renderInstitutions();
@@ -2599,6 +2633,24 @@ var page     = 0;
 var pageSize = 50;
 var watchlist = {};  // ticker → true
 
+// ── sessionStorage cache ──────────────────────────────────────────────────────
+var SENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+function fbCached(path, ttl, onData, onErr) {
+  var key = 'fb|' + path;
+  try {
+    var raw = sessionStorage.getItem(key);
+    if (raw) {
+      var obj = JSON.parse(raw);
+      if (Date.now() - obj.ts < ttl) { onData(obj.data); return; }
+    }
+  } catch(e) {}
+  fdb.ref(path).once('value', function(snap) {
+    var data = snap.val();
+    try { sessionStorage.setItem(key, JSON.stringify({ts: Date.now(), data: data})); } catch(e) {}
+    onData(data);
+  }, function(err) { if (onErr) onErr(err); });
+}
+
 // ── Watchlist helpers ─────────────────────────────────────────────────────────
 function loadWatchlist(cb) {
   fdb.ref('/scanner/watchlist').once('value', function(snap) {
@@ -2625,12 +2677,12 @@ function toggleWatch(ticker) {
 
 function load() {
   loadWatchlist(function() {
-  fdb.ref('/scanner/sentiment').once('value', function(snap) {
-    var d = snap.val() || {};
+  fbCached('/scanner/sentiment', SENT_CACHE_TTL, function(d) {
+    d = d || {};
     var updated = d._updated || '';
     if (updated) {
       document.getElementById('updated-ts').textContent =
-        'Updated: ' + new Date(updated).toLocaleString();
+        'Updated: ' + new Date(updated).toLocaleString() + ' (cached 10 min)';
     }
     allData = Object.values(d).filter(function(r) { return r && r.ticker; });
     if (!allData.length) {

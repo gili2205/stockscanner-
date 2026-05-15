@@ -210,6 +210,7 @@ DEFAULT_WEIGHTS = {
 ## 6. Git Workflow — Strict Rules
 
 **NEVER push directly to `main` without staging verification.**
+**NEVER create new branches. Use `fix/scanner-bugs` for staging.**
 
 All changes go to `fix/scanner-bugs` first:
 ```bash
@@ -221,13 +222,21 @@ git push origin fix/scanner-bugs
 ```
 
 Merge to `main` only after:
-1. Changes tested on staging
-2. Explicit user approval: "yes, merge it" or "push to main"
+1. Changes tested on staging Vercel + staging VM
+2. Explicit user approval: "yes, merge it" or "push to main" or "deploy to prod"
 
 On staging VM: `git pull origin fix/scanner-bugs`
 On prod VM: `git pull origin main`
 
 **Always explain what you're going to change and where before making any changes. Wait for go-ahead.**
+
+Merging staging → prod:
+```bash
+git checkout main
+git merge fix/scanner-bugs
+git push origin main
+# then tell user to run: cd /home/scanner && git pull && sudo systemctl restart scanner
+```
 
 ---
 
@@ -355,11 +364,12 @@ Replaced working `ThreadPoolExecutor` code with `multiprocessing`. Introduced de
 
 ## 11. Pending / Future Work
 
-- [ ] Add `smart_money.py` cron job (every 4 hours) on both VMs
 - [ ] Fix insider buys (Form 4 returning 0 buys) in `smart_money.py`
 - [ ] Test "Approve" flow end-to-end: approve AI rec → run `--apply` → verify live_scanner.py patched correctly
 - [ ] Add Anthropic credits to enable AI analysis button (console.anthropic.com)
 - [ ] Consider adding more return windows to optimizer (6M, 1Y) once enough history exists
+- [ ] v3 experiment on staging: systemd service running, needs to complete then run `optimizer.py --compare v3_three_layer`
+- [ ] After v3 experiment passes → run on prod
 
 ---
 
@@ -379,12 +389,51 @@ Run `python backtest.py --update-returns` periodically to fill in new windows as
 
 ---
 
-## 13. Current State (as of 2026-05-13)
+## 13. New Features (added 2026-05-15)
 
-- ✅ All code on `main` branch (fix/scanner-bugs merged)
-- ✅ Vercel production auto-deployed
-- ✅ Both VMs have cron jobs set up (optimizer weekly + AI poller 5-min)
-- ✅ Staging optimizer ran → data in Firebase → Section 1 showing data
-- ✅ Production optimizer ran → data in Firebase → Section 1 showing data
+### Sentiment Tracker (`sentiment.py`)
+- Fetches news from Finnhub `/company-news` (free tier — only working source)
+- Removed: StockTwits (Cloudflare blocked), Reddit (OAuth required), Finnhub `/news-sentiment` (premium)
+- Keyword-based sentiment: BULLISH_WORDS / BEARISH_WORDS sets, weighted by source credibility
+- Source weights: SeekingAlpha 2.5x, Benzinga 2.0x, ChartMill 1.8x, CNBC 1.3x, Yahoo 1.0x
+- Buzz score: log-normalized from article count (`min(100, log(count+1)/log(301)*100)`)
+- **Expanded universe**: scanner picks + Finnhub IPO calendar (last 30d) + scanner history (last 14d)
+- Firebase path: `/scanner/sentiment/{TICKER}`
+- Cron: `0 7,12,17,22 * * 1-5` (4x/day, weekdays)
+- Run: `python sentiment.py --limit 200`
+
+### Watchlist (`/scanner/watchlist`)
+- ⭐ Star button on every row in Sentiment and Smart Money pages
+- Saves `{ticker: true}` to Firebase `/scanner/watchlist`
+- Dashboard reads watchlist live (real-time subscription)
+
+### Cross-tab Signal Filters (dashboard)
+- New "Cross-tab Signals" filter row with chips:
+  - 🔥 High Buzz (buzz_score ≥ 50 from sentimentData)
+  - 📰 Bullish news (overall_sentiment === 'bullish')
+  - 🐋 Insider buy (from smartMoneyTickers)
+  - 🏦 Hedge fund (from smartMoneyTickers)
+  - ⭐ Watchlist (from watchlistTickers)
+
+### sessionStorage Caching
+- Smart Money page, Sentiment page, and dashboard badge data all cached 10 min
+- Second visit within session renders instantly
+- "(cached)" label shown next to timestamp
+
+### v3 Three-Layer Scoring (staging only, experiment running)
+- Technical (50%) + Fundamental (30%) + Catalyst (20%)
+- Score focus chips in dashboard filter panel replace layer weight sliders
+- `estimateTech()` / `estimateCat()` for pre-v3 data fallback
+- Experiment: `/scanner/experiments/v3_three_layer/history`
+
+## 14. Current State (as of 2026-05-15)
+
+- ✅ Prod VM: scanner running, cron jobs clean
+- ✅ Prod: sentiment cron added (`0 7,12,17,22 * * 1-5`)
+- ✅ Prod: smart_money cron added (`0 6 * * 1-5`)
+- ✅ Staging: watchlist + cross-tab signals + caching on `fix/scanner-bugs`
+- ⏳ Prod: smart_money.py + sentiment.py need first manual run to populate data
+- ⏳ Staging: v3 experiment still running (keeps crashing on preemptible VM)
 - ⏳ AI Analysis requires Anthropic credits before it can run
 - ⏳ `smart_money.py` Form 4 insider buys returning 0 (known bug, deferred)
+- ⏳ Caching changes on `fix/scanner-bugs` — test on staging before merging to main
