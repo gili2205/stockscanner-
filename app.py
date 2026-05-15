@@ -1502,8 +1502,24 @@ var fdb = firebase.database();
           <option value="bull_flag">Bull flag</option>
         </select>
       </div>
+      <div class="ctrl-group">
+        <label>Min Tech</label>
+        <input type="number" id="min-tech" value="0" min="0" max="100" style="width:60px" onchange="render()">
+      </div>
+      <div class="ctrl-group">
+        <label>Min Catalyst</label>
+        <input type="number" id="min-cat" value="0" min="0" max="100" style="width:60px" onchange="render()">
+      </div>
       <button class="btn" onclick="loadData()">🔄 Refresh</button>
       <span id="data-info" style="font-size:11px;color:var(--muted)"></span>
+    </div>
+
+    <!-- Score focus chips -->
+    <div style="display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Score focus:</span>
+      <button class="sort-btn active" id="focus-all"  onclick="setLayerFocus('all')">&#127919; All signals</button>
+      <button class="sort-btn"        id="focus-tech" onclick="setLayerFocus('tech')">&#128202; Technical only</button>
+      <button class="sort-btn"        id="focus-cat"  onclick="setLayerFocus('cat')">&#9889; Catalyst only</button>
     </div>
 
     <!-- KPI row -->
@@ -1530,6 +1546,12 @@ var fdb = firebase.database();
           (win = positive return in selected window)
         </span>
       </h2>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--muted);">Layer:</span>
+        <button class="sort-btn active" id="sig-all"  onclick="setSigLayer('all')">All picks</button>
+        <button class="sort-btn"        id="sig-tech" onclick="setSigLayer('tech')">&#128202; Technical leaders</button>
+        <button class="sort-btn"        id="sig-cat"  onclick="setSigLayer('cat')">&#9889; Catalyst leaders</button>
+      </div>
       <div class="signal-grid" id="signal-grid"></div>
     </div>
 
@@ -1548,6 +1570,8 @@ var fdb = firebase.database();
         <button class="sort-btn active" id="sort-btn-date"  onclick="setSort('scan_date')">📅 Date</button>
         <button class="sort-btn"        id="sort-btn-abc"   onclick="setSort('ticker_asc')">🔤 A–Z</button>
         <button class="sort-btn"        id="sort-btn-score" onclick="setSort('score')">⭐ Score</button>
+        <button class="sort-btn"        id="sort-btn-tech"  onclick="setSort('score_technical')">📊 Tech</button>
+        <button class="sort-btn"        id="sort-btn-cat"   onclick="setSort('score_catalyst')">⚡ Catalyst</button>
         <button class="sort-btn"        id="sort-btn-ret1w" onclick="setSort('ret_1w')">1W Return</button>
         <button class="sort-btn"        id="sort-btn-ret1m" onclick="setSort('ret_1m')">1M Return</button>
         <button class="sort-btn"        id="sort-btn-ret3m" onclick="setSort('ret_3m')">3M Return</button>
@@ -1562,6 +1586,8 @@ var fdb = firebase.database();
             <th onclick="sortBy('ticker')">Ticker ↕</th>
             <th onclick="sortBy('price_at_scan')">Entry $</th>
             <th onclick="sortBy('score')">Score ↕</th>
+            <th onclick="sortBy('score_technical')" style="color:var(--blue)">Tech ↕</th>
+            <th onclick="sortBy('score_catalyst')" style="color:var(--amber)">Cat ↕</th>
             <th>Status</th>
             <th>Setup</th>
             <th onclick="sortBy('rs_percentile')">RS %ile</th>
@@ -1587,12 +1613,71 @@ var fdb = firebase.database();
 </div>
 
 <script>
-var allPicks = [];
-var filtered = [];
-var sortCol  = 'scan_date';
-var sortAsc  = false;
-var page     = 0;
-var pageSize = 50;
+var allPicks  = [];
+var filtered  = [];
+var sortCol   = 'scan_date';
+var sortAsc   = false;
+var page      = 0;
+var pageSize  = 50;
+var layerFocus = 'all';   // 'all' | 'tech' | 'cat'
+var sigLayer   = 'all';   // 'all' | 'tech' | 'cat'
+
+// ── Layer score helpers (mirror dashboard logic) ──────────────────────────────
+function aEstimateTech(p) {
+  var t = 0;
+  var es = p.ema_stack||'';
+  if (es==='full') t+=25; else if (es==='partial') t+=15; else if (es==='weak') t+=5;
+  var hh = p.hh_hl||0;
+  if (hh>=0.85) t+=12; else if (hh>=0.70) t+=8; else if (hh>=0.55) t+=4;
+  var ac = p.atr||1;
+  if (ac<=0.20) t+=20; else if (ac<=0.25) t+=15; else if (ac<=0.30) t+=10; else if (ac<=0.40) t+=5;
+  var vc = p.vol_contraction||1;
+  if (vc<=0.50) t+=15; else if (vc<=0.65) t+=10; else if (vc<=0.80) t+=5;
+  var d = p.dist_to_level||99;
+  if (d<=1) t+=20; else if (d<=2) t+=16; else if (d<=3.5) t+=11; else if (d<=6) t+=5; else if (d<=10) t+=1;
+  if (es==='weak') t=Math.max(0,t-18);
+  if (d>15) t=Math.max(0,t-12);
+  if ((p.momentum_1m||0)<-5) t=Math.max(0,t-10);
+  return Math.min(100,t);
+}
+
+function aEstimateCat(p) {
+  var c = 0;
+  var m = p.momentum_1m||p.change_pct||0;
+  if (m>=30) c+=25; else if (m>=15) c+=18; else if (m>=8) c+=10; else if (m>=3) c+=5;
+  var vr = p.vol_ratio||1;
+  if (vr>=5) c+=15; else if (vr>=3) c+=10; else if (vr>=2) c+=5;
+  var m3 = p.momentum_3m||0;
+  if (m3<-30) c=Math.max(0,c-20);
+  return Math.min(100,c);
+}
+
+function aBlendScore(p) {
+  var tech = p.score_technical  != null ? p.score_technical  : aEstimateTech(p);
+  var fund = p.score_fundamental != null ? p.score_fundamental : 0;
+  var cat  = p.score_catalyst    != null ? p.score_catalyst   : aEstimateCat(p);
+  if (layerFocus === 'tech') return Math.min(100, tech);
+  if (layerFocus === 'cat')  return Math.min(100, cat);
+  var total = 50 + 30 + 20;
+  return Math.min(100, Math.round((50*tech + 30*fund + 20*cat) / total));
+}
+
+function setLayerFocus(f) {
+  layerFocus = f;
+  ['all','tech','cat'].forEach(function(x) {
+    document.getElementById('focus-'+x).classList.toggle('active', x === f);
+  });
+  page = 0;
+  render();
+}
+
+function setSigLayer(f) {
+  sigLayer = f;
+  ['all','tech','cat'].forEach(function(x) {
+    document.getElementById('sig-'+x).classList.toggle('active', x === f);
+  });
+  renderSignals(document.getElementById('tf-select').value);
+}
 
 var CACHE_KEY     = 'scanner_analytics_v1';
 var CACHE_TS_KEY  = 'scanner_analytics_ts_v1';
@@ -1723,12 +1808,22 @@ function loadData() {
 function getFiltered() {
   var status   = document.getElementById('status-filter').value;
   var minScore = parseInt(document.getElementById('min-score').value) || 0;
+  var minTech  = parseInt(document.getElementById('min-tech').value)  || 0;
+  var minCat   = parseInt(document.getElementById('min-cat').value)   || 0;
   var setup    = document.getElementById('setup-filter').value;
   var search   = (document.getElementById('ticker-search').value || '').trim().toUpperCase();
 
   return allPicks.filter(function(p) {
     if (status !== 'all' && p.status !== status) return false;
-    if (p.score < minScore) return false;
+    if (aBlendScore(p) < minScore) return false;
+    if (minTech > 0) {
+      var t = p.score_technical != null ? p.score_technical : aEstimateTech(p);
+      if (t < minTech) return false;
+    }
+    if (minCat > 0) {
+      var c = p.score_catalyst != null ? p.score_catalyst : aEstimateCat(p);
+      if (c < minCat) return false;
+    }
     if (setup === 'pre_breakout' && !p.pre_breakout) return false;
     if (setup === 'bull_flag'    && !p.bull_flag)    return false;
     if (search && p.ticker.indexOf(search) === -1)   return false;
@@ -1738,10 +1833,11 @@ function getFiltered() {
 
 function setSort(col) {
   sortCol = col;
-  sortAsc = (col === 'ticker_asc');  // A-Z is ascending, everything else descending
-  // Update button styles
-  var btns = ['date','abc','score','ret1w','ret1m','ret3m'];
-  var map  = {scan_date:'date', ticker_asc:'abc', score:'score', ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m'};
+  sortAsc = (col === 'ticker_asc');
+  var btns = ['date','abc','score','tech','cat','ret1w','ret1m','ret3m'];
+  var map  = {scan_date:'date', ticker_asc:'abc', score:'score',
+              score_technical:'tech', score_catalyst:'cat',
+              ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m'};
   btns.forEach(function(b) { document.getElementById('sort-btn-'+b).classList.remove('active'); });
   var active = map[col];
   if (active) document.getElementById('sort-btn-'+active).classList.add('active');
@@ -1753,21 +1849,31 @@ function render() {
   var tf = document.getElementById('tf-select').value;
   filtered = getFiltered();
   filtered.sort(function(a,b) {
-    // A-Z sort
     if (sortCol === 'ticker_asc') {
       return a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0;
     }
-    // Return sorts
     if (sortCol.startsWith('ret_')) {
       var key = sortCol.replace('ret_','');
       var va = a.returns && a.returns[key] != null ? a.returns[key] : -Infinity;
       var vb = b.returns && b.returns[key] != null ? b.returns[key] : -Infinity;
-      return vb - va;  // highest first
+      return vb - va;
     }
-    // Standard sorts (highest first)
+    if (sortCol === 'score') {
+      return aBlendScore(b) - aBlendScore(a);
+    }
+    if (sortCol === 'score_technical') {
+      var ta = a.score_technical != null ? a.score_technical : aEstimateTech(a);
+      var tb = b.score_technical != null ? b.score_technical : aEstimateTech(b);
+      return tb - ta;
+    }
+    if (sortCol === 'score_catalyst') {
+      var ca = a.score_catalyst != null ? a.score_catalyst : aEstimateCat(a);
+      var cb = b.score_catalyst != null ? b.score_catalyst : aEstimateCat(b);
+      return cb - ca;
+    }
     var va = a[sortCol] != null ? a[sortCol] : -Infinity;
     var vb = b[sortCol] != null ? b[sortCol] : -Infinity;
-    if (sortCol === 'scan_date') return va < vb ? 1 : va > vb ? -1 : 0;  // newest first
+    if (sortCol === 'scan_date') return va < vb ? 1 : va > vb ? -1 : 0;
     return vb - va;
   });
 
@@ -1865,6 +1971,14 @@ function avgLossForWindow(w) {
 
 function renderSignals(tf) {
   var ps = filtered.filter(function(p){return p.returns&&p.returns[tf]!=null;});
+  // Filter by dominant layer if toggled
+  if (sigLayer !== 'all') {
+    ps = ps.filter(function(p) {
+      var t = p.score_technical != null ? p.score_technical : aEstimateTech(p);
+      var c = p.score_catalyst  != null ? p.score_catalyst  : aEstimateCat(p);
+      return sigLayer === 'tech' ? t >= c : c > t;
+    });
+  }
   if (!ps.length) { document.getElementById('signal-grid').innerHTML='<div style="color:var(--muted)">Not enough data yet</div>'; return; }
 
   var signals = [
@@ -1924,11 +2038,15 @@ function renderPicks(tf) {
     var setup = p.pre_breakout?'Pre-brkout':p.bull_flag?'Bull flag':'Breakout';
     var dol   = p.days_on_list || 1;
     var dolColor = dol >= 5 ? 'var(--green)' : dol >= 3 ? 'var(--amber)' : 'var(--muted)';
+    var techScore = p.score_technical != null ? p.score_technical : aEstimateTech(p);
+    var catScore  = p.score_catalyst  != null ? p.score_catalyst  : aEstimateCat(p);
     html += '<tr>'
       +'<td>'+p.scan_date+'</td>'
       +'<td><strong>'+p.ticker+'</strong></td>'
       +'<td>$'+(p.price_at_scan?p.price_at_scan.toFixed(2):'—')+'</td>'
-      +'<td>'+p.score+'</td>'
+      +'<td>'+aBlendScore(p)+'</td>'
+      +'<td style="color:var(--blue)">'+(techScore||'—')+'</td>'
+      +'<td style="color:var(--amber)">'+(catScore||'—')+'</td>'
       +'<td><span class="badge '+(p.status||'')+'">'+p.status+'</span></td>'
       +'<td>'+setup+'</td>'
       +'<td>'+(p.rs_percentile!=null?p.rs_percentile+'th':'—')+'</td>'
