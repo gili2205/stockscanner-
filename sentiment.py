@@ -175,6 +175,58 @@ def fetch_history_tickers(days=14):
         return set()
 
 
+# ── Yahoo Finance trending + most-active tickers ──────────────────────────────
+_YF_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; sentiment-tracker/1.0)"}
+
+def fetch_yahoo_trending(count=50):
+    """Trending tickers on Yahoo Finance right now (no auth required)."""
+    try:
+        r = requests.get(
+            "https://query1.finance.yahoo.com/v1/finance/trending/US",
+            params={"count": count},
+            headers=_YF_HEADERS,
+            timeout=10,
+        )
+        if r.status_code != 200:
+            log.warning(f"  Yahoo trending: HTTP {r.status_code}")
+            return set()
+        quotes = r.json().get("finance", {}).get("result", [{}])[0].get("quotes", [])
+        tickers = {q["symbol"].strip().upper() for q in quotes if q.get("symbol")}
+        log.info(f"  Yahoo trending: {len(tickers)} tickers")
+        return tickers
+    except Exception as e:
+        log.warning(f"  Yahoo trending error: {e}")
+        return set()
+
+def fetch_yahoo_movers(count=50):
+    """Top movers (most-actives + day gainers) from Yahoo Finance screener."""
+    results = set()
+    for scr_id in ("most_actives", "day_gainers", "day_losers"):
+        try:
+            r = requests.get(
+                "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved",
+                params={"scrIds": scr_id, "count": count},
+                headers=_YF_HEADERS,
+                timeout=10,
+            )
+            if r.status_code != 200:
+                continue
+            quotes = (
+                r.json()
+                .get("finance", {})
+                .get("result", [{}])[0]
+                .get("quotes", [])
+            )
+            for q in quotes:
+                sym = (q.get("symbol") or "").strip().upper()
+                if sym and "." not in sym:   # skip ADRs (BRK.A etc.)
+                    results.add(sym)
+        except Exception as e:
+            log.warning(f"  Yahoo movers ({scr_id}) error: {e}")
+    log.info(f"  Yahoo movers (actives+gainers+losers): {len(results)} tickers")
+    return results
+
+
 # ── Pinned tickers (user-managed via Sentiment page UI) ───────────────────────
 def fetch_pinned_tickers():
     """Return set of tickers pinned by the user at /scanner/sentiment_universe/pinned."""
@@ -191,24 +243,35 @@ def fetch_pinned_tickers():
 # ── Build full sentiment universe ──────────────────────────────────────────────
 def build_universe(limit, ipo_days, history_days):
     """
-    Merge four sources into an ordered list of tickers:
-      1. Pinned tickers (user-managed) — always included first
-      2. All scanner picks (sorted by score desc)
-      3. Recent IPOs from Finnhub calendar
-      4. Recent history picks (appeared in last history_days)
+    Merge six sources into an ordered list of tickers:
+      1. Pinned tickers (user-managed) — always included, never dropped
+      2. Yahoo Finance trending tickers (right now)
+      3. Yahoo Finance most-actives / day gainers / day losers
+      4. All scanner picks (sorted by score desc)
+      5. Recent IPOs from Finnhub calendar
+      6. Recent history picks (appeared in last history_days)
     Deduplicates while preserving insertion order, then caps at limit.
     """
     ordered = []
     seen    = set()
 
+    def _add(tickers):
+        for t in sorted(tickers):
+            if t not in seen:
+                ordered.append(t)
+                seen.add(t)
+
     # 1. Pinned tickers (always included, regardless of limit)
     pinned = fetch_pinned_tickers()
-    for t in sorted(pinned):
-        if t not in seen:
-            ordered.append(t)
-            seen.add(t)
+    _add(pinned)
 
-    # 2. Scanner picks
+    # 2. Yahoo Finance trending
+    _add(fetch_yahoo_trending())
+
+    # 3. Yahoo Finance movers (most-actives + gainers + losers)
+    _add(fetch_yahoo_movers())
+
+    # 4. Scanner picks
     try:
         snap = db.reference("/scanner/all_stocks").get() or {}
         scanner_tickers = sorted(
@@ -216,28 +279,18 @@ def build_universe(limit, ipo_days, history_days):
             key=lambda t: (snap[t] or {}).get("score", 0),
             reverse=True,
         )
-        for t in scanner_tickers:
-            if t not in seen:
-                ordered.append(t)
-                seen.add(t)
+        _add(scanner_tickers)
         log.info(f"  Scanner picks: {len(scanner_tickers)}")
     except Exception as e:
         log.warning(f"  Scanner picks error: {e}")
 
-    # 3. IPO calendar
+    # 5. IPO calendar
     ipo_tickers = fetch_ipo_tickers(days=ipo_days)
     time.sleep(1.1)  # rate limit
-    for t in sorted(ipo_tickers):
-        if t not in seen:
-            ordered.append(t)
-            seen.add(t)
+    _add(ipo_tickers)
 
-    # 4. History tickers
-    hist_tickers = fetch_history_tickers(days=history_days)
-    for t in sorted(hist_tickers):
-        if t not in seen:
-            ordered.append(t)
-            seen.add(t)
+    # 6. History tickers
+    _add(fetch_history_tickers(days=history_days))
 
     # Pinned tickers are always included even beyond the limit
     non_pinned = [t for t in ordered if t not in pinned]
