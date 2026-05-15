@@ -225,8 +225,10 @@ Merge to `main` only after:
 1. Changes tested on staging Vercel + staging VM
 2. Explicit user approval: "yes, merge it" or "push to main" or "deploy to prod"
 
-On staging VM: `git pull origin fix/scanner-bugs`
-On prod VM: `git pull origin main`
+**Vercel auto-deploys `app.py` changes — no VM git pull needed for UI changes.**
+VM git pull is only needed when VM scripts change (`sentiment.py`, `backtest.py`, `smart_money.py`, `live_scanner.py`, etc.):
+- Staging VM: `git pull origin fix/scanner-bugs`
+- Prod VM: `git pull origin main`
 
 **Always explain what you're going to change and where before making any changes. Wait for go-ahead.**
 
