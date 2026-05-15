@@ -57,6 +57,13 @@ firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_URL})
 hist_ref  = db.reference("/scanner/history")
 first_ref = db.reference("/scanner/first_seen")
 
+# ── Scoring version ────────────────────────────────────────────────────────────
+# Bump this string whenever the scoring logic in score_stock_historical() changes.
+# Format: "v{N}_{short_description}"
+# Every pick stored in Firebase carries this tag so the optimizer can filter
+# by version and experiments can be compared apples-to-apples.
+SCORING_VERSION = "v3_three_layer"
+
 # ── Universe ──────────────────────────────────────────────────────────────────
 def get_universe():
     """Get NASDAQ tickers from SEC EDGAR."""
@@ -110,34 +117,62 @@ def _download_one_batch(batch, start_str, end_str):
     )
 
 
+PRICE_CACHE_PATH = Path("/home/scanner/.price_cache.pkl")
+PRICE_CACHE_MAX_AGE_HOURS = 12
+
+
 def download_prices(tickers: list, start: date, end: date) -> dict:
-    """Download OHLCV for all tickers. Returns {ticker: DataFrame}."""
-    log.info(f"Downloading price data for {len(tickers)} tickers: {start} to {end}...")
+    """
+    Download OHLCV for all tickers. Returns {ticker: DataFrame}.
+    Caches result to disk so VM restarts don't trigger a full re-download.
+    Cache is invalidated after 12 hours or if the date range changes.
+    """
+    import pickle
 
     start_str = str(start - timedelta(days=90))
     end_str   = str(end   + timedelta(days=5))
+    cache_key = f"{len(tickers)}_{start_str}_{end_str}"
 
-    # Download in batches of 200 to avoid yfinance memory/timeout issues.
-    # Each batch runs in its own thread with a hard 120-second wall-clock timeout
-    # so a frozen batch never stalls the whole run.
+    # ── Try loading from disk cache ───────────────────────────────────────────
+    if PRICE_CACHE_PATH.exists():
+        try:
+            age_hours = (time.time() - PRICE_CACHE_PATH.stat().st_mtime) / 3600
+            if age_hours < PRICE_CACHE_MAX_AGE_HOURS:
+                with open(PRICE_CACHE_PATH, "rb") as f:
+                    cached = pickle.load(f)
+                if cached.get("key") == cache_key:
+                    result = cached["data"]
+                    log.info(f"Loaded {len(result)} tickers from disk cache "
+                             f"(age: {age_hours:.1f}h)")
+                    return result
+                else:
+                    log.info("Cache key mismatch — re-downloading")
+            else:
+                log.info(f"Cache expired ({age_hours:.1f}h) — re-downloading")
+        except Exception as e:
+            log.warning(f"Cache load failed: {e} — re-downloading")
+
+    # ── Full download ─────────────────────────────────────────────────────────
+    log.info(f"Downloading price data for {len(tickers)} tickers: {start} to {end}...")
+
     result = {}
-    batch_size = 200
+    batch_size = 50   # smaller batches = less likely to timeout
     batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
 
     for i, batch in enumerate(batches):
         log.info(f"  Batch {i+1}/{len(batches)} ({len(batch)} tickers)...")
         raw = None
-        for attempt in range(1, 4):          # up to 3 attempts per batch
+        for attempt in range(1, 4):
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                     future = ex.submit(_download_one_batch, batch, start_str, end_str)
-                    raw = future.result(timeout=120)   # hard 120-second deadline
-                break                                  # success → stop retrying
+                    raw = future.result(timeout=180)   # 180s per smaller batch
+                break
             except concurrent.futures.TimeoutError:
                 log.warning(f"  Batch {i+1} attempt {attempt} timed out, retrying…")
             except Exception as e:
                 log.warning(f"  Batch {i+1} attempt {attempt} error: {e}, retrying…")
-            time.sleep(3)
+            time.sleep(5)
 
         if raw is None or (hasattr(raw, 'empty') and raw.empty):
             log.warning(f"  Batch {i+1} gave no data after 3 attempts, skipping")
@@ -153,13 +188,21 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
                 except Exception:
                     pass
         else:
-            # Single ticker returned
             if len(raw) >= 30:
                 result[batch[0]] = raw
 
-        time.sleep(1)  # polite rate-limit between batches
+        time.sleep(1)
 
     log.info(f"Downloaded {len(result)} tickers with sufficient history")
+
+    # ── Save to disk cache ────────────────────────────────────────────────────
+    try:
+        import pickle
+        with open(PRICE_CACHE_PATH, "wb") as f:
+            pickle.dump({"key": cache_key, "data": result}, f)
+        log.info(f"Price data cached to {PRICE_CACHE_PATH}")
+    except Exception as e:
+        log.warning(f"Cache save failed: {e}")
     return result
 
 
@@ -189,111 +232,160 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         if avg_vol * price < 10_000_000:
             return None
 
-        # EMAs
-        e10  = compute_ema(close, 10)
-        e20  = compute_ema(close, 20)
-        e50  = compute_ema(close, 50)
-        e200 = compute_ema(close, 200) if len(df) >= 200 else None
+        # ── Base signals ──────────────────────────────────────────────
+        e10 = compute_ema(close, 10)
+        e20 = compute_ema(close, 20)
+        e50 = compute_ema(close, 50)
+        ema_stack = ("full"    if price > e10 > e20 > e50 else
+                     "partial" if e10 > e20             else "weak")
 
-        ema_stack = "none"
-        if price > e10 > e20 > e50:
-            ema_stack = "full"
-        elif price > e20 > e50:
-            ema_stack = "partial"
-        elif price > e50:
-            ema_stack = "weak"
-
-        # ATR compression (20-day)
         tr = pd.concat([
             high - low,
             (high - close.shift(1)).abs(),
             (low  - close.shift(1)).abs()
         ], axis=1).max(axis=1)
-        atr14 = float(tr.ewm(span=14, adjust=False).mean().iloc[-1])
-        atr_c = round(atr14 / price, 3) if price > 0 else 1.0
+        atr_ema = tr.ewm(span=14, adjust=False).mean()
+        atr14   = float(atr_ema.iloc[-1])
+        atr_pct = round(atr14 / price, 4) if price > 0 else 1.0
 
-        # Volume contraction (last 5 vs last 20)
-        avg5  = float(volume.iloc[-5:].mean())
-        avg20 = float(volume.iloc[-20:].mean())
-        vol_c = round(avg5 / avg20, 2) if avg20 > 0 else 1.0
+        # ATR compression ratio (recent vs historical)
+        if len(atr_ema) >= 25:
+            atr_c = round(float(atr_ema.iloc[-5:].mean()) /
+                          float(atr_ema.iloc[-25:-10].mean()), 2)
+        else:
+            atr_c = 1.0
+        atr_c = min(atr_c, 2.0)
 
-        # Volume ratio (today vs 20-day avg)
+        # Volume contraction (8-day vs prior 17-day reference)
+        avg8      = float(volume.iloc[-8:].mean())
+        avg25_ref = float(volume.iloc[-25:-8].mean()) if len(volume) >= 25 else float(volume.mean())
+        vol_c     = round(avg8 / avg25_ref, 2) if avg25_ref > 0 else 1.0
+        avg20     = float(volume.iloc[-20:].mean())
         vol_ratio = round(float(volume.iloc[-1]) / avg20, 2) if avg20 > 0 else 1.0
 
-        # 52-week level
+        # Distance to 52-week high
         h52  = float(high.iloc[-252:].max()) if len(high) >= 252 else float(high.max())
         dist = round((h52 - price) / price * 100, 2) if h52 > 0 else 0.0
-        if   dist <= 1:   level = "ATH"
-        elif dist <= 5:   level = "multi-year high"
-        elif dist <= 15:  level = "52-week high"
-        else:             level = "prior resistance"
+        level = ("ATH"            if dist <= 1  else
+                 "multi-year high" if dist <= 5  else
+                 "52-week high"    if dist <= 15 else "prior resistance")
 
         # HH/HL (last 20 bars)
-        hh_hl = 0.0
-        bars = min(20, len(df))
-        hh_count = sum(
-            1 for i in range(1, bars)
-            if float(high.iloc[-bars+i]) > float(high.iloc[-bars+i-1])
-            and float(low.iloc[-bars+i]) > float(low.iloc[-bars+i-1])
-        )
+        bars     = min(20, len(df))
+        hh_count = sum(1 for i in range(1, bars)
+                       if float(high.iloc[-bars+i]) > float(high.iloc[-bars+i-1])
+                       and float(low.iloc[-bars+i])  > float(low.iloc[-bars+i-1]))
         hh_hl = round(hh_count / (bars - 1), 2) if bars > 1 else 0.0
 
         # Momentum
-        mom1m = round((price - float(close.iloc[-21])) / float(close.iloc[-21]) * 100, 1) \
-                if len(close) >= 21 else 0.0
-        mom3m = round((price - float(close.iloc[-63])) / float(close.iloc[-63]) * 100, 1) \
-                if len(close) >= 63 else 0.0
+        mom1m = round((price / float(close.iloc[-21]) - 1) * 100, 1) if len(close) >= 21 else 0.0
+        mom3m = round((price / float(close.iloc[-63]) - 1) * 100, 1) if len(close) >= 63 else mom1m
 
-        # Pre-breakout / bull flag
-        pre_breakout = (atr_c <= 0.03 and vol_c <= 0.7 and dist <= 5
+        # Flags
+        pre_breakout = (atr_pct <= 0.03 and vol_c <= 0.7 and dist <= 5
                         and ema_stack in ("full", "partial"))
-        bull_flag    = (atr_c <= 0.025 and vol_c <= 0.65 and mom1m >= 8
+        bull_flag    = (atr_pct <= 0.025 and vol_c <= 0.65 and mom1m >= 8
                         and ema_stack in ("full", "partial"))
 
-        # Qullamaggie score
-        score = 0
-        if ema_stack == "full":    score += 30
-        elif ema_stack == "partial": score += 18
-        elif ema_stack == "weak":  score += 8
-        if hh_hl >= 0.85: score += 20
-        elif hh_hl >= 0.70: score += 13
-        elif hh_hl >= 0.55: score += 7
-        if atr_c <= 0.25: score += 15
-        elif atr_c <= 0.35: score += 11
-        elif atr_c <= 0.45: score += 7
-        elif atr_c <= 0.55: score += 3
-        if level == "ATH":           score += 10
-        elif level == "multi-year high": score += 8
-        elif level == "52-week high": score += 6
-        elif level == "prior resistance": score += 3
-        if vol_c <= 0.5: score += 10
-        elif vol_c <= 0.7: score += 6
-        elif vol_c <= 0.9: score += 2
-        if pre_breakout: score += 5
-        if bull_flag:    score += 5
+        avg_dollar_vol = avg_vol * price
 
+        # ════════════════════════════════════════════════════════════════
+        # LAYER 1 — TECHNICAL (0-100)
+        # ════════════════════════════════════════════════════════════════
+        ta = 0
+        if   ema_stack == "full":    ta += 25
+        elif ema_stack == "partial": ta += 15
+        elif ema_stack == "weak":    ta += 5
+
+        if   hh_hl >= 0.85: ta += 12
+        elif hh_hl >= 0.70: ta += 8
+        elif hh_hl >= 0.55: ta += 4
+
+        if   atr_c <= 0.20: ta += 20
+        elif atr_c <= 0.25: ta += 15
+        elif atr_c <= 0.30: ta += 10
+        elif atr_c <= 0.40: ta += 5
+
+        if   vol_c <= 0.50: ta += 15
+        elif vol_c <= 0.65: ta += 10
+        elif vol_c <= 0.80: ta += 5
+
+        if   dist <= 1.0: ta += 20
+        elif dist <= 2.0: ta += 16
+        elif dist <= 3.5: ta += 11
+        elif dist <= 6.0: ta += 5
+        elif dist <= 10:  ta += 1
+
+        if   avg_dollar_vol >= 200_000_000: ta += 8
+        elif avg_dollar_vol >= 50_000_000:  ta += 6
+        elif avg_dollar_vol >= 20_000_000:  ta += 4
+        else:                               ta += 2
+
+        if ema_stack == "weak":         ta = max(0, ta - 18)
+        if dist > 15:                   ta = max(0, ta - 12)
+        if mom1m < -5:                  ta = max(0, ta - 10)
+        if atr_c > 0.7 and mom1m < 10: ta = max(0, ta - 8)
+
+        score_technical = min(100, ta)
+
+        # ════════════════════════════════════════════════════════════════
+        # LAYER 2 — FUNDAMENTAL (0-100)
+        # NOTE: backtest has no fundamental data from yfinance per-date,
+        # so this layer is estimated from price-derived signals only.
+        # It will be 0 for most stocks — the live scanner fills it in.
+        # ════════════════════════════════════════════════════════════════
+        score_fundamental = 0   # no per-date fundamental data in backtest
+
+        # ════════════════════════════════════════════════════════════════
+        # LAYER 3 — CATALYST (0-100)
+        # ════════════════════════════════════════════════════════════════
+        ca = 0
+        if   mom1m >= 30: ca += 25
+        elif mom1m >= 15: ca += 18
+        elif mom1m >= 8:  ca += 10
+        elif mom1m >= 3:  ca += 5
+
+        if   vol_ratio >= 5.0: ca += 15
+        elif vol_ratio >= 3.0: ca += 10
+        elif vol_ratio >= 2.0: ca += 5
+
+        if mom3m < -30: ca = max(0, ca - 20)
+
+        score_catalyst = min(100, ca)
+
+        # ── Default blend (50% tech / 30% fund / 20% catalyst) ───────
+        score  = round(0.50 * score_technical + 0.30 * score_fundamental + 0.20 * score_catalyst)
+        track  = "CATALYST" if score_catalyst > score_technical else "BREAKOUT"
         status = "READY" if score >= 72 else "WATCH" if score >= 55 else "BUILDING"
 
+        if score < 25:
+            return None
+
         return {
-            "ticker":          ticker,
-            "scan_date":       as_of.isoformat(),
-            "price_at_scan":   round(price, 2),
-            "score":           score,
-            "status":          status,
-            "track":           "BREAKOUT",
-            "ema_stack":       ema_stack,
-            "atr":             atr_c,
-            "vol_contraction": vol_c,
-            "vol_ratio":       vol_ratio,
-            "level":           level,
-            "dist_to_level":   dist,
-            "hh_hl":           hh_hl,
-            "momentum_1m":     mom1m,
-            "momentum_3m":     mom3m,
-            "pre_breakout":    pre_breakout,
-            "bull_flag":       bull_flag,
-            "rs_percentile":   None,  # computed after scoring all stocks
-            "returns":         {}
+            "ticker":            ticker,
+            "scan_date":         as_of.isoformat(),
+            "price_at_scan":     round(price, 2),
+            "score":             score,
+            "score_technical":   score_technical,
+            "score_fundamental": score_fundamental,
+            "score_catalyst":    score_catalyst,
+            "status":            status,
+            "track":             track,
+            "scoring_version":   SCORING_VERSION,
+            "ema_stack":         ema_stack,
+            "atr":               atr_c,
+            "atr_pct":           atr_pct,
+            "vol_contraction":   vol_c,
+            "vol_ratio":         vol_ratio,
+            "level":             level,
+            "dist_to_level":     dist,
+            "hh_hl":             hh_hl,
+            "momentum_1m":       mom1m,
+            "momentum_3m":       mom3m,
+            "pre_breakout":      pre_breakout,
+            "bull_flag":         bull_flag,
+            "rs_percentile":     None,
+            "returns":           {}
         }
     except Exception as e:
         return None
@@ -327,22 +419,71 @@ def compute_returns(price_at_scan: float, ticker: str,
 
 
 # ── Main backtest runner ───────────────────────────────────────────────────────
-def run_backtest(n_days: int = 30, specific_date: date = None):
-    log.info(f"=== BACKTEST START: {n_days} trading days ===")
+def run_backtest(n_days: int = None, specific_date: date = None, experiment: str = None):
+    """
+    Run the historical backtest.
+
+    experiment : str | None
+        If provided, results are written to
+          /scanner/experiments/{experiment}/history/{date}/{ticker}
+        instead of /scanner/history. Experiment metadata (scoring version,
+        date range, status) is saved to /scanner/experiments/{experiment}/meta.
+        first_seen is NOT updated during experiment runs — only production
+        runs touch that path.
+        Use this to test scoring logic changes before promoting to production.
+
+        When experiment is set and n_days is None (the default), the backtest
+        automatically reads all dates present in production /scanner/history
+        and scores those exact same dates — so the comparison is always
+        apples-to-apples against v1 production data.
+    """
+    if experiment:
+        write_ref = db.reference(f"/scanner/experiments/{experiment}/history")
+        meta_ref  = db.reference(f"/scanner/experiments/{experiment}/meta")
+        log.info(f"=== EXPERIMENT BACKTEST: {experiment} (scoring={SCORING_VERSION}) ===")
+    else:
+        write_ref = hist_ref
+        log.info(f"=== BACKTEST START: {n_days or 30} trading days (scoring={SCORING_VERSION}) ===")
+
     t_total = time.time()
 
-    # Get trading dates (skip weekends)
-    end_date   = date.today()
-    all_dates  = []
-    d = end_date - timedelta(days=1)
-    while len(all_dates) < n_days:
-        if d.weekday() < 5:  # Mon-Fri
-            all_dates.append(d)
-        d -= timedelta(days=1)
-    all_dates.reverse()
-
+    # Determine which dates to process
     if specific_date:
         all_dates = [specific_date]
+    elif experiment and n_days is None:
+        # Mirror production history dates exactly
+        log.info("Experiment mode: reading production history dates from Firebase...")
+        prod_history = hist_ref.get() or {}
+        all_dates = sorted(
+            date.fromisoformat(d) for d in prod_history.keys()
+            if isinstance(prod_history[d], dict) and len(prod_history[d]) > 0
+        )
+        if not all_dates:
+            log.error("No production history dates found — run backtest.py without --experiment first")
+            return
+        log.info(f"Found {len(all_dates)} dates in production history "
+                 f"({all_dates[0]} → {all_dates[-1]})")
+    else:
+        # Standard n_days rolling window
+        days = n_days or 30
+        end_date  = date.today()
+        all_dates = []
+        d = end_date - timedelta(days=1)
+        while len(all_dates) < days:
+            if d.weekday() < 5:
+                all_dates.append(d)
+            d -= timedelta(days=1)
+        all_dates.reverse()
+
+    if experiment:
+        meta_ref.set({
+            "created_at":      datetime.now().isoformat(),
+            "scoring_version": SCORING_VERSION,
+            "n_days":          len(all_dates),
+            "specific_date":   specific_date.isoformat() if specific_date else None,
+            "mirrored_prod":   (n_days is None and specific_date is None),
+            "status":          "running",
+        })
 
     log.info(f"Backtest dates: {all_dates[0]} to {all_dates[-1]} ({len(all_dates)} days)")
 
@@ -367,8 +508,9 @@ def run_backtest(n_days: int = 30, specific_date: date = None):
         log.info(f"\n--- Processing {day} ---")
         day_t = time.time()
 
-        # Check if already done
-        existing = hist_ref.child(day.isoformat()).get()
+        # Skip dates already processed (works for both production and experiments)
+        check_ref = write_ref.child(day.isoformat())
+        existing = check_ref.get()
         if existing and len(existing) > 50:
             log.info(f"  Already have {len(existing)} records for {day}, skipping")
             continue
@@ -403,31 +545,39 @@ def run_backtest(n_days: int = 30, specific_date: date = None):
                     r["price_at_scan"], ticker, prices[ticker], day
                 )
 
-        # Write to Firebase
-        day_str  = day.isoformat()
-        hist_ref.child(day_str).set({r["ticker"]: r for r in top200})
+        # Write to Firebase (experiment path or production)
+        day_str = day.isoformat()
+        write_ref.child(day_str).set({r["ticker"]: r for r in top200})
 
-        # Update first_seen
+        # Update first_seen — production only
         new_first = {}
-        for r in top200:
-            t = r["ticker"]
-            if t not in existing_first:
-                new_first[t] = {
-                    "date":  day_str,
-                    "price": r["price_at_scan"],
-                    "score": r["score"],
-                }
-                existing_first[t] = new_first[t]
-        if new_first:
-            first_ref.update(new_first)
+        if not experiment:
+            for r in top200:
+                t = r["ticker"]
+                if t not in existing_first:
+                    new_first[t] = {
+                        "date":  day_str,
+                        "price": r["price_at_scan"],
+                        "score": r["score"],
+                    }
+                    existing_first[t] = new_first[t]
+            if new_first:
+                first_ref.update(new_first)
 
         elapsed = round(time.time() - day_t, 1)
-        log.info(f"  {day}: {len(top200)} picks stored, "
-                 f"{len(new_first)} new first-seen | {elapsed}s")
+        seen_msg = f", {len(new_first)} new first-seen" if not experiment else ""
+        log.info(f"  {day}: {len(top200)} picks stored{seen_msg} | {elapsed}s")
 
     total_elapsed = round((time.time() - t_total) / 60, 1)
-    log.info(f"\n=== BACKTEST COMPLETE in {total_elapsed} min ===")
-    log.info("Now run: python update_returns.py  (to fill in any missing forward returns)")
+
+    if experiment:
+        meta_ref.update({"status": "complete", "completed_at": datetime.now().isoformat()})
+        log.info(f"\n=== EXPERIMENT COMPLETE in {total_elapsed} min ===")
+        log.info(f"Analyze results:  python optimizer.py --experiment {experiment}")
+        log.info(f"Compare vs prod:  python optimizer.py --compare {experiment}")
+    else:
+        log.info(f"\n=== BACKTEST COMPLETE in {total_elapsed} min ===")
+        log.info("Now run: python backtest.py --update-returns  (to fill in forward returns)")
 
 
 def update_all_returns():
@@ -480,15 +630,26 @@ def update_all_returns():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--days",   type=int, default=30)
-    parser.add_argument("--date",   type=str, default=None)
+    parser = argparse.ArgumentParser(description="Scanner backtest engine")
+    parser.add_argument("--days",       type=int, default=None,
+                        help="Number of trading days to backtest (default: 30, or mirrors "
+                             "production history when --experiment is used without --days)")
+    parser.add_argument("--date",       type=str, default=None,
+                        help="Backtest a single specific date (YYYY-MM-DD)")
     parser.add_argument("--update-returns", action="store_true",
                         help="Only update forward returns, don't rerun backtest")
+    parser.add_argument("--experiment", type=str, default=None,
+                        help=(
+                            "Run as an experiment — results go to "
+                            "/scanner/experiments/{NAME}/history instead of production. "
+                            "Use this to test scoring changes before promoting to main. "
+                            "Example: --experiment v2_momentum_reweight"
+                        ))
     args = parser.parse_args()
 
     if args.update_returns:
         update_all_returns()
     else:
         specific = date.fromisoformat(args.date) if args.date else None
-        run_backtest(n_days=args.days, specific_date=specific)
+        n = args.days if args.days else (30 if not args.experiment else None)
+        run_backtest(n_days=n, specific_date=specific, experiment=args.experiment)

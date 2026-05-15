@@ -485,6 +485,17 @@ def parse_13f_holdings(filing):
                 "shares": int(shares_f),
             })
 
+        # Aggregate duplicate CUSIPs (same stock filed under multiple accounts/classes)
+        merged = {}
+        for h in holdings:
+            key = h["cusip"] or h["name"]
+            if key in merged:
+                merged[key]["value"]  += h["value"]
+                merged[key]["shares"] += h["shares"]
+            else:
+                merged[key] = h.copy()
+        holdings = list(merged.values())
+
         # Sort by value descending, take top 30 per fund
         holdings.sort(key=lambda x: x["value"], reverse=True)
         holdings = holdings[:30]

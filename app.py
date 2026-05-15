@@ -139,7 +139,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <p>Scans 2,000+ stocks &middot; Multi-filter &middot; P/E &middot; RSI &middot; Analyst Target &middot; Updates every 60s</p>
   </div>
   <div class="hright">
-    <div class="nav-pills"><a class="nav-pill active" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
+    <div class="nav-pills"><a class="nav-pill active" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/sentiment">&#128293; Sentiment</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
     <span class="ver" id="verspan">{ver}</span>
     <span class="regime closed" id="regime">&#9679; Connecting...</span>
   </div>
@@ -171,7 +171,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
   <div class="lookup-divider"></div>
   <span class="lookup-hint">&#9889; Full analysis on <strong>any stock</strong> &mdash; even outside top 200</span>
 </div>
-<div id="lookup-wrap" style="display:none"><div class="lookup-result" id="lookup-result"></div></div>
+<div id="lookup-wrap" style="display:none;position:relative"><button onclick="document.getElementById('lookup-wrap').style.display='none';document.getElementById('lookup-input').value=''" style="position:absolute;top:10px;right:16px;background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;z-index:10" title="Close">&times;</button><div class="lookup-result" id="lookup-result"></div></div>
 
 <!-- __ Multi-select filter panel __ -->
 <div class="filterpanel">
@@ -251,6 +251,26 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
       </div>
     </div>
 
+    <!-- Timeframe -->
+    <div class="fgroup">
+      <div class="fgrouplabel">&#128336; Timeframe</div>
+      <div class="fchips">
+        <div class="fchip red"   data-group="timeframe" data-val="short" onclick="toggleChip(this)"><span class="fcheck"></span>&#9889; Short 1-2w</div>
+        <div class="fchip amber" data-group="timeframe" data-val="mid"   onclick="toggleChip(this)"><span class="fcheck"></span>&#128197; Mid 1-3m</div>
+        <div class="fchip blue"  data-group="timeframe" data-val="long"  onclick="toggleChip(this)"><span class="fcheck"></span>&#128336; Long 3m+</div>
+      </div>
+    </div>
+
+    <!-- Score focus -->
+    <div class="fgroup">
+      <div class="fgrouplabel">&#127919; Score focus</div>
+      <div class="fchips">
+        <div class="fchip blue"  id="preset-breakout" onclick="setPreset('breakout')"><span class="fcheck"></span>&#128202; Technical</div>
+        <div class="fchip green" id="preset-quality"  onclick="setPreset('quality')"><span class="fcheck"></span>&#127807; Tech + Fundamental</div>
+        <div class="fchip amber on" id="preset-full"  onclick="setPreset('full')"><span class="fcheck"></span>&#127919; All signals</div>
+      </div>
+    </div>
+
     <!-- Quick presets -->
     <div class="fgroup">
       <div class="fgrouplabel">&#9889; Quick Presets</div>
@@ -269,6 +289,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <span class="cnt" id="cnt"></span>
   </div>
 </div>
+
 
 <div class="sortrow">
   <select id="ssort" onchange="render()">
@@ -293,10 +314,74 @@ var VER = "{ver}";
 var CFG = {cfg};
 var connected = false, lastDataTime = null, watchdogTimer = null;
 var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}}, firstSeenData = {{}};
+var smartMoneyTickers = {{}};  // ticker → {{insider: bool, institution: bool}}
+
+// ── Layer weights (0–100 each, frontend re-blends scores) ────────────────────
+var layerWeights = {{ tech: 50, fund: 30, cat: 20 }};
+
+function setPreset(name) {{
+  var presets = {{
+    breakout: {{ tech:100, fund:0,  cat:0  }},
+    quality:  {{ tech:50,  fund:50, cat:0  }},
+    full:     {{ tech:50,  fund:30, cat:20 }},
+  }};
+  if (!presets[name]) return;
+  layerWeights = Object.assign({{}}, presets[name]);
+  // Highlight active chip, clear others
+  ['breakout','quality','full'].forEach(function(p) {{
+    var el = document.getElementById('preset-'+p);
+    if (el) el.classList.toggle('on', p === name);
+  }});
+  render();
+}}
+
+function estimateTech(s) {{
+  // Estimate technical score from existing Firebase fields (pre-v3 data)
+  var t = 0;
+  var es = s.ema_stack||'';
+  if (es==='full') t+=25; else if (es==='partial') t+=15; else if (es==='weak') t+=5;
+  var hh = s.hh_hl||0;
+  if (hh>=0.85) t+=12; else if (hh>=0.70) t+=8; else if (hh>=0.55) t+=4;
+  var ac = s.atr||1;
+  if (ac<=0.20) t+=20; else if (ac<=0.25) t+=15; else if (ac<=0.30) t+=10; else if (ac<=0.40) t+=5;
+  var vc = s.vol_contraction||1;
+  if (vc<=0.50) t+=15; else if (vc<=0.65) t+=10; else if (vc<=0.80) t+=5;
+  var d = s.dist_to_level||99;
+  if (d<=1) t+=20; else if (d<=2) t+=16; else if (d<=3.5) t+=11; else if (d<=6) t+=5; else if (d<=10) t+=1;
+  var adv = (s.avg_dollar_vol||0);
+  if (adv>=200000000) t+=8; else if (adv>=50000000) t+=6; else if (adv>=20000000) t+=4; else t+=2;
+  if (es==='weak') t=Math.max(0,t-18);
+  if (d>15) t=Math.max(0,t-12);
+  if ((s.momentum_1m||0)<-5) t=Math.max(0,t-10);
+  return Math.min(100,t);
+}}
+
+function estimateCat(s) {{
+  // Estimate catalyst score from existing Firebase fields (pre-v3 data)
+  var c = 0;
+  var m = s.momentum_1m||s.change_pct||0;
+  if (m>=30) c+=25; else if (m>=15) c+=18; else if (m>=8) c+=10; else if (m>=3) c+=5;
+  var vr = s.vol_ratio||1;
+  if (vr>=5) c+=15; else if (vr>=3) c+=10; else if (vr>=2) c+=5;
+  var m3 = s.momentum_3m||0;
+  if (m3<-30) c=Math.max(0,c-20);
+  return Math.min(100,c);
+}}
+
+function blendScore(s) {{
+  // Use stored layer scores if available; otherwise estimate from existing fields
+  var tech = s.score_technical  != null ? s.score_technical  : estimateTech(s);
+  var fund = s.score_fundamental != null ? s.score_fundamental : 0;
+  var cat  = s.score_catalyst    != null ? s.score_catalyst   : estimateCat(s);
+  var tw = layerWeights.tech, fw = layerWeights.fund, cw = layerWeights.cat;
+  var total = tw + fw + cw;
+  if (total === 0) return s.score || 0;
+  return Math.min(100, Math.round((tw*tech + fw*fund + cw*cat) / total));
+}}
 
 // ── Filter state — which chips are ON per group ───────────────────────────────
 // Empty set = no filter for that group (show all)
-var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[] }};
+var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[] }};
 
 function toggleChip(el) {{
   var group = el.dataset.group;
@@ -328,7 +413,7 @@ function setChip(group, val, on) {{
 
 function resetAll() {{
   document.querySelectorAll(".fchip[data-group]").forEach(function(c){{c.classList.remove("on");}});
-  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[] }};
+  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[] }};
   render();
 }}
 
@@ -432,6 +517,16 @@ function passesFilters(s) {{
     if (!setupOk) return false;
   }}
 
+  if (activeFilters.timeframe && activeFilters.timeframe.length > 0) {{
+    var earn2 = s.days_to_earnings;
+    var tf2 = s.timeframe || (
+      (earn2!=null&&earn2>=0&&earn2<=7) ? 'short' :
+      ((s.rs_percentile||0)>=85 && (s.vol_contraction||1)<=0.55 && (s.ema_stack||'')==='full') ? 'long' :
+      'mid'
+    );
+    if (!activeFilters.timeframe.includes(tf2)) return false;
+  }}
+
   return true;
 }}
 
@@ -442,6 +537,7 @@ function getActiveDesc() {{
   if (activeFilters.sector && activeFilters.sector.length) parts.push(activeFilters.sector.join(" or "));
   if (activeFilters.streak && activeFilters.streak.length) parts.push(activeFilters.streak.map(function(v){{return {{new:"New today",fresh:"1-5 days",building:"6-14 days",proven:"15+ days"}}[v]||v;}}).join(" or ")+" on list");
   if (activeFilters.setup.length)    parts.push(activeFilters.setup.map(function(v){{return {{breakout:"Breakout",catalyst:"Catalyst",bullflag:"Bull Flag",prebreak:"Pre-breakout",earnings:"Earnings soon"}}[v]||v;}}).join(" or "));
+  if (activeFilters.timeframe && activeFilters.timeframe.length) parts.push(activeFilters.timeframe.map(function(v){{return {{short:"Short (1-2w)",mid:"Mid (1-3m)",long:"Long (3m+)"}}[v]||v;}}).join(" or "));
   if (activeFilters.momentum.length) parts.push({{hot:"Hot +30%",strong:"Strong +15%",pos:"Positive",neg:"Pullback"}}[activeFilters.momentum[0]]||activeFilters.momentum[0]);
   if (!parts.length) return "Showing all stocks \u2014 select filters above to narrow down";
   return "Filters: " + parts.join(" \u00b7 ");
@@ -540,6 +636,22 @@ fdb.ref("/scanner").on("value", function(snap) {{
 
 startWatchdog();
 
+// ── Load smart money tickers for badge display ────────────────────────────────
+fdb.ref('/scanner/smart_money').once('value', function(snap) {{
+  var d = snap.val() || {{}};
+  (d.insiders || []).forEach(function(b) {{ if(b.ticker) {{ smartMoneyTickers[b.ticker] = smartMoneyTickers[b.ticker] || {{}}; smartMoneyTickers[b.ticker].insider = true; }} }});
+  (d.institutions || []).forEach(function(fund) {{
+    (fund.holdings || []).forEach(function(h) {{ if(h.ticker) {{ smartMoneyTickers[h.ticker] = smartMoneyTickers[h.ticker] || {{}}; smartMoneyTickers[h.ticker].institution = true; }} }});
+  }});
+}});
+
+// ── Load sentiment data for buzz badge ───────────────────────────────────────
+var sentimentData = {{}};
+fdb.ref('/scanner/sentiment').once('value', function(snap) {{
+  var d = snap.val() || {{}};
+  Object.keys(d).forEach(function(k) {{ if(k !== '_updated' && d[k]) sentimentData[k] = d[k]; }});
+}});
+
 // ── Render ────────────────────────────────────────────────────────────────────
 function render() {{
   var sortBy   = document.getElementById("ssort").value;
@@ -570,7 +682,7 @@ function render() {{
     var au=up>=40?12:up>=25?9:up>=10?5:up>0?2:up<-10?-5:0;
     var ab=bp>=80?10:bp>=65?7:bp>=50?4:bp>0?1:0;
     var ac=na>=10?8:na>=5?5:na>=2?2:0;
-    s._unified=Math.min(100,Math.round(tr+tv+ta+tl+Math.min(30,ce+cv+cm)+Math.min(30,Math.max(0,au+ab+ac))));
+    s._unified=blendScore(s);
   }});
   var fns = {{
     score:    function(a,b){{ return (b._unified||0)-(a._unified||0); }},
@@ -591,16 +703,31 @@ function render() {{
   if (!top10.length) {{
     grid.innerHTML = '<div class="empty">No stocks match this combination.<br><span style="font-size:12px;color:var(--muted)">Try removing some filters or click <strong style="color:var(--blue)">Show all</strong> to reset.</span></div>';
   }} else {{
-  // Save which cards are open before rebuild
-  var openCards = {{}};
+  // Save which cards and charts are open before rebuild
+  var openCards  = {{}};
+  var openCharts = {{}};
   document.querySelectorAll('.card-body').forEach(function(b) {{
     if(b.style.display==='block') openCards[b.id]=true;
+  }});
+  document.querySelectorAll('[id^="cpanel-"]').forEach(function(p) {{
+    if(p.style.display==='block') openCharts[p.id.replace('cpanel-','')]=true;
   }});
   grid.innerHTML = top10.map(function(s,i){{return makeCard(s,i+1);}}).join("");
   // Restore open cards
   Object.keys(openCards).forEach(function(id) {{
     var el=document.getElementById(id);
     if(el) el.style.display='block';
+  }});
+  // Restore open charts (re-inject iframe src so TV widget reloads)
+  Object.keys(openCharts).forEach(function(ticker) {{
+    var panel=document.getElementById('cpanel-'+ticker);
+    var frame=document.getElementById('cframe-'+ticker);
+    var btn=document.getElementById('cbtn-'+ticker);
+    if(panel&&frame) {{
+      panel.style.display='block';
+      frame.src='https://s.tradingview.com/widgetembed/?symbol=NASDAQ%3A'+ticker+'&interval=D&theme=dark&style=1&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&toolbarbg=1a1d26&show_popup_button=0';
+      if(btn){{btn.className='chart-btn open';btn.innerHTML='&times; Close';}}
+    }}
   }});
   setTimeout(prefetchAllFundamentals, 100);
   }}
@@ -635,21 +762,11 @@ function makeCard(s, rank) {{
   var earn   = s.days_to_earnings;
   var upColor = upsidePct!=null&&upsidePct>5?'#27ae60':upsidePct!=null&&upsidePct<-5?'#e74c3c':'#8892a4';
 
-  // Unified score
-  var t_rs  = Math.min(16,Math.round((s.rs_percentile||0)/100*16));
-  var t_vol = (s.vol_contraction||1)<=0.5?12:(s.vol_contraction||1)<=0.7?8:(s.vol_contraction||1)<=0.9?4:0;
-  var t_atr = (s.atr||1)<=0.2?8:(s.atr||1)<=0.3?5:(s.atr||1)<=0.4?2:0;
-  var t_lvl = (s.level||'').indexOf('ATH')>=0?4:(s.level||'').indexOf('multi')>=0?3:1;
-  var techScore = t_rs+t_vol+t_atr+t_lvl;
-  var c_earn = earn!=null&&earn>=0&&earn<=7?15:earn!=null&&earn>=0&&earn<=14?10:earn!=null&&earn>=0&&earn<=30?5:0;
-  var c_vol  = (s.vol_ratio||1)>=3?10:(s.vol_ratio||1)>=2?6:(s.vol_ratio||1)>=1.5?3:0;
-  var c_mom  = (s.momentum_1m||0)>=30?5:(s.momentum_1m||0)>=15?3:(s.momentum_1m||0)>=5?1:0;
-  var catalystScore = Math.min(30,c_earn+c_vol+c_mom);
-  var a_upside = upsidePct!=null?(upsidePct>=40?12:upsidePct>=25?9:upsidePct>=10?5:upsidePct>0?2:upsidePct<-10?-5:0):0;
-  var a_buy    = buyPct>=80?10:buyPct>=65?7:buyPct>=50?4:buyPct>0?1:0;
-  var a_cov    = numAna>=10?8:numAna>=5?5:numAna>=2?2:0;
-  var analystScore = Math.min(30,Math.max(0,a_upside+a_buy+a_cov));
-  var unifiedScore = Math.min(100,Math.round(techScore+catalystScore+analystScore));
+  // Scores — use stored layer scores if available, else estimate from signals
+  var techScore     = s.score_technical   != null ? s.score_technical   : s.breakout_score || s.score || 0;
+  var fundScore     = s.score_fundamental != null ? s.score_fundamental : 0;
+  var catalystScore = s.score_catalyst    != null ? s.score_catalyst    : s.catalyst_score || 0;
+  var unifiedScore  = blendScore(s);
 
   // Stop/entry
   var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
@@ -674,7 +791,12 @@ function makeCard(s, rank) {{
   var rewardBg=rp>=3?'#1a3d2b':rp>=2?'#3d2e10':'#3d1a1a';
 
   // Timeframe
-  var tf=s.timeframe||'mid';
+  // Compute timeframe from signals (scanner rarely sets s.timeframe)
+  var tf = s.timeframe || (
+    (earn!=null&&earn>=0&&earn<=7) ? 'short' :
+    ((s.rs_percentile||0)>=85 && (s.vol_contraction||1)<=0.55 && (s.ema_stack||'')==='full') ? 'long' :
+    'mid'
+  );
   var tfLabel=tf==='short'?'Short (1-2w)':tf==='long'?'Long (3-12m)':'Mid (1-3m)';
   var tfColor=tf==='short'?'#e74c3c':tf==='long'?'#3498db':'#e67e22';
   var tfIcon=tf==='short'?'&#9889;':tf==='long'?'&#128336;':'&#128197;';
@@ -701,7 +823,7 @@ function makeCard(s, rank) {{
 
   // Store breakdown
   var scoreId='sc-'+s.ticker;
-  cardBreakdowns[scoreId]={{tech:techScore,cat:catalystScore,ana:analystScore,
+  cardBreakdowns[scoreId]={{tech:techScore,fund:fundScore,cat:catalystScore,
     entry:entryNum.toFixed(2),stop:stopNum.toFixed(2),
     tfLabel:tfIcon+' '+tfLabel,tfColor:tfColor}};
 
@@ -731,7 +853,20 @@ function makeCard(s, rank) {{
   h += '<div style="display:flex;align-items:center;gap:12px">';
   h += '<div class="card-rank '+(isTop?'top':'')+'">'+rank+'</div>';
   h += '<div>';
-  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
+  var sm = smartMoneyTickers[s.ticker];
+  var smBadge = sm ? '<span title="'+(sm.insider&&sm.institution?'Insider buy + hedge fund holding':sm.insider?'Insider buy':'Hedge fund holding')+'" style="font-size:13px;margin-left:6px;cursor:help">&#127968;</span>' : '';
+  var sd = sentimentData[s.ticker];
+  var buzzBadge = '';
+  if (sd) {{
+    var buzz = sd.buzz_score || 0;
+    var sent = sd.overall_sentiment || 'neutral';
+    if (buzz >= 60) {{
+      var icon = sent === 'bullish' ? '&#128293;' : sent === 'bearish' ? '&#128308;' : '&#128293;';
+      var tip  = 'Buzz: '+buzz+'/100 · '+sent+' · StockTwits: '+((sd.stocktwits||{{}}).message_count||0)+' msgs · Reddit: '+((sd.reddit||{{}}).mentions_7d||0)+' mentions';
+      buzzBadge = '<span title="'+tip+'" style="font-size:13px;margin-left:4px;cursor:help">'+icon+'</span>';
+    }}
+  }}
+  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+smBadge+buzzBadge+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
   h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
@@ -850,9 +985,9 @@ function makeCard(s, rank) {{
 function toggleCard(ticker) {{
   var body = document.getElementById('body-'+ticker);
   if (!body) return;
-  var isOpen = body.style.display === 'block';
+  var isOpen = body.offsetHeight > 0 && body.style.display !== 'none';
   body.style.display = isOpen ? 'none' : 'block';
-  if (!isOpen) fetchFundamentals(ticker);
+  if (isOpen) {{ closeChart(ticker); }} else {{ fetchFundamentals(ticker); }}
 }}
 
 function showBreakdown(el) {{
@@ -860,12 +995,12 @@ function showBreakdown(el) {{
   if(!d) return;
   var p = document.getElementById('breakdown-popup');
   if(!p) return;
-  document.getElementById('bp-tech').textContent = d.tech+'/40';
-  document.getElementById('bp-cat').textContent  = d.cat+'/30';
-  document.getElementById('bp-ana').textContent  = d.ana+'/30';
-  document.getElementById('bp-tech-bar').style.width = Math.round(d.tech/40*100)+'%';
-  document.getElementById('bp-cat-bar').style.width  = Math.round(d.cat/30*100)+'%';
-  document.getElementById('bp-ana-bar').style.width  = Math.round(d.ana/30*100)+'%';
+  document.getElementById('bp-tech').textContent = d.tech+'/100';
+  document.getElementById('bp-cat').textContent  = d.cat+'/100';
+  document.getElementById('bp-ana').textContent  = d.fund+'/100';
+  document.getElementById('bp-tech-bar').style.width = Math.round(d.tech)+'%';
+  document.getElementById('bp-cat-bar').style.width  = Math.round(d.cat)+'%';
+  document.getElementById('bp-ana-bar').style.width  = Math.round(d.fund||0)+'%';
   document.getElementById('bp-entry').textContent = '$'+d.entry;
   document.getElementById('bp-stop').textContent  = '$'+d.stop;
   document.getElementById('bp-tf').innerHTML = '<span style="color:'+d.tfColor+'">'+d.tfLabel+'</span>';
@@ -1015,8 +1150,36 @@ async function lookupTicker() {{
   var wrap=document.getElementById('lookup-wrap'),result=document.getElementById('lookup-result');
   wrap.style.display='block';
   result.innerHTML='<div style="color:var(--muted);padding:12px 0">&#9203; Fetching '+ticker+'...</div>';
-  if(allStockData&&allStockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in scanner</div>'+makeCard(allStockData[ticker],'&mdash;');return;}}
-  if(stockData&&stockData[ticker]){{result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">&#10003; Found in top 10</div>'+makeCard(stockData[ticker],'&mdash;');return;}}
+  var baseData = (allStockData&&allStockData[ticker]) ? allStockData[ticker]
+               : (stockData&&stockData[ticker])       ? stockData[ticker]
+               : null;
+  var foundLabel = (allStockData&&allStockData[ticker]) ? '&#10003; Found in scanner'
+                 : (stockData&&stockData[ticker])       ? '&#10003; Found in top 10'
+                 : null;
+  if(baseData) {{
+    // Always fetch fresh market data so RSI / PE / analyst fields are populated
+    var enriched = Object.assign({{}}, baseData);
+    try {{
+      var resp2 = await fetch('/lookup?t='+ticker);
+      if(resp2.ok) {{
+        var d2 = await resp2.json();
+        if(!d2.error) {{
+          // Lookup wins on market data; scanner wins on score/status/signals
+          enriched.price          = d2.price          || enriched.price;
+          enriched.change_pct     = d2.change_pct     != null ? d2.change_pct : enriched.change_pct;
+          enriched.rsi            = d2.rsi            != null ? d2.rsi : enriched.rsi;
+          enriched.pe_ratio       = d2.pe_ratio       != null ? d2.pe_ratio : enriched.pe_ratio;
+          enriched.analyst_target = d2.analyst_target != null ? d2.analyst_target : enriched.analyst_target;
+          enriched.analyst_upside = d2.analyst_upside != null ? String(d2.analyst_upside) : enriched.analyst_upside;
+          enriched.name           = d2.name           || enriched.name;
+          enriched.sector         = d2.sector         || enriched.sector;
+        }}
+      }}
+    }} catch(e) {{/* use scanner data only */}}
+    result.innerHTML='<div style="color:var(--green);font-size:12px;margin-bottom:8px">'+foundLabel+'</div>'+makeCard(enriched,'&mdash;');
+    setTimeout(function(){{ fetchPerf(ticker); }}, 50);
+    return;
+  }}
   try {{
     var resp=await fetch('/lookup?t='+ticker);
     if(!resp.ok)throw new Error('HTTP '+resp.status);
@@ -1044,6 +1207,7 @@ async function lookupTicker() {{
       pe_ratio:data.pe_ratio||null,rsi:data.rsi||null,analyst_target:data.analyst_target||null,
       analyst_upside:data.analyst_upside!=null?String(data.analyst_upside):null,track:'BREAKOUT'}};
     result.innerHTML='<div style="color:var(--amber);font-size:12px;margin-bottom:8px">&#9889; Live lookup &mdash; Yahoo Finance 60d</div>'+makeCard(s,'&mdash;');
+    setTimeout(function(){{ fetchPerf(ticker); }}, 50);
   }} catch(e) {{
     result.innerHTML='<div style="color:var(--red);padding:12px 0">Could not fetch <strong>'+ticker+'</strong>: '+e.message+'</div>';
   }}
@@ -1059,14 +1223,14 @@ async function lookupTicker() {{
     <span class="bp-val" id="bp-tech"></span>
   </div>
   <div class="bp-row">
+    <span class="bp-label">&#127807; Fundamental</span>
+    <div class="bp-bar"><div class="bp-fill" id="bp-ana-bar" style="background:#27ae60"></div></div>
+    <span class="bp-val" id="bp-ana"></span>
+  </div>
+  <div class="bp-row">
     <span class="bp-label">&#9889; Catalyst</span>
     <div class="bp-bar"><div class="bp-fill" id="bp-cat-bar" style="background:#e67e22"></div></div>
     <span class="bp-val" id="bp-cat"></span>
-  </div>
-  <div class="bp-row">
-    <span class="bp-label">&#128101; Analyst</span>
-    <div class="bp-bar"><div class="bp-fill" id="bp-ana-bar" style="background:#27ae60"></div></div>
-    <span class="bp-val" id="bp-ana"></span>
   </div>
   <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -1299,7 +1463,7 @@ var fdb = firebase.database();
     <p>Historical performance of scanner picks — does the logic actually find winners?</p>
   </div>
   <div class="hright">
-    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
+    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/sentiment">&#128293; Sentiment</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
     <span class="ver"><!--VERSION--></span>
     <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
   </div>
@@ -1354,8 +1518,24 @@ var fdb = firebase.database();
           <option value="bull_flag">Bull flag</option>
         </select>
       </div>
+      <div class="ctrl-group">
+        <label>Min Tech</label>
+        <input type="number" id="min-tech" value="0" min="0" max="100" style="width:60px" onchange="render()">
+      </div>
+      <div class="ctrl-group">
+        <label>Min Catalyst</label>
+        <input type="number" id="min-cat" value="0" min="0" max="100" style="width:60px" onchange="render()">
+      </div>
       <button class="btn" onclick="loadData()">🔄 Refresh</button>
       <span id="data-info" style="font-size:11px;color:var(--muted)"></span>
+    </div>
+
+    <!-- Score focus chips -->
+    <div style="display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Score focus:</span>
+      <button class="sort-btn active" id="focus-all"  onclick="setLayerFocus('all')">&#127919; All signals</button>
+      <button class="sort-btn"        id="focus-tech" onclick="setLayerFocus('tech')">&#128202; Technical only</button>
+      <button class="sort-btn"        id="focus-cat"  onclick="setLayerFocus('cat')">&#9889; Catalyst only</button>
     </div>
 
     <!-- KPI row -->
@@ -1382,6 +1562,12 @@ var fdb = firebase.database();
           (win = positive return in selected window)
         </span>
       </h2>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--muted);">Layer:</span>
+        <button class="sort-btn active" id="sig-all"  onclick="setSigLayer('all')">All picks</button>
+        <button class="sort-btn"        id="sig-tech" onclick="setSigLayer('tech')">&#128202; Technical leaders</button>
+        <button class="sort-btn"        id="sig-cat"  onclick="setSigLayer('cat')">&#9889; Catalyst leaders</button>
+      </div>
       <div class="signal-grid" id="signal-grid"></div>
     </div>
 
@@ -1400,6 +1586,8 @@ var fdb = firebase.database();
         <button class="sort-btn active" id="sort-btn-date"  onclick="setSort('scan_date')">📅 Date</button>
         <button class="sort-btn"        id="sort-btn-abc"   onclick="setSort('ticker_asc')">🔤 A–Z</button>
         <button class="sort-btn"        id="sort-btn-score" onclick="setSort('score')">⭐ Score</button>
+        <button class="sort-btn"        id="sort-btn-tech"  onclick="setSort('score_technical')">📊 Tech</button>
+        <button class="sort-btn"        id="sort-btn-cat"   onclick="setSort('score_catalyst')">⚡ Catalyst</button>
         <button class="sort-btn"        id="sort-btn-ret1w" onclick="setSort('ret_1w')">1W Return</button>
         <button class="sort-btn"        id="sort-btn-ret1m" onclick="setSort('ret_1m')">1M Return</button>
         <button class="sort-btn"        id="sort-btn-ret3m" onclick="setSort('ret_3m')">3M Return</button>
@@ -1414,6 +1602,8 @@ var fdb = firebase.database();
             <th onclick="sortBy('ticker')">Ticker ↕</th>
             <th onclick="sortBy('price_at_scan')">Entry $</th>
             <th onclick="sortBy('score')">Score ↕</th>
+            <th onclick="sortBy('score_technical')" style="color:var(--blue)">Tech ↕</th>
+            <th onclick="sortBy('score_catalyst')" style="color:var(--amber)">Cat ↕</th>
             <th>Status</th>
             <th>Setup</th>
             <th onclick="sortBy('rs_percentile')">RS %ile</th>
@@ -1439,12 +1629,71 @@ var fdb = firebase.database();
 </div>
 
 <script>
-var allPicks = [];
-var filtered = [];
-var sortCol  = 'scan_date';
-var sortAsc  = false;
-var page     = 0;
-var pageSize = 50;
+var allPicks  = [];
+var filtered  = [];
+var sortCol   = 'scan_date';
+var sortAsc   = false;
+var page      = 0;
+var pageSize  = 50;
+var layerFocus = 'all';   // 'all' | 'tech' | 'cat'
+var sigLayer   = 'all';   // 'all' | 'tech' | 'cat'
+
+// ── Layer score helpers (mirror dashboard logic) ──────────────────────────────
+function aEstimateTech(p) {
+  var t = 0;
+  var es = p.ema_stack||'';
+  if (es==='full') t+=25; else if (es==='partial') t+=15; else if (es==='weak') t+=5;
+  var hh = p.hh_hl||0;
+  if (hh>=0.85) t+=12; else if (hh>=0.70) t+=8; else if (hh>=0.55) t+=4;
+  var ac = p.atr||1;
+  if (ac<=0.20) t+=20; else if (ac<=0.25) t+=15; else if (ac<=0.30) t+=10; else if (ac<=0.40) t+=5;
+  var vc = p.vol_contraction||1;
+  if (vc<=0.50) t+=15; else if (vc<=0.65) t+=10; else if (vc<=0.80) t+=5;
+  var d = p.dist_to_level||99;
+  if (d<=1) t+=20; else if (d<=2) t+=16; else if (d<=3.5) t+=11; else if (d<=6) t+=5; else if (d<=10) t+=1;
+  if (es==='weak') t=Math.max(0,t-18);
+  if (d>15) t=Math.max(0,t-12);
+  if ((p.momentum_1m||0)<-5) t=Math.max(0,t-10);
+  return Math.min(100,t);
+}
+
+function aEstimateCat(p) {
+  var c = 0;
+  var m = p.momentum_1m||p.change_pct||0;
+  if (m>=30) c+=25; else if (m>=15) c+=18; else if (m>=8) c+=10; else if (m>=3) c+=5;
+  var vr = p.vol_ratio||1;
+  if (vr>=5) c+=15; else if (vr>=3) c+=10; else if (vr>=2) c+=5;
+  var m3 = p.momentum_3m||0;
+  if (m3<-30) c=Math.max(0,c-20);
+  return Math.min(100,c);
+}
+
+function aBlendScore(p) {
+  var tech = p.score_technical  != null ? p.score_technical  : aEstimateTech(p);
+  var fund = p.score_fundamental != null ? p.score_fundamental : 0;
+  var cat  = p.score_catalyst    != null ? p.score_catalyst   : aEstimateCat(p);
+  if (layerFocus === 'tech') return Math.min(100, tech);
+  if (layerFocus === 'cat')  return Math.min(100, cat);
+  var total = 50 + 30 + 20;
+  return Math.min(100, Math.round((50*tech + 30*fund + 20*cat) / total));
+}
+
+function setLayerFocus(f) {
+  layerFocus = f;
+  ['all','tech','cat'].forEach(function(x) {
+    document.getElementById('focus-'+x).classList.toggle('active', x === f);
+  });
+  page = 0;
+  render();
+}
+
+function setSigLayer(f) {
+  sigLayer = f;
+  ['all','tech','cat'].forEach(function(x) {
+    document.getElementById('sig-'+x).classList.toggle('active', x === f);
+  });
+  renderSignals(document.getElementById('tf-select').value);
+}
 
 var CACHE_KEY     = 'scanner_analytics_v1';
 var CACHE_TS_KEY  = 'scanner_analytics_ts_v1';
@@ -1575,12 +1824,22 @@ function loadData() {
 function getFiltered() {
   var status   = document.getElementById('status-filter').value;
   var minScore = parseInt(document.getElementById('min-score').value) || 0;
+  var minTech  = parseInt(document.getElementById('min-tech').value)  || 0;
+  var minCat   = parseInt(document.getElementById('min-cat').value)   || 0;
   var setup    = document.getElementById('setup-filter').value;
   var search   = (document.getElementById('ticker-search').value || '').trim().toUpperCase();
 
   return allPicks.filter(function(p) {
     if (status !== 'all' && p.status !== status) return false;
-    if (p.score < minScore) return false;
+    if (aBlendScore(p) < minScore) return false;
+    if (minTech > 0) {
+      var t = p.score_technical != null ? p.score_technical : aEstimateTech(p);
+      if (t < minTech) return false;
+    }
+    if (minCat > 0) {
+      var c = p.score_catalyst != null ? p.score_catalyst : aEstimateCat(p);
+      if (c < minCat) return false;
+    }
     if (setup === 'pre_breakout' && !p.pre_breakout) return false;
     if (setup === 'bull_flag'    && !p.bull_flag)    return false;
     if (search && p.ticker.indexOf(search) === -1)   return false;
@@ -1590,10 +1849,11 @@ function getFiltered() {
 
 function setSort(col) {
   sortCol = col;
-  sortAsc = (col === 'ticker_asc');  // A-Z is ascending, everything else descending
-  // Update button styles
-  var btns = ['date','abc','score','ret1w','ret1m','ret3m'];
-  var map  = {scan_date:'date', ticker_asc:'abc', score:'score', ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m'};
+  sortAsc = (col === 'ticker_asc');
+  var btns = ['date','abc','score','tech','cat','ret1w','ret1m','ret3m'];
+  var map  = {scan_date:'date', ticker_asc:'abc', score:'score',
+              score_technical:'tech', score_catalyst:'cat',
+              ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m'};
   btns.forEach(function(b) { document.getElementById('sort-btn-'+b).classList.remove('active'); });
   var active = map[col];
   if (active) document.getElementById('sort-btn-'+active).classList.add('active');
@@ -1605,21 +1865,31 @@ function render() {
   var tf = document.getElementById('tf-select').value;
   filtered = getFiltered();
   filtered.sort(function(a,b) {
-    // A-Z sort
     if (sortCol === 'ticker_asc') {
       return a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0;
     }
-    // Return sorts
     if (sortCol.startsWith('ret_')) {
       var key = sortCol.replace('ret_','');
       var va = a.returns && a.returns[key] != null ? a.returns[key] : -Infinity;
       var vb = b.returns && b.returns[key] != null ? b.returns[key] : -Infinity;
-      return vb - va;  // highest first
+      return vb - va;
     }
-    // Standard sorts (highest first)
+    if (sortCol === 'score') {
+      return aBlendScore(b) - aBlendScore(a);
+    }
+    if (sortCol === 'score_technical') {
+      var ta = a.score_technical != null ? a.score_technical : aEstimateTech(a);
+      var tb = b.score_technical != null ? b.score_technical : aEstimateTech(b);
+      return tb - ta;
+    }
+    if (sortCol === 'score_catalyst') {
+      var ca = a.score_catalyst != null ? a.score_catalyst : aEstimateCat(a);
+      var cb = b.score_catalyst != null ? b.score_catalyst : aEstimateCat(b);
+      return cb - ca;
+    }
     var va = a[sortCol] != null ? a[sortCol] : -Infinity;
     var vb = b[sortCol] != null ? b[sortCol] : -Infinity;
-    if (sortCol === 'scan_date') return va < vb ? 1 : va > vb ? -1 : 0;  // newest first
+    if (sortCol === 'scan_date') return va < vb ? 1 : va > vb ? -1 : 0;
     return vb - va;
   });
 
@@ -1717,6 +1987,14 @@ function avgLossForWindow(w) {
 
 function renderSignals(tf) {
   var ps = filtered.filter(function(p){return p.returns&&p.returns[tf]!=null;});
+  // Filter by dominant layer if toggled
+  if (sigLayer !== 'all') {
+    ps = ps.filter(function(p) {
+      var t = p.score_technical != null ? p.score_technical : aEstimateTech(p);
+      var c = p.score_catalyst  != null ? p.score_catalyst  : aEstimateCat(p);
+      return sigLayer === 'tech' ? t >= c : c > t;
+    });
+  }
   if (!ps.length) { document.getElementById('signal-grid').innerHTML='<div style="color:var(--muted)">Not enough data yet</div>'; return; }
 
   var signals = [
@@ -1776,11 +2054,15 @@ function renderPicks(tf) {
     var setup = p.pre_breakout?'Pre-brkout':p.bull_flag?'Bull flag':'Breakout';
     var dol   = p.days_on_list || 1;
     var dolColor = dol >= 5 ? 'var(--green)' : dol >= 3 ? 'var(--amber)' : 'var(--muted)';
+    var techScore = p.score_technical != null ? p.score_technical : aEstimateTech(p);
+    var catScore  = p.score_catalyst  != null ? p.score_catalyst  : aEstimateCat(p);
     html += '<tr>'
       +'<td>'+p.scan_date+'</td>'
       +'<td><strong>'+p.ticker+'</strong></td>'
       +'<td>$'+(p.price_at_scan?p.price_at_scan.toFixed(2):'—')+'</td>'
-      +'<td>'+p.score+'</td>'
+      +'<td>'+aBlendScore(p)+'</td>'
+      +'<td style="color:var(--blue)">'+(techScore||'—')+'</td>'
+      +'<td style="color:var(--amber)">'+(catScore||'—')+'</td>'
       +'<td><span class="badge '+(p.status||'')+'">'+p.status+'</span></td>'
       +'<td>'+setup+'</td>'
       +'<td>'+(p.rs_percentile!=null?p.rs_percentile+'th':'—')+'</td>'
@@ -1904,7 +2186,7 @@ var fdb = firebase.database();
     <p>Insider transactions &amp; hedge fund holdings — see what big players are buying</p>
   </div>
   <div class="hright">
-    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
+    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/sentiment">&#128293; Sentiment</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
     <span class="ver"><!--VERSION--></span>
     <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
   </div>
@@ -2082,6 +2364,289 @@ function loadData() {
 }
 
 loadData();
+</script>
+</body>
+</html>"""
+
+
+@app.route('/sentiment')
+def sentiment():
+    cfg_tag = '<script id="fb-cfg" type="application/json">' + json.dumps(FIREBASE_CONFIG) + '</script>'
+    return SENTIMENT_HTML.replace('<!--FB_CONFIG-->', cfg_tag).replace('<!--VERSION-->', VERSION)
+
+
+SENTIMENT_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sentiment Tracker</title>
+<style>
+:root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;--purple:#9b59b6;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;}
+.header h1{font-size:16px;font-weight:600;}
+.hright{display:flex;align-items:center;gap:10px;}
+.ver{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}
+.nav-pills{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
+.nav-pill:hover{color:var(--text);border-color:var(--blue);}
+.nav-pill.active{background:#e67e22;color:#fff;border-color:#e67e22;}
+.regime{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid;}
+.regime.open{background:#1a3d2b;color:#27ae60;border-color:#27ae6055;}
+.regime.closed{background:var(--bg3);color:var(--muted);border-color:var(--border);}
+.page{padding:24px;max-width:1400px;margin:0 auto;}
+.loading{text-align:center;padding:60px;color:var(--muted);font-size:15px;}
+.error{color:var(--red);padding:20px;text-align:center;}
+.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 16px;}
+.ctrl-group{display:flex;flex-direction:column;gap:3px;}
+.ctrl-group label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+.ctrl-group select,.ctrl-group input{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;outline:none;}
+.section{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:24px;}
+.section h2{font-size:15px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.sm-table{width:100%;border-collapse:collapse;font-size:12px;}
+.sm-table th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none;}
+.sm-table th:hover{color:var(--text);}
+.sm-table td{padding:9px 10px;border-bottom:1px solid var(--border)22;vertical-align:middle;}
+.sm-table tr:hover td{background:#ffffff05;}
+.sm-table tr:last-child td{border-bottom:none;}
+.ticker-badge{font-size:13px;font-weight:700;}
+.buzz-bar{width:80px;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px;}
+.buzz-fill{height:100%;border-radius:3px;}
+.sent-bull{color:var(--green);font-weight:600;}
+.sent-bear{color:var(--red);font-weight:600;}
+.sent-neut{color:var(--muted);font-weight:600;}
+.headline{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px;}
+.headline a{color:var(--blue);text-decoration:none;}
+.headline a:hover{text-decoration:underline;}
+.sort-btn{background:var(--bg3);color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;}
+.sort-btn.active{background:var(--amber);color:#fff;border-color:var(--amber);}
+.updated{font-size:11px;color:var(--muted);margin-left:auto;}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>&#128293; Sentiment Tracker</h1>
+    <p style="font-size:11px;color:var(--muted);margin-top:2px">Social buzz · News sentiment · Reddit mentions</p>
+  </div>
+  <div class="hright">
+    <div class="nav-pills">
+      <a class="nav-pill" href="/">&#128202; Dashboard</a>
+      <a class="nav-pill" href="/analytics">&#128200; Analytics</a>
+      <a class="nav-pill" href="/smart-money">&#127974; Smart Money</a>
+      <a class="nav-pill active" href="/sentiment">&#128293; Sentiment</a>
+      <a class="nav-pill" href="/optimizer">&#128202; Optimizer</a>
+    </div>
+    <span class="ver"><!--VERSION--></span>
+    <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
+  </div>
+</div>
+<script>
+(function(){
+  var n=new Date(),h=(n.getUTCHours()-4+24)%24,m=n.getUTCMinutes(),d=n.getUTCDay(),t=h*60+m;
+  var el=document.getElementById('regime-badge');
+  if(d===0||d===6){el.textContent='○ Market Closed';el.className='regime closed';}
+  else if(t>=570&&t<960){el.textContent='● Market Open';el.className='regime open';}
+  else{el.textContent='○ Market Closed';el.className='regime closed';}
+})();
+</script>
+<!--FB_CONFIG-->
+
+<div class="page">
+  <div id="loading" class="loading">&#9203; Loading sentiment data...</div>
+  <div id="content" style="display:none">
+
+    <div class="controls">
+      <div class="ctrl-group">
+        <label>Sentiment</label>
+        <select id="sent-filter" onchange="render()">
+          <option value="all">All</option>
+          <option value="bullish">Bullish</option>
+          <option value="bearish">Bearish</option>
+          <option value="neutral">Neutral</option>
+        </select>
+      </div>
+      <div class="ctrl-group">
+        <label>Min buzz</label>
+        <input type="number" id="min-buzz" value="0" min="0" max="100" style="width:60px" onchange="render()">
+      </div>
+      <div class="ctrl-group">
+        <label>Search</label>
+        <input type="text" id="ticker-search" placeholder="AAPL" style="width:90px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();render()">
+      </div>
+      <div style="display:flex;gap:6px;align-items:flex-end;">
+        <button class="sort-btn active" id="sort-buzz"   onclick="setSort('buzz')">&#128293; Buzz</button>
+        <button class="sort-btn"        id="sort-sent"   onclick="setSort('sent')">&#127919; Sentiment</button>
+        <button class="sort-btn"        id="sort-news"   onclick="setSort('news')">&#128240; News count</button>
+        <button class="sort-btn"        id="sort-pos"    onclick="setSort('pos')">&#129412; Positive signals</button>
+        <button class="sort-btn"        id="sort-abc"    onclick="setSort('abc')">&#128288; A–Z</button>
+      </div>
+      <span class="updated" id="updated-ts"></span>
+    </div>
+
+    <div class="section">
+      <h2>&#128293; News Sentiment
+        <span style="font-size:11px;color:var(--muted);font-weight:400" id="count-label"></span>
+      </h2>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:14px;">
+        Sentiment derived from keyword analysis across all news headlines in the past 7 days (source: Finnhub).
+        Buzz score is log-normalized from article volume.
+      </p>
+      <table class="sm-table">
+        <thead>
+          <tr>
+            <th onclick="setSort('abc')">Ticker</th>
+            <th onclick="setSort('buzz')">Buzz &#9650;</th>
+            <th onclick="setSort('sent')">Sentiment</th>
+            <th onclick="setSort('pos')">&#129412; Positive signals</th>
+            <th onclick="setSort('neg')">&#128308; Negative signals</th>
+            <th onclick="setSort('news')">Articles 7d</th>
+            <th>Top headlines</th>
+          </tr>
+        </thead>
+        <tbody id="sent-body"></tbody>
+      </table>
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;">
+        <button id="pg-prev" onclick="prevPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 14px;cursor:pointer;font-size:12px;" disabled>&#8592; Prev</button>
+        <span id="pg-info" style="font-size:12px;color:var(--muted)"></span>
+        <button id="pg-next" onclick="nextPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 14px;cursor:pointer;font-size:12px;">Next &#8594;</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+var fbCfg = JSON.parse(document.getElementById('fb-cfg').textContent);
+firebase.initializeApp(fbCfg);
+var fdb = firebase.database();
+
+var allData = [];
+var filtered = [];
+var sortCol  = 'buzz';
+var page     = 0;
+var pageSize = 50;
+
+function load() {
+  fdb.ref('/scanner/sentiment').once('value', function(snap) {
+    var d = snap.val() || {};
+    var updated = d._updated || '';
+    if (updated) {
+      document.getElementById('updated-ts').textContent =
+        'Updated: ' + new Date(updated).toLocaleString();
+    }
+    allData = Object.values(d).filter(function(r) { return r && r.ticker; });
+    if (!allData.length) {
+      document.getElementById('loading').innerHTML =
+        '<div class="error">No sentiment data yet.<br><br>'
+        + '<code style="font-size:12px;color:var(--muted)">python sentiment.py</code><br>'
+        + '<span style="font-size:12px;color:var(--muted)">Run on the VM to populate.</span></div>';
+      return;
+    }
+    render();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  }, function(err) {
+    document.getElementById('loading').innerHTML =
+      '<div class="error">Firebase error: ' + err.message + '</div>';
+  });
+}
+
+function getFiltered() {
+  var sentF  = document.getElementById('sent-filter').value;
+  var minBuzz= parseInt(document.getElementById('min-buzz').value) || 0;
+  var search = (document.getElementById('ticker-search').value || '').trim().toUpperCase();
+  return allData.filter(function(r) {
+    if (sentF !== 'all' && r.overall_sentiment !== sentF) return false;
+    if ((r.buzz_score || 0) < minBuzz) return false;
+    if (search && r.ticker.indexOf(search) === -1) return false;
+    return true;
+  });
+}
+
+function setSort(col) {
+  sortCol = col;
+  ['buzz','sent','news','pos','neg','abc'].forEach(function(c) {
+    var el = document.getElementById('sort-'+c);
+    if (el) el.classList.toggle('active', c === col);
+  });
+  page = 0;
+  render();
+}
+
+function render() {
+  filtered = getFiltered();
+  filtered.sort(function(a, b) {
+    if (sortCol === 'abc')  return a.ticker < b.ticker ? -1 : 1;
+    if (sortCol === 'buzz') return (b.buzz_score||0) - (a.buzz_score||0);
+    if (sortCol === 'news') return (b.article_count_7d||0) - (a.article_count_7d||0);
+    if (sortCol === 'pos')  return (b.positive_signals||0) - (a.positive_signals||0);
+    if (sortCol === 'neg')  return (b.negative_signals||0) - (a.negative_signals||0);
+    if (sortCol === 'sent') {
+      var order = {bullish:0, neutral:1, bearish:2};
+      return (order[a.overall_sentiment]||1) - (order[b.overall_sentiment]||1);
+    }
+    return 0;
+  });
+  document.getElementById('count-label').textContent = '— ' + filtered.length + ' tickers';
+  renderTable();
+}
+
+function renderTable() {
+  var rows = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  var html = '';
+  rows.forEach(function(r) {
+    var buzz      = r.buzz_score || 0;
+    var sent      = r.overall_sentiment || 'neutral';
+    var articles  = r.article_count_7d || 0;
+    var pos       = r.positive_signals || 0;
+    var neg       = r.negative_signals || 0;
+    var headlines = r.headlines || [];
+    var fh        = r.finnhub || {};
+    // fallback for old data format
+    if (!headlines.length && fh.latest_headline) {
+      headlines = [{ headline: fh.latest_headline, url: fh.latest_url || '' }];
+    }
+
+    var sentClass = sent === 'bullish' ? 'sent-bull' : sent === 'bearish' ? 'sent-bear' : 'sent-neut';
+    var sentIcon  = sent === 'bullish' ? '&#129412;' : sent === 'bearish' ? '&#128308;' : '&#9898;';
+    var buzzColor = buzz >= 70 ? '#e67e22' : buzz >= 40 ? '#3498db' : '#8892a4';
+
+    var headlineHtml = headlines.slice(0,3).map(function(h) {
+      var txt = escHtml(h.headline || '');
+      return h.url
+        ? '<div class="headline"><a href="'+escHtml(h.url)+'" target="_blank">'+txt+'</a></div>'
+        : '<div class="headline">'+txt+'</div>';
+    }).join('') || '—';
+
+    html += '<tr>'
+      + '<td><span class="ticker-badge">' + r.ticker + '</span></td>'
+      + '<td>'
+        + '<div class="buzz-bar"><div class="buzz-fill" style="width:'+buzz+'%;background:'+buzzColor+'"></div></div>'
+        + '<strong style="color:'+buzzColor+'">' + buzz + '</strong>'
+      + '</td>'
+      + '<td><span class="'+sentClass+'">' + sentIcon + ' ' + sent + '</span></td>'
+      + '<td style="color:var(--green)">' + (pos || '—') + '</td>'
+      + '<td style="color:var(--red)">'   + (neg || '—') + '</td>'
+      + '<td>' + (articles || '—') + '</td>'
+      + '<td>' + headlineHtml + '</td>'
+      + '</tr>';
+  });
+  document.getElementById('sent-body').innerHTML = html
+    || '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">No tickers match filters</td></tr>';
+  document.getElementById('pg-info').textContent  = 'Page ' + (page + 1) + ' of ' + Math.max(1, Math.ceil(filtered.length / pageSize));
+  document.getElementById('pg-prev').disabled = page === 0;
+  document.getElementById('pg-next').disabled = (page + 1) * pageSize >= filtered.length;
+}
+
+function prevPage() { if(page>0){page--;renderTable();} }
+function nextPage() { if((page+1)*pageSize<filtered.length){page++;renderTable();} }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+load();
 </script>
 </body>
 </html>"""
@@ -2329,6 +2894,7 @@ code{background:var(--bg);padding:2px 6px;border-radius:4px;font-family:monospac
       <a class="nav-pill" href="/">&#128202; Dashboard</a>
       <a class="nav-pill" href="/analytics">&#128200; Analytics</a>
       <a class="nav-pill" href="/smart-money">&#127974; Smart Money</a>
+      <a class="nav-pill" href="/sentiment">&#128293; Sentiment</a>
       <a class="nav-pill active" href="/optimizer">&#128202; Optimizer</a>
     </div>
     <span class="ver"><!--VERSION--></span>

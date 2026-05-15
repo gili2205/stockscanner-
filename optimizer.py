@@ -45,6 +45,7 @@ cred = credentials.Certificate(FIREBASE_CRED)
 firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_URL})
 hist_ref   = db.reference("/scanner/history")
 report_ref = db.reference("/scanner/optimization_reports")
+exp_ref    = db.reference("/scanner/experiments")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -73,10 +74,18 @@ def fmt_wr(v):
 
 # ── Load data ──────────────────────────────────────────────────────────────────
 
-def load_picks(window="1m"):
-    """Load all historical picks that have a return for the given window."""
-    log.info("Loading historical picks from Firebase...")
-    history = hist_ref.get() or {}
+def load_picks(window="1m", source_ref=None, label="production"):
+    """Load all historical picks that have a return for the given window.
+
+    source_ref : Firebase DatabaseReference | None
+        Reference to load history from. Defaults to /scanner/history.
+        Pass exp_ref.child(name).child("history") for experiment data.
+    label : str
+        Human-readable name shown in log messages.
+    """
+    ref = source_ref or hist_ref
+    log.info(f"Loading {label} picks from Firebase ({window} window)...")
+    history = ref.get() or {}
 
     picks = []
     skipped = 0
@@ -97,7 +106,8 @@ def load_picks(window="1m"):
             pick["_day"]    = day_str
             picks.append(pick)
 
-    log.info(f"Loaded {len(picks)} picks with {window} returns ({skipped} skipped — no return data yet)")
+    log.info(f"Loaded {len(picks)} {label} picks with {window} returns "
+             f"({skipped} skipped — no return data yet)")
     return picks
 
 
@@ -231,6 +241,86 @@ def overall_stats(picks, window):
     }
 
 
+# ── Experiment comparison ──────────────────────────────────────────────────────
+
+def print_comparison(prod_picks, exp_picks, exp_name, window):
+    """Print a side-by-side comparison of production vs experiment picks."""
+    SEP = "─" * 80
+
+    def stats(picks):
+        rets = [p["_return"] for p in picks]
+        days = sorted(set(p["_day"] for p in picks))
+        return {
+            "n":        len(picks),
+            "win_rate": win_rate(rets),
+            "avg":      round(mean(rets), 2) if rets else None,
+            "med":      round(median(rets), 2) if rets else None,
+            "best":     round(max(rets), 2) if rets else None,
+            "worst":    round(min(rets), 2) if rets else None,
+            "days":     len(days),
+            "versions": sorted(set(p.get("scoring_version", "unknown") for p in picks)),
+        }
+
+    ps = stats(prod_picks)
+    es = stats(exp_picks)
+
+    def delta(a, b):
+        if a is None or b is None: return "  —  "
+        d = b - a
+        return f"{d:+.1f}%" if isinstance(d, float) else f"{d:+d}"
+
+    print(f"\n{'═'*80}")
+    print(f"  EXPERIMENT COMPARISON: production  vs  {exp_name}")
+    print(f"  Return window: {window.upper()}   |   Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"{'═'*80}\n")
+    print(f"  {'Metric':<20} {'Production':>14} {'Experiment':>14} {'Delta':>10}")
+    print(f"  {'─'*20} {'─'*14} {'─'*14} {'─'*10}")
+    print(f"  {'Picks':<20} {ps['n']:>14,} {es['n']:>14,} {es['n']-ps['n']:>+10,}")
+    print(f"  {'Scan days':<20} {ps['days']:>14} {es['days']:>14} {'':>10}")
+    print(f"  {'Win rate':<20} {fmt_wr(ps['win_rate']):>14} {fmt_wr(es['win_rate']):>14} {delta(ps['win_rate'], es['win_rate']):>10}")
+    print(f"  {'Avg return':<20} {fmt_pct(ps['avg']):>14} {fmt_pct(es['avg']):>14} {delta(ps['avg'], es['avg']):>10}")
+    print(f"  {'Median return':<20} {fmt_pct(ps['med']):>14} {fmt_pct(es['med']):>14} {delta(ps['med'], es['med']):>10}")
+    print(f"  {'Best pick':<20} {fmt_pct(ps['best']):>14} {fmt_pct(es['best']):>14} {'':>10}")
+    print(f"  {'Worst pick':<20} {fmt_pct(ps['worst']):>14} {fmt_pct(es['worst']):>14} {'':>10}")
+    print(f"  {'Scoring version':<20} {str(ps['versions'][0] if ps['versions'] else '?'):>14} "
+          f"{str(es['versions'][0] if es['versions'] else '?'):>14}")
+
+    # Factor comparison
+    if prod_picks and exp_picks:
+        print(f"\n\nFACTOR WIN-RATE LIFT — production vs experiment")
+        print(SEP)
+        prod_factors = {f["factor"]: f for f in run_factor_analysis(prod_picks, window)}
+        exp_factors  = {f["factor"]: f for f in run_factor_analysis(exp_picks,  window)}
+        all_factors  = sorted(set(prod_factors) | set(exp_factors))
+        print(f"  {'Factor':<30} {'Prod WR lift':>12} {'Exp WR lift':>12} {'Change':>10}")
+        print(f"  {'─'*30} {'─'*12} {'─'*12} {'─'*10}")
+        for fname in all_factors:
+            pf = prod_factors.get(fname)
+            ef = exp_factors.get(fname)
+            pd_lift = pf["wr_diff"] if pf else None
+            ed_lift = ef["wr_diff"] if ef else None
+            ch = f"{(ed_lift - pd_lift):+.1f}%" if pd_lift is not None and ed_lift is not None else "  —"
+            print(f"  {fname:<30} {fmt_wr(pd_lift):>12} {fmt_wr(ed_lift):>12} {ch:>10}")
+
+    # Verdict
+    print(f"\n\nVERDICT")
+    print(SEP)
+    wr_delta  = (es["win_rate"] or 0) - (ps["win_rate"] or 0)
+    avg_delta = (es["avg"] or 0) - (ps["avg"] or 0)
+    if wr_delta >= 3 and avg_delta >= 0:
+        verdict = "✅ PROMOTE — experiment beats production on both win rate and avg return"
+    elif wr_delta >= 3:
+        verdict = "🟡 MIXED — higher win rate but lower avg return, review carefully"
+    elif wr_delta <= -3:
+        verdict = "❌ REJECT — experiment underperforms production"
+    else:
+        verdict = "⚪ NEUTRAL — no significant difference, need more data"
+    print(f"  {verdict}")
+    print(f"  Win rate:   {fmt_wr(ps['win_rate'])} → {fmt_wr(es['win_rate'])}  ({wr_delta:+.1f}%)")
+    print(f"  Avg return: {fmt_pct(ps['avg'])} → {fmt_pct(es['avg'])}  ({avg_delta:+.2f}%)")
+    print(f"\n{'═'*80}\n")
+
+
 # ── Print report ───────────────────────────────────────────────────────────────
 
 def print_report(stats, factors, bands, window):
@@ -295,19 +385,53 @@ def print_report(stats, factors, bands, window):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--window",   default="1m",
+    parser = argparse.ArgumentParser(description="Scanner factor analysis optimizer")
+    parser.add_argument("--window",     default="1m",
                         help="Return window to analyze: 1w, 2w, 1m, 2m, 3m (default: 1m)")
     parser.add_argument("--all-windows", action="store_true",
                         help="Run analysis for all windows")
+    parser.add_argument("--experiment", type=str, default=None,
+                        help="Analyze an experiment instead of production data. "
+                             "Loads from /scanner/experiments/{NAME}/history.")
+    parser.add_argument("--compare",   type=str, default=None,
+                        help="Compare experiment NAME side-by-side with production. "
+                             "Prints a comparison table and a PROMOTE/REJECT verdict.")
     args = parser.parse_args()
 
     windows = ["1w", "2w", "1m", "2m", "3m"] if args.all_windows else [args.window]
 
+    # ── Compare mode ────────────────────────────────────────────────────────────
+    if args.compare:
+        exp_name    = args.compare
+        exp_history = exp_ref.child(exp_name).child("history")
+        exp_meta    = exp_ref.child(exp_name).child("meta").get() or {}
+        log.info(f"Experiment meta: {exp_meta}")
+
+        for window in windows:
+            prod_picks = load_picks(window, label="production")
+            exp_picks  = load_picks(window, source_ref=exp_history, label=exp_name)
+            if len(prod_picks) < 20 or len(exp_picks) < 20:
+                log.warning(f"Not enough picks for window {window} — need ≥20 in both datasets")
+                continue
+            print_comparison(prod_picks, exp_picks, exp_name, window)
+        sys.exit(0)
+
+    # ── Experiment or production analysis ───────────────────────────────────────
+    if args.experiment:
+        source_ref = exp_ref.child(args.experiment).child("history")
+        label      = args.experiment
+        save_ref   = exp_ref.child(args.experiment).child("report")
+        log.info(f"Analyzing experiment: {args.experiment}")
+    else:
+        source_ref = None
+        label      = "production"
+        save_ref   = report_ref
+        log.info("Analyzing production history")
+
     all_reports = {}
 
     for window in windows:
-        picks = load_picks(window)
+        picks = load_picks(window, source_ref=source_ref, label=label)
 
         if len(picks) < 20:
             log.warning(f"Not enough picks with {window} return data ({len(picks)}). "
@@ -331,15 +455,25 @@ if __name__ == "__main__":
                   "Run the backtest first and wait for at least 1 week of forward returns.")
         sys.exit(1)
 
-    # Save to Firebase
+    # Save to Firebase (experiment report path or production report path)
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
     try:
-        report_ref.child(ts).set({
-            "generated_at": datetime.now().isoformat(),
-            "windows":      list(all_reports.keys()),
-            "reports":      all_reports,
-        })
-        log.info(f"Report saved to Firebase at /scanner/optimization_reports/{ts}")
+        if args.experiment:
+            save_ref.set({
+                "generated_at": datetime.now().isoformat(),
+                "experiment":   args.experiment,
+                "windows":      list(all_reports.keys()),
+                "reports":      all_reports,
+            })
+            log.info(f"Report saved to /scanner/experiments/{args.experiment}/report")
+            log.info(f"Compare vs production: python optimizer.py --compare {args.experiment}")
+        else:
+            save_ref.child(ts).set({
+                "generated_at": datetime.now().isoformat(),
+                "windows":      list(all_reports.keys()),
+                "reports":      all_reports,
+            })
+            log.info(f"Report saved to Firebase at /scanner/optimization_reports/{ts}")
     except Exception as e:
         log.warning(f"Could not save to Firebase: {e}")
 

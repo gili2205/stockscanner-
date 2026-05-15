@@ -460,13 +460,19 @@ def apply_approved_recommendation():
     log.info(f"live_scanner.py updated. Changes applied:\n" + "\n".join(applied))
 
     # Mark as applied in Firebase
+    experiment_id = rec.get("experiment_id", f"ai_{ts}")
     ai_recs_ref.child(ts).update({
-        "applied": True,
-        "applied_at": datetime.now().isoformat(),
+        "applied":         True,
+        "applied_at":      datetime.now().isoformat(),
         "applied_changes": applied,
     })
     log.info(f"Marked recommendation {ts} as applied in Firebase.")
-    log.info("Restart live_scanner.py on the VM for changes to take effect.")
+    log.info("Next steps:")
+    log.info("  1. Restart live_scanner.py for the new scoring to take effect in production")
+    log.info(f"  2. Run a real experiment backtest to verify on historical data:")
+    log.info(f"       python backtest.py --days 60 --experiment {experiment_id}")
+    log.info(f"       python optimizer.py --compare {experiment_id}")
+    log.info(f"  3. Bump SCORING_VERSION in backtest.py to document the change")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -513,12 +519,16 @@ def run_analysis(window="1m"):
     wr_delta  = round((projected["all"]["win_rate"]  or 0) - (current["all"]["win_rate"]  or 0), 1)
     avg_delta = round((projected["all"]["avg_return"] or 0) - (current["all"]["avg_return"] or 0), 2)
 
+    ts           = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    experiment_id = f"ai_{ts}"   # matches /scanner/experiments/{experiment_id} convention
+
     rec = {
         "generated_at":     datetime.now().isoformat(),
         "window":           window,
         "n_picks":          len(picks),
         "status":           "pending",
         "applied":          False,
+        "experiment_id":    experiment_id,   # ← links to experiment framework
         "claude_summary":   suggestion.get("summary"),
         "claude_reasoning": suggestion.get("reasoning"),
         "claude_confidence":suggestion.get("confidence"),
@@ -531,10 +541,14 @@ def run_analysis(window="1m"):
         "changes":          suggestion.get("changes", []),
     }
 
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     ai_recs_ref.child(ts).set(rec)
     log.info(f"Recommendation saved to Firebase: /scanner/ai_recommendations/{ts}")
     log.info(f"Win rate delta: {wr_delta:+.1f}%  |  Avg return delta: {avg_delta:+.2f}%")
+    log.info(f"Shadow backtest used re-scored historical picks (fast estimate).")
+    log.info(f"To run a real backtest with the proposed weights and compare:")
+    log.info(f"  1. Edit score_stock_historical() in backtest.py with the proposed changes")
+    log.info(f"  2. python backtest.py --days 60 --experiment {experiment_id}")
+    log.info(f"  3. python optimizer.py --compare {experiment_id}")
 
     # Also save locally
     out = Path("/tmp/ai_recommendation.json")
