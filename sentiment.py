@@ -138,11 +138,15 @@ def fetch_ipo_tickers(days=30):
             return set()
         data = r.json() or {}
         ipoCalendar = data.get("ipoCalendar", [])
-        tickers = {
-            item["symbol"].strip().upper()
-            for item in ipoCalendar
-            if item.get("symbol") and item.get("exchange", "").upper() in ("NYSE", "NASDAQ", "")
-        }
+        tickers = set()
+        for item in ipoCalendar:
+            sym = (item.get("symbol") or "").strip().upper()
+            if not sym:
+                continue
+            exch = (item.get("exchange") or "").upper()
+            # Finnhub returns "NASDAQ Global", "NASDAQ Capital", "NYSE MKT", etc.
+            if exch.startswith("NASDAQ") or exch.startswith("NYSE") or exch == "":
+                tickers.add(sym)
         log.info(f"  IPO calendar: {len(tickers)} tickers (last {days} days)")
         return tickers
     except Exception as e:
@@ -171,19 +175,40 @@ def fetch_history_tickers(days=14):
         return set()
 
 
+# ── Pinned tickers (user-managed via Sentiment page UI) ───────────────────────
+def fetch_pinned_tickers():
+    """Return set of tickers pinned by the user at /scanner/sentiment_universe/pinned."""
+    try:
+        snap = db.reference("/scanner/sentiment_universe/pinned").get() or {}
+        tickers = {t.strip().upper() for t in snap.keys() if t and t != "_updated"}
+        log.info(f"  Pinned tickers: {len(tickers)}")
+        return tickers
+    except Exception as e:
+        log.warning(f"  Pinned tickers error: {e}")
+        return set()
+
+
 # ── Build full sentiment universe ──────────────────────────────────────────────
 def build_universe(limit, ipo_days, history_days):
     """
-    Merge three sources into an ordered list of tickers:
-      1. All scanner picks (sorted by score desc) — highest priority
-      2. Recent IPOs from Finnhub calendar
-      3. Recent history picks (appeared in last history_days)
+    Merge four sources into an ordered list of tickers:
+      1. Pinned tickers (user-managed) — always included first
+      2. All scanner picks (sorted by score desc)
+      3. Recent IPOs from Finnhub calendar
+      4. Recent history picks (appeared in last history_days)
     Deduplicates while preserving insertion order, then caps at limit.
     """
     ordered = []
     seen    = set()
 
-    # 1. Scanner picks
+    # 1. Pinned tickers (always included, regardless of limit)
+    pinned = fetch_pinned_tickers()
+    for t in sorted(pinned):
+        if t not in seen:
+            ordered.append(t)
+            seen.add(t)
+
+    # 2. Scanner picks
     try:
         snap = db.reference("/scanner/all_stocks").get() or {}
         scanner_tickers = sorted(
@@ -199,7 +224,7 @@ def build_universe(limit, ipo_days, history_days):
     except Exception as e:
         log.warning(f"  Scanner picks error: {e}")
 
-    # 2. IPO calendar
+    # 3. IPO calendar
     ipo_tickers = fetch_ipo_tickers(days=ipo_days)
     time.sleep(1.1)  # rate limit
     for t in sorted(ipo_tickers):
@@ -207,15 +232,17 @@ def build_universe(limit, ipo_days, history_days):
             ordered.append(t)
             seen.add(t)
 
-    # 3. History tickers
+    # 4. History tickers
     hist_tickers = fetch_history_tickers(days=history_days)
     for t in sorted(hist_tickers):
         if t not in seen:
             ordered.append(t)
             seen.add(t)
 
-    universe = ordered[:limit]
-    log.info(f"  Universe: {len(universe)} tickers (cap={limit})")
+    # Pinned tickers are always included even beyond the limit
+    non_pinned = [t for t in ordered if t not in pinned]
+    universe   = list(pinned) + non_pinned[:max(0, limit - len(pinned))]
+    log.info(f"  Universe: {len(universe)} tickers ({len(pinned)} pinned, cap={limit})")
     return universe
 
 

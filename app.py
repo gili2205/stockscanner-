@@ -2587,6 +2587,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <button class="sort-btn"        id="sort-pos"    onclick="setSort('pos')">&#129412; Positive signals</button>
         <button class="sort-btn"        id="sort-abc"    onclick="setSort('abc')">&#128288; A–Z</button>
       </div>
+      <div class="ctrl-group">
+        <label>Pin ticker</label>
+        <div style="display:flex;gap:4px">
+          <input type="text" id="pin-input" placeholder="ASTS" style="width:70px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+          <button onclick="pinTicker()" style="background:var(--amber);color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer">+ Pin</button>
+        </div>
+      </div>
       <span class="updated" id="updated-ts"></span>
     </div>
 
@@ -2800,6 +2807,14 @@ function renderTable() {
 function prevPage() { if(page>0){page--;renderTable();} }
 function nextPage() { if((page+1)*pageSize<filtered.length){page++;renderTable();} }
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function pinTicker() {
+  var t = (document.getElementById('pin-input').value || '').trim().toUpperCase();
+  if (!t) return;
+  fdb.ref('/scanner/sentiment_universe/pinned/' + t).set(true);
+  document.getElementById('pin-input').value = '';
+  alert(t + ' pinned! It will appear next time sentiment.py runs on the VM.');
+}
 
 load();
 </script>
