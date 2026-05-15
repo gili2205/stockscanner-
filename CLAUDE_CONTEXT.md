@@ -282,10 +282,18 @@ Staging Firebase: `stockscanner-staging-default-rtdb`
 ## 9. VM Operations
 
 ### Running scripts
-```bash
-cd /home/scanner
+**ALWAYS use the full absolute venv path. Never use `python`, `python3`, or relative `venv/bin/python`.**
 
-# Always use venv python
+```bash
+# CORRECT
+/home/scanner/venv/bin/python sentiment.py --limit 200
+
+# WRONG — never give these
+python sentiment.py
+python3 sentiment.py
+venv/bin/python sentiment.py
+cd /home/scanner && venv/bin/python sentiment.py
+
 /home/scanner/venv/bin/python optimizer.py --all-windows
 /home/scanner/venv/bin/python ai_optimizer.py --check-and-run
 
