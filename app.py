@@ -670,12 +670,14 @@ function fbCached(path, ttl, onData) {{
     var raw = sessionStorage.getItem(key);
     if (raw) {{
       var obj = JSON.parse(raw);
-      if (Date.now() - obj.ts < ttl) {{ onData(obj.data); return; }}
+      if (obj.data != null && Date.now() - obj.ts < ttl) {{ onData(obj.data); return; }}
     }}
   }} catch(e) {{}}
   fdb.ref(path).once('value', function(snap) {{
     var data = snap.val();
-    try {{ sessionStorage.setItem(key, JSON.stringify({{ts: Date.now(), data: data}})); }} catch(e) {{}}
+    if (data != null) {{
+      try {{ sessionStorage.setItem(key, JSON.stringify({{ts: Date.now(), data: data}})); }} catch(e) {{}}
+    }}
     onData(data);
   }});
 }}
@@ -2316,12 +2318,14 @@ function fbCached(path, ttl, onData, onErr) {
     var raw = sessionStorage.getItem(key);
     if (raw) {
       var obj = JSON.parse(raw);
-      if (Date.now() - obj.ts < ttl) { onData(obj.data); return; }
+      if (obj.data != null && Date.now() - obj.ts < ttl) { onData(obj.data); return; }
     }
   } catch(e) {}
   fdb.ref(path).once('value', function(snap) {
     var data = snap.val();
-    try { sessionStorage.setItem(key, JSON.stringify({ts: Date.now(), data: data})); } catch(e) {}
+    if (data != null) {
+      try { sessionStorage.setItem(key, JSON.stringify({ts: Date.now(), data: data})); } catch(e) {}
+    }
     onData(data);
   }, function(err) { if (onErr) onErr(err); });
 }
@@ -2641,12 +2645,14 @@ function fbCached(path, ttl, onData, onErr) {
     var raw = sessionStorage.getItem(key);
     if (raw) {
       var obj = JSON.parse(raw);
-      if (Date.now() - obj.ts < ttl) { onData(obj.data); return; }
+      if (obj.data != null && Date.now() - obj.ts < ttl) { onData(obj.data); return; }
     }
   } catch(e) {}
   fdb.ref(path).once('value', function(snap) {
     var data = snap.val();
-    try { sessionStorage.setItem(key, JSON.stringify({ts: Date.now(), data: data})); } catch(e) {}
+    if (data != null) {
+      try { sessionStorage.setItem(key, JSON.stringify({ts: Date.now(), data: data})); } catch(e) {}
+    }
     onData(data);
   }, function(err) { if (onErr) onErr(err); });
 }
