@@ -2477,30 +2477,32 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       </div>
       <div style="display:flex;gap:6px;align-items:flex-end;">
         <button class="sort-btn active" id="sort-buzz"   onclick="setSort('buzz')">&#128293; Buzz</button>
-        <button class="sort-btn"        id="sort-bull"   onclick="setSort('bull')">&#129432; Bullish %</button>
-        <button class="sort-btn"        id="sort-reddit" onclick="setSort('reddit')">&#128172; Reddit</button>
-        <button class="sort-btn"        id="sort-news"   onclick="setSort('news')">&#128240; News</button>
+        <button class="sort-btn"        id="sort-sent"   onclick="setSort('sent')">&#127919; Sentiment</button>
+        <button class="sort-btn"        id="sort-news"   onclick="setSort('news')">&#128240; News count</button>
+        <button class="sort-btn"        id="sort-pos"    onclick="setSort('pos')">&#129412; Positive signals</button>
         <button class="sort-btn"        id="sort-abc"    onclick="setSort('abc')">&#128288; A–Z</button>
       </div>
       <span class="updated" id="updated-ts"></span>
     </div>
 
     <div class="section">
-      <h2>&#128293; Social &amp; News Sentiment
+      <h2>&#128293; News Sentiment
         <span style="font-size:11px;color:var(--muted);font-weight:400" id="count-label"></span>
       </h2>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:14px;">
+        Sentiment derived from keyword analysis across all news headlines in the past 7 days (source: Finnhub).
+        Buzz score is log-normalized from article volume.
+      </p>
       <table class="sm-table">
         <thead>
           <tr>
             <th onclick="setSort('abc')">Ticker</th>
             <th onclick="setSort('buzz')">Buzz &#9650;</th>
-            <th onclick="setSort('bull')">Sentiment</th>
-            <th onclick="setSort('bull')">Bullish %</th>
-            <th onclick="setSort('bear')">Bearish %</th>
-            <th>StockTwits msgs</th>
-            <th onclick="setSort('reddit')">Reddit 7d</th>
-            <th onclick="setSort('news')">News 7d</th>
-            <th>Latest headline</th>
+            <th onclick="setSort('sent')">Sentiment</th>
+            <th onclick="setSort('pos')">&#129412; Positive signals</th>
+            <th onclick="setSort('neg')">&#128308; Negative signals</th>
+            <th onclick="setSort('news')">Articles 7d</th>
+            <th>Top headlines</th>
           </tr>
         </thead>
         <tbody id="sent-body"></tbody>
@@ -2510,11 +2512,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <span id="pg-info" style="font-size:12px;color:var(--muted)"></span>
         <button id="pg-next" onclick="nextPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 14px;cursor:pointer;font-size:12px;">Next &#8594;</button>
       </div>
-    </div>
-
-    <div class="section" id="reddit-section" style="display:none">
-      <h2>&#128172; Top Reddit Discussions</h2>
-      <div id="reddit-posts"></div>
     </div>
 
   </div>
@@ -2546,13 +2543,12 @@ function load() {
       document.getElementById('loading').innerHTML =
         '<div class="error">No sentiment data yet.<br><br>'
         + '<code style="font-size:12px;color:var(--muted)">python sentiment.py</code><br>'
-        + '<span style="font-size:12px;color:var(--muted)">Run on the VM to populate sentiment data.</span></div>';
+        + '<span style="font-size:12px;color:var(--muted)">Run on the VM to populate.</span></div>';
       return;
     }
     render();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
-    renderReddit();
   }, function(err) {
     document.getElementById('loading').innerHTML =
       '<div class="error">Firebase error: ' + err.message + '</div>';
@@ -2573,8 +2569,9 @@ function getFiltered() {
 
 function setSort(col) {
   sortCol = col;
-  ['buzz','bull','reddit','news','abc'].forEach(function(c) {
-    document.getElementById('sort-'+c).classList.toggle('active', c === col);
+  ['buzz','sent','news','pos','neg','abc'].forEach(function(c) {
+    var el = document.getElementById('sort-'+c);
+    if (el) el.classList.toggle('active', c === col);
   });
   page = 0;
   render();
@@ -2583,12 +2580,15 @@ function setSort(col) {
 function render() {
   filtered = getFiltered();
   filtered.sort(function(a, b) {
-    if (sortCol === 'abc')    return a.ticker < b.ticker ? -1 : 1;
-    if (sortCol === 'buzz')   return (b.buzz_score||0) - (a.buzz_score||0);
-    if (sortCol === 'bull')   return ((b.stocktwits||{}).bullish_pct||50) - ((a.stocktwits||{}).bullish_pct||50);
-    if (sortCol === 'bear')   return ((a.stocktwits||{}).bullish_pct||50) - ((b.stocktwits||{}).bullish_pct||50);
-    if (sortCol === 'reddit') return ((b.reddit||{}).mentions_7d||0) - ((a.reddit||{}).mentions_7d||0);
-    if (sortCol === 'news')   return ((b.finnhub||{}).article_count_7d||0) - ((a.finnhub||{}).article_count_7d||0);
+    if (sortCol === 'abc')  return a.ticker < b.ticker ? -1 : 1;
+    if (sortCol === 'buzz') return (b.buzz_score||0) - (a.buzz_score||0);
+    if (sortCol === 'news') return (b.article_count_7d||0) - (a.article_count_7d||0);
+    if (sortCol === 'pos')  return (b.positive_signals||0) - (a.positive_signals||0);
+    if (sortCol === 'neg')  return (b.negative_signals||0) - (a.negative_signals||0);
+    if (sortCol === 'sent') {
+      var order = {bullish:0, neutral:1, bearish:2};
+      return (order[a.overall_sentiment]||1) - (order[b.overall_sentiment]||1);
+    }
     return 0;
   });
   document.getElementById('count-label').textContent = '— ' + filtered.length + ' tickers';
@@ -2596,21 +2596,32 @@ function render() {
 }
 
 function renderTable() {
-  var rows  = filtered.slice(page * pageSize, (page + 1) * pageSize);
-  var html  = '';
+  var rows = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  var html = '';
   rows.forEach(function(r) {
-    var st    = r.stocktwits || {};
-    var fh    = r.finnhub    || {};
-    var rd    = r.reddit     || {};
-    var buzz  = r.buzz_score || 0;
-    var sent  = r.overall_sentiment || 'neutral';
+    var buzz      = r.buzz_score || 0;
+    var sent      = r.overall_sentiment || 'neutral';
+    var articles  = r.article_count_7d || 0;
+    var pos       = r.positive_signals || 0;
+    var neg       = r.negative_signals || 0;
+    var headlines = r.headlines || [];
+    var fh        = r.finnhub || {};
+    // fallback for old data format
+    if (!headlines.length && fh.latest_headline) {
+      headlines = [{ headline: fh.latest_headline, url: fh.latest_url || '' }];
+    }
+
     var sentClass = sent === 'bullish' ? 'sent-bull' : sent === 'bearish' ? 'sent-bear' : 'sent-neut';
     var sentIcon  = sent === 'bullish' ? '&#129412;' : sent === 'bearish' ? '&#128308;' : '&#9898;';
     var buzzColor = buzz >= 70 ? '#e67e22' : buzz >= 40 ? '#3498db' : '#8892a4';
-    var headline  = fh.latest_headline || '';
-    var url       = fh.latest_url || '';
-    var bullPct   = st.bullish_pct != null ? st.bullish_pct : '—';
-    var bearPct   = st.bearish_pct != null ? st.bearish_pct : '—';
+
+    var headlineHtml = headlines.slice(0,3).map(function(h) {
+      var txt = escHtml(h.headline || '');
+      return h.url
+        ? '<div class="headline"><a href="'+escHtml(h.url)+'" target="_blank">'+txt+'</a></div>'
+        : '<div class="headline">'+txt+'</div>';
+    }).join('') || '—';
+
     html += '<tr>'
       + '<td><span class="ticker-badge">' + r.ticker + '</span></td>'
       + '<td>'
@@ -2618,40 +2629,17 @@ function renderTable() {
         + '<strong style="color:'+buzzColor+'">' + buzz + '</strong>'
       + '</td>'
       + '<td><span class="'+sentClass+'">' + sentIcon + ' ' + sent + '</span></td>'
-      + '<td>' + (bullPct !== '—' ? '<span style="color:var(--green);font-weight:600">'+bullPct+'%</span>' : '—') + '</td>'
-      + '<td>' + (bearPct !== '—' ? '<span style="color:var(--red)">'+bearPct+'%</span>' : '—') + '</td>'
-      + '<td>' + (st.message_count || '—') + '</td>'
-      + '<td>' + (rd.mentions_7d != null ? rd.mentions_7d : '—') + '</td>'
-      + '<td>' + (fh.article_count_7d != null ? fh.article_count_7d : '—') + '</td>'
-      + '<td class="headline">' + (headline ? (url ? '<a href="'+url+'" target="_blank">'+escHtml(headline)+'</a>' : escHtml(headline)) : '—') + '</td>'
+      + '<td style="color:var(--green)">' + (pos || '—') + '</td>'
+      + '<td style="color:var(--red)">'   + (neg || '—') + '</td>'
+      + '<td>' + (articles || '—') + '</td>'
+      + '<td>' + headlineHtml + '</td>'
       + '</tr>';
   });
-  document.getElementById('sent-body').innerHTML = html || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">No tickers match filters</td></tr>';
+  document.getElementById('sent-body').innerHTML = html
+    || '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">No tickers match filters</td></tr>';
   document.getElementById('pg-info').textContent  = 'Page ' + (page + 1) + ' of ' + Math.max(1, Math.ceil(filtered.length / pageSize));
   document.getElementById('pg-prev').disabled = page === 0;
   document.getElementById('pg-next').disabled = (page + 1) * pageSize >= filtered.length;
-}
-
-function renderReddit() {
-  // Show top Reddit posts across all tickers
-  var posts = [];
-  allData.forEach(function(r) {
-    var rd = r.reddit || {};
-    if (rd.top_post_title && rd.top_post_score > 10) {
-      posts.push({ ticker: r.ticker, title: rd.top_post_title, score: rd.top_post_score });
-    }
-  });
-  if (!posts.length) return;
-  posts.sort(function(a, b) { return b.score - a.score; });
-  var html = posts.slice(0, 10).map(function(p) {
-    return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)22">'
-      + '<span style="font-weight:700;min-width:60px;color:var(--amber)">' + p.ticker + '</span>'
-      + '<span style="flex:1;color:var(--text);font-size:12px">' + escHtml(p.title) + '</span>'
-      + '<span style="color:var(--muted);font-size:11px">&#9650; ' + p.score + '</span>'
-      + '</div>';
-  }).join('');
-  document.getElementById('reddit-posts').innerHTML = html;
-  document.getElementById('reddit-section').style.display = 'block';
 }
 
 function prevPage() { if(page>0){page--;renderTable();} }

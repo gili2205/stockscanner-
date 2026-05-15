@@ -1,12 +1,18 @@
 """
 Sentiment Tracker
 =================
-Fetches social + news sentiment for scanner picks and pushes to Firebase.
+Fetches news sentiment for scanner picks from Finnhub and pushes to Firebase.
 
-Sources:
-  - StockTwits  : bullish/bearish ratio + message volume (no auth needed)
-  - Finnhub     : news sentiment + buzz score (API key required)
-  - Reddit      : mention count across r/wallstreetbets, r/stocks, r/investing
+What works on Finnhub free tier:
+  - /company-news  : article list + headlines (confirmed working)
+
+What does NOT work on free tier (removed):
+  - /news-sentiment : premium only
+  - StockTwits      : Cloudflare bot protection blocks scripts
+  - Reddit          : API requires OAuth, bot detection
+
+Sentiment is derived by keyword analysis across all fetched headlines.
+Buzz is derived from article volume (log-normalized to 0-100).
 
 Firebase paths:
   /scanner/sentiment/{TICKER}   : sentiment record per ticker
@@ -18,7 +24,7 @@ Usage:
     python sentiment.py --limit 50             # top N picks (default 100)
 """
 
-import os, time, logging, argparse
+import os, time, math, logging, argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -48,162 +54,92 @@ cred = credentials.Certificate(FIREBASE_CRED)
 firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_URL})
 sent_ref = db.reference("/scanner/sentiment")
 
-REDDIT_HEADERS = {"User-Agent": "StockSentimentBot/1.0"}
-SUBREDDITS     = ["wallstreetbets", "stocks", "investing"]
+# ── Sentiment keyword lists ────────────────────────────────────────────────────
+BULLISH_WORDS = {
+    "beat", "beats", "surge", "surges", "surging", "rally", "rallies", "record",
+    "strong", "strength", "growth", "upgrade", "upgraded", "outperform", "buy",
+    "profit", "profits", "gain", "gains", "soar", "soars", "soaring", "jump",
+    "jumps", "rise", "rises", "rising", "bullish", "exceed", "exceeds", "positive",
+    "boost", "boosted", "breakout", "momentum", "upside", "higher", "above",
+    "opportunity", "optimistic", "recovery", "recovers", "expands", "expansion",
+}
+
+BEARISH_WORDS = {
+    "miss", "misses", "missing", "decline", "declines", "declining", "drop",
+    "drops", "dropping", "fall", "falls", "falling", "weak", "weakness",
+    "downgrade", "downgraded", "underperform", "sell", "loss", "losses",
+    "crash", "crashes", "concern", "concerns", "warning", "warns", "cut",
+    "cuts", "reduce", "reduced", "below", "bearish", "disappoint", "disappoints",
+    "disappointing", "plunge", "plunges", "trouble", "risk", "risks", "fear",
+    "fears", "lawsuit", "investigation", "probe", "layoffs", "layoff", "debt",
+}
 
 
-# ── StockTwits ─────────────────────────────────────────────────────────────────
-def fetch_stocktwits(ticker):
+# ── Finnhub news ───────────────────────────────────────────────────────────────
+def fetch_finnhub_news(ticker, days=7):
+    """Fetch all articles from Finnhub for the last N days. Returns list of dicts."""
+    if not FINNHUB_KEY:
+        return []
     try:
+        today    = datetime.now().strftime("%Y-%m-%d")
+        from_dt  = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         r = requests.get(
-            f"https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json",
+            "https://finnhub.io/api/v1/company-news",
+            params={"symbol": ticker, "from": from_dt, "to": today, "token": FINNHUB_KEY},
             timeout=10
         )
         if r.status_code == 429:
-            log.warning(f"  StockTwits rate limit — sleeping 10s")
-            time.sleep(10)
-            return None
+            log.warning(f"  Finnhub rate limit — sleeping 15s")
+            time.sleep(15)
+            return []
         if r.status_code != 200:
-            return None
-        messages = r.json().get("messages", [])
-        bullish = sum(
-            1 for m in messages
-            if (m.get("entities") or {}).get("sentiment", {}) and
-               m["entities"]["sentiment"].get("basic") == "Bullish"
-        )
-        bearish = sum(
-            1 for m in messages
-            if (m.get("entities") or {}).get("sentiment", {}) and
-               m["entities"]["sentiment"].get("basic") == "Bearish"
-        )
-        total = bullish + bearish
-        return {
-            "message_count": len(messages),
-            "bullish_count": bullish,
-            "bearish_count": bearish,
-            "bullish_pct":   round(bullish / total * 100) if total > 0 else 50,
-            "bearish_pct":   round(bearish / total * 100) if total > 0 else 50,
-        }
-    except Exception as e:
-        log.warning(f"  StockTwits error for {ticker}: {e}")
-        return None
-
-
-# ── Finnhub ────────────────────────────────────────────────────────────────────
-def fetch_finnhub_news(ticker):
-    if not FINNHUB_KEY:
-        return None
-    try:
-        today    = datetime.now().strftime("%Y-%m-%d")
-        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-        r = requests.get(
-            f"https://finnhub.io/api/v1/company-news",
-            params={"symbol": ticker, "from": week_ago, "to": today, "token": FINNHUB_KEY},
-            timeout=10
-        )
-        if r.status_code != 200:
-            return None
-        articles = r.json()
-        latest = articles[0] if articles else {}
-        return {
-            "article_count_7d": len(articles),
-            "latest_headline":  latest.get("headline", ""),
-            "latest_url":       latest.get("url", ""),
-            "latest_source":    latest.get("source", ""),
-            "latest_ts":        latest.get("datetime", 0),
-        }
+            return []
+        return r.json() or []
     except Exception as e:
         log.warning(f"  Finnhub news error for {ticker}: {e}")
-        return None
+        return []
 
 
-def fetch_finnhub_sentiment(ticker):
-    if not FINNHUB_KEY:
-        return None
-    try:
-        r = requests.get(
-            "https://finnhub.io/api/v1/news-sentiment",
-            params={"symbol": ticker, "token": FINNHUB_KEY},
-            timeout=10
-        )
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        buzz = data.get("buzz", {})
-        sent = data.get("sentiment", {})
-        return {
-            "buzz_score":      round(buzz.get("buzz", 0), 3),
-            "articles_weekly": round(buzz.get("weeklyAverage", 0), 1),
-            "news_sentiment":  round(sent.get("bearerSentiment", 0), 3),
-            "positive_pct":    round((sent.get("positiveScore", 0)) * 100),
-            "negative_pct":    round((sent.get("negativeScore", 0)) * 100),
-        }
-    except Exception as e:
-        log.warning(f"  Finnhub sentiment error for {ticker}: {e}")
-        return None
+# ── Sentiment from headlines ───────────────────────────────────────────────────
+def analyze_sentiment(articles):
+    """
+    Count bullish / bearish keywords across all article headlines.
+    Returns: 'bullish' | 'bearish' | 'neutral', plus positive_count, negative_count.
+    """
+    pos = 0
+    neg = 0
+    for a in articles:
+        words = set((a.get("headline", "") + " " + a.get("summary", "")).lower().split())
+        pos += len(words & BULLISH_WORDS)
+        neg += len(words & BEARISH_WORDS)
+    total = pos + neg
+    if total == 0:
+        sentiment = "neutral"
+    elif pos / total >= 0.60:
+        sentiment = "bullish"
+    elif neg / total >= 0.60:
+        sentiment = "bearish"
+    else:
+        sentiment = "neutral"
+    return sentiment, pos, neg
 
 
-# ── Reddit ─────────────────────────────────────────────────────────────────────
-def fetch_reddit(ticker):
-    total_mentions = 0
-    top_title  = ""
-    top_score  = 0
-    try:
-        for sub in SUBREDDITS:
-            r = requests.get(
-                f"https://www.reddit.com/r/{sub}/search.json",
-                params={"q": ticker, "sort": "relevance", "t": "week",
-                        "limit": 10, "restrict_sr": 1},
-                headers=REDDIT_HEADERS,
-                timeout=10
-            )
-            if r.status_code == 200:
-                posts = r.json().get("data", {}).get("children", [])
-                total_mentions += len(posts)
-                for post in posts:
-                    d = post.get("data", {})
-                    if d.get("score", 0) > top_score:
-                        top_score = d["score"]
-                        top_title = d.get("title", "")
-            time.sleep(0.6)   # stay under Reddit rate limit
-        return {
-            "mentions_7d":    total_mentions,
-            "top_post_title": top_title,
-            "top_post_score": top_score,
-        }
-    except Exception as e:
-        log.warning(f"  Reddit error for {ticker}: {e}")
-        return None
-
-
-# ── Composite buzz score (0–100) ───────────────────────────────────────────────
-def compute_buzz(st, fh, rd):
-    score = 0.0
-    # StockTwits volume: up to 25 pts (30 msgs = max)
-    if st:
-        score += min(25, st.get("message_count", 0) * 25 / 30)
-        # Sentiment skew: bullish > 60 → bonus, < 40 → penalty
-        bull = st.get("bullish_pct", 50)
-        score += max(-10, min(10, (bull - 50) * 0.4))
-    # Finnhub buzz: 0-1 scale → up to 35 pts
-    if fh:
-        score += min(35, fh.get("buzz_score", 0) * 35)
-        # News sentiment bonus: up to 10 pts
-        score += max(-5, min(10, fh.get("news_sentiment", 0) * 20))
-    # Reddit mentions: up to 20 pts (10 mentions = max)
-    if rd:
-        score += min(20, rd.get("mentions_7d", 0) * 2)
-    return min(100, max(0, round(score)))
-
-
-def overall_sentiment(st, fh):
-    bull_pct   = (st or {}).get("bullish_pct", 50)
-    news_score = (fh or {}).get("news_sentiment", 0)
-    if bull_pct >= 60 and news_score >= 0.05:
-        return "bullish"
-    if bull_pct <= 40 or news_score <= -0.05:
-        return "bearish"
-    return "neutral"
+# ── Buzz score from article volume (log scale, 0–100) ─────────────────────────
+def compute_buzz(article_count):
+    """
+    Log-normalized buzz score:
+      0 articles  →  0
+      5 articles  → 27
+     10 articles  → 36
+     20 articles  → 46
+     50 articles  → 60
+    100 articles  → 72
+    244 articles  → 90
+    300+ articles → 100
+    """
+    if article_count <= 0:
+        return 0
+    return min(100, round(math.log(article_count + 1) / math.log(301) * 100))
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -212,38 +148,45 @@ def run(tickers):
     for i, ticker in enumerate(tickers):
         log.info(f"[{i+1}/{len(tickers)}] {ticker}")
 
-        st = fetch_stocktwits(ticker)
-        time.sleep(0.3)
+        articles = fetch_finnhub_news(ticker)
+        time.sleep(1.1)   # Finnhub free: 60 req/min
 
-        fh_news = fetch_finnhub_news(ticker)
-        time.sleep(1.1)          # Finnhub free tier: 60 req/min
-        fh_sent = fetch_finnhub_sentiment(ticker)
-        time.sleep(1.1)
+        count   = len(articles)
+        buzz    = compute_buzz(count)
+        sentiment, pos_count, neg_count = analyze_sentiment(articles)
 
-        rd = fetch_reddit(ticker)
-
-        fh = {}
-        if fh_news: fh.update(fh_news)
-        if fh_sent: fh.update(fh_sent)
-
-        buzz = compute_buzz(st, fh or None, rd)
-        sent = overall_sentiment(st, fh or None)
+        # Store top 3 headlines
+        headlines = [
+            {
+                "headline": a.get("headline", ""),
+                "url":      a.get("url", ""),
+                "source":   a.get("source", ""),
+                "ts":       a.get("datetime", 0),
+            }
+            for a in articles[:3]
+        ]
 
         record = {
-            "ticker":             ticker,
-            "updated_at":         datetime.now().isoformat(),
-            "buzz_score":         buzz,
-            "overall_sentiment":  sent,
-            "stocktwits":         st or {},
-            "finnhub":            fh or {},
-            "reddit":             rd or {},
+            "ticker":            ticker,
+            "updated_at":        datetime.now().isoformat(),
+            "buzz_score":        buzz,
+            "overall_sentiment": sentiment,
+            "article_count_7d":  count,
+            "positive_signals":  pos_count,
+            "negative_signals":  neg_count,
+            "headlines":         headlines,
+            # Latest headline (kept for backwards compat with dashboard badge)
+            "finnhub": {
+                "article_count_7d": count,
+                "latest_headline":  headlines[0]["headline"] if headlines else "",
+                "latest_url":       headlines[0]["url"]      if headlines else "",
+                "latest_source":    headlines[0]["source"]   if headlines else "",
+            }
         }
 
         sent_ref.child(ticker).set(record)
-        log.info(f"  → buzz={buzz}  sentiment={sent}  "
-                 f"ST={st and st['message_count']}msgs  "
-                 f"Reddit={rd and rd['mentions_7d']}mentions  "
-                 f"News={fh and fh.get('article_count_7d')}articles")
+        log.info(f"  → buzz={buzz}  sentiment={sentiment}  "
+                 f"articles={count}  pos={pos_count}  neg={neg_count}")
 
     sent_ref.child("_updated").set(datetime.now().isoformat())
     log.info("Done.")
@@ -262,10 +205,11 @@ if __name__ == "__main__":
         if not snap:
             log.error("No scanner data found in Firebase. Run live_scanner.py first.")
             exit(1)
-        # Sort by score descending, take top N
-        tickers = sorted(snap.keys(),
-                         key=lambda t: (snap[t] or {}).get("score", 0),
-                         reverse=True)[:args.limit]
+        tickers = sorted(
+            snap.keys(),
+            key=lambda t: (snap[t] or {}).get("score", 0),
+            reverse=True
+        )[:args.limit]
 
     if not tickers:
         log.error("No tickers to process.")
