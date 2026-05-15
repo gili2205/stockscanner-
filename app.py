@@ -2574,7 +2574,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       </div>
       <div class="ctrl-group">
         <label>Min buzz</label>
-        <input type="number" id="min-buzz" value="0" min="0" max="100" style="width:60px" onchange="render()">
+        <input type="number" id="min-buzz" value="1" min="0" max="100" style="width:60px" onchange="render()">
       </div>
       <div class="ctrl-group">
         <label>Search</label>
