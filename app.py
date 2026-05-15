@@ -282,6 +282,18 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
         <div class="fchip" onclick="resetAll()">&#10005; Show all</div>
       </div>
     </div>
+
+    <!-- Cross-tab signals -->
+    <div class="fgroup">
+      <div class="fgrouplabel">&#128279; Cross-tab Signals</div>
+      <div class="fchips">
+        <div class="fchip amber" data-group="signal" data-val="buzz"      onclick="toggleChip(this)"><span class="fcheck"></span>&#128293; High Buzz</div>
+        <div class="fchip green" data-group="signal" data-val="bullish"   onclick="toggleChip(this)"><span class="fcheck"></span>&#129412; Bullish news</div>
+        <div class="fchip blue"  data-group="signal" data-val="insider"   onclick="toggleChip(this)"><span class="fcheck"></span>&#128024; Insider buy</div>
+        <div class="fchip blue"  data-group="signal" data-val="hedge"     onclick="toggleChip(this)"><span class="fcheck"></span>&#127974; Hedge fund</div>
+        <div class="fchip" style="border-color:#f1c40f" data-group="signal" data-val="watchlist" onclick="toggleChip(this)"><span class="fcheck"></span>&#11088; Watchlist</div>
+      </div>
+    </div>
   </div>
 
   <div class="filteractions">
@@ -315,6 +327,7 @@ var CFG = {cfg};
 var connected = false, lastDataTime = null, watchdogTimer = null;
 var stockData = {{}}, allStockData = {{}}, prevData = {{}}, seen = {{}}, firstSeenData = {{}};
 var smartMoneyTickers = {{}};  // ticker → {{insider: bool, institution: bool}}
+var watchlistTickers  = {{}};  // ticker → true (user-starred from Sentiment/SmartMoney)
 
 // ── Layer weights (0–100 each, frontend re-blends scores) ────────────────────
 var layerWeights = {{ tech: 50, fund: 30, cat: 20 }};
@@ -381,7 +394,7 @@ function blendScore(s) {{
 
 // ── Filter state — which chips are ON per group ───────────────────────────────
 // Empty set = no filter for that group (show all)
-var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[] }};
+var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[], signal:[] }};
 
 function toggleChip(el) {{
   var group = el.dataset.group;
@@ -413,7 +426,7 @@ function setChip(group, val, on) {{
 
 function resetAll() {{
   document.querySelectorAll(".fchip[data-group]").forEach(function(c){{c.classList.remove("on");}});
-  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[] }};
+  activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[], signal:[] }};
   render();
 }}
 
@@ -527,6 +540,19 @@ function passesFilters(s) {{
     if (!activeFilters.timeframe.includes(tf2)) return false;
   }}
 
+  // Cross-tab signals — if any selected, ticker must match at least one
+  if (activeFilters.signal && activeFilters.signal.length > 0) {{
+    var sigOk = false;
+    var _sd = sentimentData[s.ticker];
+    var _sm = smartMoneyTickers[s.ticker];
+    if (activeFilters.signal.includes("buzz")      && _sd && (_sd.buzz_score||0) >= 50) sigOk = true;
+    if (activeFilters.signal.includes("bullish")   && _sd && _sd.overall_sentiment === "bullish") sigOk = true;
+    if (activeFilters.signal.includes("insider")   && _sm && _sm.insider)    sigOk = true;
+    if (activeFilters.signal.includes("hedge")     && _sm && _sm.institution) sigOk = true;
+    if (activeFilters.signal.includes("watchlist") && watchlistTickers[s.ticker]) sigOk = true;
+    if (!sigOk) return false;
+  }}
+
   return true;
 }}
 
@@ -539,6 +565,7 @@ function getActiveDesc() {{
   if (activeFilters.setup.length)    parts.push(activeFilters.setup.map(function(v){{return {{breakout:"Breakout",catalyst:"Catalyst",bullflag:"Bull Flag",prebreak:"Pre-breakout",earnings:"Earnings soon"}}[v]||v;}}).join(" or "));
   if (activeFilters.timeframe && activeFilters.timeframe.length) parts.push(activeFilters.timeframe.map(function(v){{return {{short:"Short (1-2w)",mid:"Mid (1-3m)",long:"Long (3m+)"}}[v]||v;}}).join(" or "));
   if (activeFilters.momentum.length) parts.push({{hot:"Hot +30%",strong:"Strong +15%",pos:"Positive",neg:"Pullback"}}[activeFilters.momentum[0]]||activeFilters.momentum[0]);
+  if (activeFilters.signal && activeFilters.signal.length) parts.push(activeFilters.signal.map(function(v){{return {{buzz:"High Buzz",bullish:"Bullish news",insider:"Insider buy",hedge:"Hedge fund",watchlist:"\u2b50 Watchlist"}}[v]||v;}}).join(" or "));
   if (!parts.length) return "Showing all stocks \u2014 select filters above to narrow down";
   return "Filters: " + parts.join(" \u00b7 ");
 }}
@@ -650,6 +677,11 @@ var sentimentData = {{}};
 fdb.ref('/scanner/sentiment').once('value', function(snap) {{
   var d = snap.val() || {{}};
   Object.keys(d).forEach(function(k) {{ if(k !== '_updated' && d[k]) sentimentData[k] = d[k]; }});
+}});
+
+// ── Load watchlist (user-starred tickers from Sentiment/SmartMoney tabs) ─────
+fdb.ref('/scanner/watchlist').on('value', function(snap) {{
+  watchlistTickers = snap.val() || {{}};
 }});
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -2169,6 +2201,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .search-box:focus{border-color:var(--blue);}
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
 .updated{font-size:11px;color:var(--muted);}
+.star-btn{background:none;border:none;cursor:pointer;font-size:16px;padding:2px 4px;opacity:.35;transition:opacity .15s,transform .1s;}
+.star-btn:hover{opacity:.75;}
+.star-btn.starred{opacity:1;transform:scale(1.15);}
 </style>
 <!--FB_CONFIG-->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -2221,6 +2256,7 @@ var fdb = firebase.database();
       <table class="sm-table">
         <thead>
           <tr>
+            <th>&#11088;</th>
             <th>Date</th>
             <th>Ticker</th>
             <th>Company</th>
@@ -2252,6 +2288,24 @@ var fdb = firebase.database();
 var insiderData      = [];
 var institutionData  = [];
 var scannerTickers   = new Set();
+var smWatchlist      = {};  // ticker → true
+
+function loadSMWatchlist(cb) {
+  fdb.ref('/scanner/watchlist').on('value', function(snap) {
+    smWatchlist = snap.val() || {};
+    renderInsiders();  // re-render to update star states
+    if (cb) { cb(); cb = null; }
+  });
+}
+function toggleSMWatch(ticker) {
+  var btn = document.getElementById('smstar-' + ticker);
+  if (smWatchlist[ticker]) {
+    fdb.ref('/scanner/watchlist/' + ticker).remove();
+  } else {
+    fdb.ref('/scanner/watchlist/' + ticker).set(true);
+  }
+  // UI updates automatically via on('value') listener above
+}
 
 function fmtVal(v) {
   if (!v) return '—';
@@ -2289,7 +2343,9 @@ function renderInsiders() {
   rows.forEach(function(r) {
     var match = scannerTickers.has(r.ticker);
     var rc = roleClass(r.title);
+    var starred = smWatchlist[r.ticker] ? ' starred' : '';
     html += '<tr>'
+      + '<td><button id="smstar-'+r.ticker+'" class="star-btn'+starred+'" onclick="toggleSMWatch(\''+r.ticker+'\')" title="Add to dashboard watchlist">&#11088;</button></td>'
       + '<td>' + (r.date||'—') + '</td>'
       + '<td><span class="ticker-badge">' + r.ticker + '</span>'
       + (match ? '<span class="scanner-match">📡 In scanner</span>' : '') + '</td>'
@@ -2303,7 +2359,7 @@ function renderInsiders() {
       + '</tr>';
   });
   document.getElementById('insider-body').innerHTML = html ||
-    '<tr><td colspan="9" style="color:var(--muted);text-align:center;padding:30px">No insider buys found matching your search.</td></tr>';
+    '<tr><td colspan="10" style="color:var(--muted);text-align:center;padding:30px">No insider buys found matching your search.</td></tr>';
 }
 
 function renderInstitutions() {
@@ -2314,11 +2370,14 @@ function renderInstitutions() {
     html += '<div class="fund-name">' + fund.fund + '</div>';
     html += '<div class="fund-meta">Filed: ' + (fund.filed||'—') + ' · Portfolio tracked: ' + fmtVal(fund.total_value) + '</div>';
     (fund.holdings||[]).forEach(function(h) {
-      var match = h.ticker && scannerTickers.has(h.ticker);
-      var barW  = Math.round(h.value / maxVal * 100);
+      var match    = h.ticker && scannerTickers.has(h.ticker);
+      var hStarred = h.ticker && smWatchlist[h.ticker] ? ' starred' : '';
+      var barW     = Math.round(h.value / maxVal * 100);
       html += '<div class="holding-row">';
-      html += '<div><div class="h-ticker">' + (h.ticker || '—') + (match ? ' 📡' : '') + '</div>'
-            + '<div class="h-bar" style="width:' + barW + '%"></div></div>';
+      html += '<div style="display:flex;align-items:center;gap:4px">'
+            + (h.ticker ? '<button id="smstar-'+h.ticker+'" class="star-btn'+hStarred+'" onclick="toggleSMWatch(\''+h.ticker+'\')" title="Add to watchlist">&#11088;</button>' : '')
+            + '<div><div class="h-ticker">' + (h.ticker || '—') + (match ? ' 📡' : '') + '</div>'
+            + '<div class="h-bar" style="width:' + barW + '%"></div></div></div>';
       html += '<div class="h-name">' + h.name + '</div>';
       html += '<div class="h-value">' + fmtVal(h.value) + '</div>';
       html += '</div>';
@@ -2335,6 +2394,8 @@ function loadData() {
     var stocks = snap.val() || {};
     scannerTickers = new Set(Object.keys(stocks));
   });
+  // Load watchlist (live subscription so star states update in real time)
+  loadSMWatchlist();
 
   fdb.ref('scanner/smart_money').once('value', function(snap) {
     var data = snap.val();
@@ -2422,6 +2483,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sort-btn{background:var(--bg3);color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;}
 .sort-btn.active{background:var(--amber);color:#fff;border-color:var(--amber);}
 .updated{font-size:11px;color:var(--muted);margin-left:auto;}
+.star-btn{background:none;border:none;cursor:pointer;font-size:16px;padding:2px 4px;opacity:.35;transition:opacity .15s,transform .1s;}
+.star-btn:hover{opacity:.75;}
+.star-btn.starred{opacity:1;transform:scale(1.15);}
 </style>
 </head>
 <body>
@@ -2496,6 +2560,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <table class="sm-table">
         <thead>
           <tr>
+            <th>&#11088;</th>
             <th onclick="setSort('abc')">Ticker</th>
             <th onclick="setSort('buzz')">Buzz &#9650;</th>
             <th onclick="setSort('sent')">Sentiment</th>
@@ -2529,8 +2594,30 @@ var filtered = [];
 var sortCol  = 'buzz';
 var page     = 0;
 var pageSize = 50;
+var watchlist = {};  // ticker → true
+
+// ── Watchlist helpers ─────────────────────────────────────────────────────────
+function loadWatchlist(cb) {
+  fdb.ref('/scanner/watchlist').once('value', function(snap) {
+    watchlist = snap.val() || {};
+    if (cb) cb();
+  });
+}
+function toggleWatch(ticker) {
+  var btn = document.getElementById('star-' + ticker);
+  if (watchlist[ticker]) {
+    delete watchlist[ticker];
+    fdb.ref('/scanner/watchlist/' + ticker).remove();
+    if (btn) btn.classList.remove('starred');
+  } else {
+    watchlist[ticker] = true;
+    fdb.ref('/scanner/watchlist/' + ticker).set(true);
+    if (btn) btn.classList.add('starred');
+  }
+}
 
 function load() {
+  loadWatchlist(function() {
   fdb.ref('/scanner/sentiment').once('value', function(snap) {
     var d = snap.val() || {};
     var updated = d._updated || '';
@@ -2553,6 +2640,7 @@ function load() {
     document.getElementById('loading').innerHTML =
       '<div class="error">Firebase error: ' + err.message + '</div>';
   });
+  }); // end loadWatchlist callback
 }
 
 function getFiltered() {
@@ -2622,7 +2710,9 @@ function renderTable() {
         : '<div class="headline">'+txt+'</div>';
     }).join('') || '—';
 
+    var starred = watchlist[r.ticker] ? ' starred' : '';
     html += '<tr>'
+      + '<td><button id="star-'+r.ticker+'" class="star-btn'+starred+'" onclick="toggleWatch(\''+r.ticker+'\')" title="Add to dashboard watchlist">&#11088;</button></td>'
       + '<td><span class="ticker-badge">' + r.ticker + '</span></td>'
       + '<td>'
         + '<div class="buzz-bar"><div class="buzz-fill" style="width:'+buzz+'%;background:'+buzzColor+'"></div></div>'
@@ -2636,7 +2726,7 @@ function renderTable() {
       + '</tr>';
   });
   document.getElementById('sent-body').innerHTML = html
-    || '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">No tickers match filters</td></tr>';
+    || '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">No tickers match filters</td></tr>';
   document.getElementById('pg-info').textContent  = 'Page ' + (page + 1) + ' of ' + Math.max(1, Math.ceil(filtered.length / pageSize));
   document.getElementById('pg-prev').disabled = page === 0;
   document.getElementById('pg-next').disabled = (page + 1) * pageSize >= filtered.length;
