@@ -117,34 +117,62 @@ def _download_one_batch(batch, start_str, end_str):
     )
 
 
+PRICE_CACHE_PATH = Path("/home/scanner/.price_cache.pkl")
+PRICE_CACHE_MAX_AGE_HOURS = 12
+
+
 def download_prices(tickers: list, start: date, end: date) -> dict:
-    """Download OHLCV for all tickers. Returns {ticker: DataFrame}."""
-    log.info(f"Downloading price data for {len(tickers)} tickers: {start} to {end}...")
+    """
+    Download OHLCV for all tickers. Returns {ticker: DataFrame}.
+    Caches result to disk so VM restarts don't trigger a full re-download.
+    Cache is invalidated after 12 hours or if the date range changes.
+    """
+    import pickle
 
     start_str = str(start - timedelta(days=90))
     end_str   = str(end   + timedelta(days=5))
+    cache_key = f"{len(tickers)}_{start_str}_{end_str}"
 
-    # Download in batches of 200 to avoid yfinance memory/timeout issues.
-    # Each batch runs in its own thread with a hard 120-second wall-clock timeout
-    # so a frozen batch never stalls the whole run.
+    # ── Try loading from disk cache ───────────────────────────────────────────
+    if PRICE_CACHE_PATH.exists():
+        try:
+            age_hours = (time.time() - PRICE_CACHE_PATH.stat().st_mtime) / 3600
+            if age_hours < PRICE_CACHE_MAX_AGE_HOURS:
+                with open(PRICE_CACHE_PATH, "rb") as f:
+                    cached = pickle.load(f)
+                if cached.get("key") == cache_key:
+                    result = cached["data"]
+                    log.info(f"Loaded {len(result)} tickers from disk cache "
+                             f"(age: {age_hours:.1f}h)")
+                    return result
+                else:
+                    log.info("Cache key mismatch — re-downloading")
+            else:
+                log.info(f"Cache expired ({age_hours:.1f}h) — re-downloading")
+        except Exception as e:
+            log.warning(f"Cache load failed: {e} — re-downloading")
+
+    # ── Full download ─────────────────────────────────────────────────────────
+    log.info(f"Downloading price data for {len(tickers)} tickers: {start} to {end}...")
+
     result = {}
-    batch_size = 200
+    batch_size = 50   # smaller batches = less likely to timeout
     batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
 
     for i, batch in enumerate(batches):
         log.info(f"  Batch {i+1}/{len(batches)} ({len(batch)} tickers)...")
         raw = None
-        for attempt in range(1, 4):          # up to 3 attempts per batch
+        for attempt in range(1, 4):
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                     future = ex.submit(_download_one_batch, batch, start_str, end_str)
-                    raw = future.result(timeout=120)   # hard 120-second deadline
-                break                                  # success → stop retrying
+                    raw = future.result(timeout=180)   # 180s per smaller batch
+                break
             except concurrent.futures.TimeoutError:
                 log.warning(f"  Batch {i+1} attempt {attempt} timed out, retrying…")
             except Exception as e:
                 log.warning(f"  Batch {i+1} attempt {attempt} error: {e}, retrying…")
-            time.sleep(3)
+            time.sleep(5)
 
         if raw is None or (hasattr(raw, 'empty') and raw.empty):
             log.warning(f"  Batch {i+1} gave no data after 3 attempts, skipping")
@@ -160,13 +188,21 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
                 except Exception:
                     pass
         else:
-            # Single ticker returned
             if len(raw) >= 30:
                 result[batch[0]] = raw
 
-        time.sleep(1)  # polite rate-limit between batches
+        time.sleep(1)
 
     log.info(f"Downloaded {len(result)} tickers with sufficient history")
+
+    # ── Save to disk cache ────────────────────────────────────────────────────
+    try:
+        import pickle
+        with open(PRICE_CACHE_PATH, "wb") as f:
+            pickle.dump({"key": cache_key, "data": result}, f)
+        log.info(f"Price data cached to {PRICE_CACHE_PATH}")
+    except Exception as e:
+        log.warning(f"Cache save failed: {e}")
     return result
 
 
