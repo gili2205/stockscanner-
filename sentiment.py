@@ -74,6 +74,18 @@ BEARISH_WORDS = {
     "fears", "lawsuit", "investigation", "probe", "layoffs", "layoff", "debt",
 }
 
+# ── Source credibility weights ─────────────────────────────────────────────────
+# SeekingAlpha/Benzinga are explicit buy-sell focused → higher weight
+# General news (Yahoo, CNBC) is broader → lower weight
+SOURCE_WEIGHTS = {
+    "SeekingAlpha": 2.5,   # "Strong Buy", "Sell Now" — very explicit
+    "Benzinga":     2.0,   # real-time, analyst-focused
+    "ChartMill":    1.8,   # technical + fundamental ratings
+    "CNBC":         1.3,   # credible but more neutral/macro
+    "Yahoo":        1.0,   # broad aggregator
+    "Finnhub":      1.0,   # default
+}
+
 
 # ── Finnhub news ───────────────────────────────────────────────────────────────
 def fetch_finnhub_news(ticker, days=7):
@@ -103,15 +115,17 @@ def fetch_finnhub_news(ticker, days=7):
 # ── Sentiment from headlines ───────────────────────────────────────────────────
 def analyze_sentiment(articles):
     """
-    Count bullish / bearish keywords across all article headlines.
-    Returns: 'bullish' | 'bearish' | 'neutral', plus positive_count, negative_count.
+    Keyword analysis across all article headlines, weighted by source credibility.
+    SeekingAlpha/Benzinga signals count 2-2.5x more than generic news.
+    Returns: 'bullish' | 'bearish' | 'neutral', plus weighted pos/neg scores.
     """
-    pos = 0
-    neg = 0
+    pos = 0.0
+    neg = 0.0
     for a in articles:
-        words = set((a.get("headline", "") + " " + a.get("summary", "")).lower().split())
-        pos += len(words & BULLISH_WORDS)
-        neg += len(words & BEARISH_WORDS)
+        weight = SOURCE_WEIGHTS.get(a.get("source", ""), 1.0)
+        words  = set((a.get("headline", "") + " " + a.get("summary", "")).lower().split())
+        pos   += len(words & BULLISH_WORDS) * weight
+        neg   += len(words & BEARISH_WORDS) * weight
     total = pos + neg
     if total == 0:
         sentiment = "neutral"
@@ -121,7 +135,7 @@ def analyze_sentiment(articles):
         sentiment = "bearish"
     else:
         sentiment = "neutral"
-    return sentiment, pos, neg
+    return sentiment, round(pos, 1), round(neg, 1)
 
 
 # ── Buzz score from article volume (log scale, 0–100) ─────────────────────────
