@@ -139,7 +139,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <p>Scans 2,000+ stocks &middot; Multi-filter &middot; P/E &middot; RSI &middot; Analyst Target &middot; Updates every 60s</p>
   </div>
   <div class="hright">
-    <div class="nav-pills"><a class="nav-pill active" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
+    <div class="nav-pills"><a class="nav-pill active" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/sentiment">&#128293; Sentiment</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
     <span class="ver" id="verspan">{ver}</span>
     <span class="regime closed" id="regime">&#9679; Connecting...</span>
   </div>
@@ -639,12 +639,17 @@ startWatchdog();
 // ── Load smart money tickers for badge display ────────────────────────────────
 fdb.ref('/scanner/smart_money').once('value', function(snap) {{
   var d = snap.val() || {{}};
-  // Insider buys
-  (d.insiders || []).forEach(function(b) {{ if(b.ticker) smartMoneyTickers[b.ticker] = smartMoneyTickers[b.ticker] || {{}}; if(b.ticker) smartMoneyTickers[b.ticker].insider = true; }});
-  // Institutional holdings
+  (d.insiders || []).forEach(function(b) {{ if(b.ticker) {{ smartMoneyTickers[b.ticker] = smartMoneyTickers[b.ticker] || {{}}; smartMoneyTickers[b.ticker].insider = true; }} }});
   (d.institutions || []).forEach(function(fund) {{
     (fund.holdings || []).forEach(function(h) {{ if(h.ticker) {{ smartMoneyTickers[h.ticker] = smartMoneyTickers[h.ticker] || {{}}; smartMoneyTickers[h.ticker].institution = true; }} }});
   }});
+}});
+
+// ── Load sentiment data for buzz badge ───────────────────────────────────────
+var sentimentData = {{}};
+fdb.ref('/scanner/sentiment').once('value', function(snap) {{
+  var d = snap.val() || {{}};
+  Object.keys(d).forEach(function(k) {{ if(k !== '_updated' && d[k]) sentimentData[k] = d[k]; }});
 }});
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -850,7 +855,18 @@ function makeCard(s, rank) {{
   h += '<div>';
   var sm = smartMoneyTickers[s.ticker];
   var smBadge = sm ? '<span title="'+(sm.insider&&sm.institution?'Insider buy + hedge fund holding':sm.insider?'Insider buy':'Hedge fund holding')+'" style="font-size:13px;margin-left:6px;cursor:help">&#127968;</span>' : '';
-  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+smBadge+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
+  var sd = sentimentData[s.ticker];
+  var buzzBadge = '';
+  if (sd) {{
+    var buzz = sd.buzz_score || 0;
+    var sent = sd.overall_sentiment || 'neutral';
+    if (buzz >= 60) {{
+      var icon = sent === 'bullish' ? '&#128293;' : sent === 'bearish' ? '&#128308;' : '&#128293;';
+      var tip  = 'Buzz: '+buzz+'/100 · '+sent+' · StockTwits: '+((sd.stocktwits||{{}}).message_count||0)+' msgs · Reddit: '+((sd.reddit||{{}}).mentions_7d||0)+' mentions';
+      buzzBadge = '<span title="'+tip+'" style="font-size:13px;margin-left:4px;cursor:help">'+icon+'</span>';
+    }}
+  }}
+  h += '<div style="font-size:20px;font-weight:700">'+s.ticker+smBadge+buzzBadge+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
   h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
@@ -1447,7 +1463,7 @@ var fdb = firebase.database();
     <p>Historical performance of scanner picks — does the logic actually find winners?</p>
   </div>
   <div class="hright">
-    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
+    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill active" href="/analytics">&#128200; Analytics</a><a class="nav-pill" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/sentiment">&#128293; Sentiment</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
     <span class="ver"><!--VERSION--></span>
     <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
   </div>
@@ -2170,7 +2186,7 @@ var fdb = firebase.database();
     <p>Insider transactions &amp; hedge fund holdings — see what big players are buying</p>
   </div>
   <div class="hright">
-    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
+    <div class="nav-pills"><a class="nav-pill" href="/">&#128202; Dashboard</a><a class="nav-pill" href="/analytics">&#128200; Analytics</a><a class="nav-pill active" href="/smart-money">&#127974; Smart Money</a><a class="nav-pill" href="/sentiment">&#128293; Sentiment</a><a class="nav-pill" href="/optimizer">&#128202; Optimizer</a></div>
     <span class="ver"><!--VERSION--></span>
     <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
   </div>
@@ -2348,6 +2364,301 @@ function loadData() {
 }
 
 loadData();
+</script>
+</body>
+</html>"""
+
+
+@app.route('/sentiment')
+def sentiment():
+    cfg_tag = '<script id="fb-cfg" type="application/json">' + json.dumps(FIREBASE_CONFIG) + '</script>'
+    return SENTIMENT_HTML.replace('<!--FB_CONFIG-->', cfg_tag).replace('<!--VERSION-->', VERSION)
+
+
+SENTIMENT_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sentiment Tracker</title>
+<style>
+:root{--bg:#0f1117;--bg2:#1a1d26;--bg3:#22263a;--text:#e8eaf0;--muted:#8892a4;--border:#2a2f42;--green:#27ae60;--amber:#e67e22;--blue:#3498db;--red:#e74c3c;--purple:#9b59b6;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;position:sticky;top:0;z-index:100;}
+.header h1{font-size:16px;font-weight:600;}
+.hright{display:flex;align-items:center;gap:10px;}
+.ver{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:monospace;}
+.nav-pills{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.nav-pill{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--muted);transition:all .15s;background:var(--bg3);}
+.nav-pill:hover{color:var(--text);border-color:var(--blue);}
+.nav-pill.active{background:#e67e22;color:#fff;border-color:#e67e22;}
+.regime{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid;}
+.regime.open{background:#1a3d2b;color:#27ae60;border-color:#27ae6055;}
+.regime.closed{background:var(--bg3);color:var(--muted);border-color:var(--border);}
+.page{padding:24px;max-width:1400px;margin:0 auto;}
+.loading{text-align:center;padding:60px;color:var(--muted);font-size:15px;}
+.error{color:var(--red);padding:20px;text-align:center;}
+.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 16px;}
+.ctrl-group{display:flex;flex-direction:column;gap:3px;}
+.ctrl-group label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+.ctrl-group select,.ctrl-group input{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;outline:none;}
+.section{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:24px;}
+.section h2{font-size:15px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.sm-table{width:100%;border-collapse:collapse;font-size:12px;}
+.sm-table th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none;}
+.sm-table th:hover{color:var(--text);}
+.sm-table td{padding:9px 10px;border-bottom:1px solid var(--border)22;vertical-align:middle;}
+.sm-table tr:hover td{background:#ffffff05;}
+.sm-table tr:last-child td{border-bottom:none;}
+.ticker-badge{font-size:13px;font-weight:700;}
+.buzz-bar{width:80px;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px;}
+.buzz-fill{height:100%;border-radius:3px;}
+.sent-bull{color:var(--green);font-weight:600;}
+.sent-bear{color:var(--red);font-weight:600;}
+.sent-neut{color:var(--muted);font-weight:600;}
+.headline{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px;}
+.headline a{color:var(--blue);text-decoration:none;}
+.headline a:hover{text-decoration:underline;}
+.sort-btn{background:var(--bg3);color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;}
+.sort-btn.active{background:var(--amber);color:#fff;border-color:var(--amber);}
+.updated{font-size:11px;color:var(--muted);margin-left:auto;}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>&#128293; Sentiment Tracker</h1>
+    <p style="font-size:11px;color:var(--muted);margin-top:2px">Social buzz · News sentiment · Reddit mentions</p>
+  </div>
+  <div class="hright">
+    <div class="nav-pills">
+      <a class="nav-pill" href="/">&#128202; Dashboard</a>
+      <a class="nav-pill" href="/analytics">&#128200; Analytics</a>
+      <a class="nav-pill" href="/smart-money">&#127974; Smart Money</a>
+      <a class="nav-pill active" href="/sentiment">&#128293; Sentiment</a>
+      <a class="nav-pill" href="/optimizer">&#128202; Optimizer</a>
+    </div>
+    <span class="ver"><!--VERSION--></span>
+    <span class="regime closed" id="regime-badge">&#9675; Checking...</span>
+  </div>
+</div>
+<script>
+(function(){
+  var n=new Date(),h=(n.getUTCHours()-4+24)%24,m=n.getUTCMinutes(),d=n.getUTCDay(),t=h*60+m;
+  var el=document.getElementById('regime-badge');
+  if(d===0||d===6){el.textContent='○ Market Closed';el.className='regime closed';}
+  else if(t>=570&&t<960){el.textContent='● Market Open';el.className='regime open';}
+  else{el.textContent='○ Market Closed';el.className='regime closed';}
+})();
+</script>
+<!--FB_CONFIG-->
+
+<div class="page">
+  <div id="loading" class="loading">&#9203; Loading sentiment data...</div>
+  <div id="content" style="display:none">
+
+    <div class="controls">
+      <div class="ctrl-group">
+        <label>Sentiment</label>
+        <select id="sent-filter" onchange="render()">
+          <option value="all">All</option>
+          <option value="bullish">Bullish</option>
+          <option value="bearish">Bearish</option>
+          <option value="neutral">Neutral</option>
+        </select>
+      </div>
+      <div class="ctrl-group">
+        <label>Min buzz</label>
+        <input type="number" id="min-buzz" value="0" min="0" max="100" style="width:60px" onchange="render()">
+      </div>
+      <div class="ctrl-group">
+        <label>Search</label>
+        <input type="text" id="ticker-search" placeholder="AAPL" style="width:90px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();render()">
+      </div>
+      <div style="display:flex;gap:6px;align-items:flex-end;">
+        <button class="sort-btn active" id="sort-buzz"   onclick="setSort('buzz')">&#128293; Buzz</button>
+        <button class="sort-btn"        id="sort-bull"   onclick="setSort('bull')">&#129432; Bullish %</button>
+        <button class="sort-btn"        id="sort-reddit" onclick="setSort('reddit')">&#128172; Reddit</button>
+        <button class="sort-btn"        id="sort-news"   onclick="setSort('news')">&#128240; News</button>
+        <button class="sort-btn"        id="sort-abc"    onclick="setSort('abc')">&#128288; A–Z</button>
+      </div>
+      <span class="updated" id="updated-ts"></span>
+    </div>
+
+    <div class="section">
+      <h2>&#128293; Social &amp; News Sentiment
+        <span style="font-size:11px;color:var(--muted);font-weight:400" id="count-label"></span>
+      </h2>
+      <table class="sm-table">
+        <thead>
+          <tr>
+            <th onclick="setSort('abc')">Ticker</th>
+            <th onclick="setSort('buzz')">Buzz &#9650;</th>
+            <th onclick="setSort('bull')">Sentiment</th>
+            <th onclick="setSort('bull')">Bullish %</th>
+            <th onclick="setSort('bear')">Bearish %</th>
+            <th>StockTwits msgs</th>
+            <th onclick="setSort('reddit')">Reddit 7d</th>
+            <th onclick="setSort('news')">News 7d</th>
+            <th>Latest headline</th>
+          </tr>
+        </thead>
+        <tbody id="sent-body"></tbody>
+      </table>
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;">
+        <button id="pg-prev" onclick="prevPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 14px;cursor:pointer;font-size:12px;" disabled>&#8592; Prev</button>
+        <span id="pg-info" style="font-size:12px;color:var(--muted)"></span>
+        <button id="pg-next" onclick="nextPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 14px;cursor:pointer;font-size:12px;">Next &#8594;</button>
+      </div>
+    </div>
+
+    <div class="section" id="reddit-section" style="display:none">
+      <h2>&#128172; Top Reddit Discussions</h2>
+      <div id="reddit-posts"></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+var fbCfg = JSON.parse(document.getElementById('fb-cfg').textContent);
+firebase.initializeApp(fbCfg);
+var fdb = firebase.database();
+
+var allData = [];
+var filtered = [];
+var sortCol  = 'buzz';
+var page     = 0;
+var pageSize = 50;
+
+function load() {
+  fdb.ref('/scanner/sentiment').once('value', function(snap) {
+    var d = snap.val() || {};
+    var updated = d._updated || '';
+    if (updated) {
+      document.getElementById('updated-ts').textContent =
+        'Updated: ' + new Date(updated).toLocaleString();
+    }
+    allData = Object.values(d).filter(function(r) { return r && r.ticker; });
+    if (!allData.length) {
+      document.getElementById('loading').innerHTML =
+        '<div class="error">No sentiment data yet.<br><br>'
+        + '<code style="font-size:12px;color:var(--muted)">python sentiment.py</code><br>'
+        + '<span style="font-size:12px;color:var(--muted)">Run on the VM to populate sentiment data.</span></div>';
+      return;
+    }
+    render();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+    renderReddit();
+  }, function(err) {
+    document.getElementById('loading').innerHTML =
+      '<div class="error">Firebase error: ' + err.message + '</div>';
+  });
+}
+
+function getFiltered() {
+  var sentF  = document.getElementById('sent-filter').value;
+  var minBuzz= parseInt(document.getElementById('min-buzz').value) || 0;
+  var search = (document.getElementById('ticker-search').value || '').trim().toUpperCase();
+  return allData.filter(function(r) {
+    if (sentF !== 'all' && r.overall_sentiment !== sentF) return false;
+    if ((r.buzz_score || 0) < minBuzz) return false;
+    if (search && r.ticker.indexOf(search) === -1) return false;
+    return true;
+  });
+}
+
+function setSort(col) {
+  sortCol = col;
+  ['buzz','bull','reddit','news','abc'].forEach(function(c) {
+    document.getElementById('sort-'+c).classList.toggle('active', c === col);
+  });
+  page = 0;
+  render();
+}
+
+function render() {
+  filtered = getFiltered();
+  filtered.sort(function(a, b) {
+    if (sortCol === 'abc')    return a.ticker < b.ticker ? -1 : 1;
+    if (sortCol === 'buzz')   return (b.buzz_score||0) - (a.buzz_score||0);
+    if (sortCol === 'bull')   return ((b.stocktwits||{}).bullish_pct||50) - ((a.stocktwits||{}).bullish_pct||50);
+    if (sortCol === 'bear')   return ((a.stocktwits||{}).bullish_pct||50) - ((b.stocktwits||{}).bullish_pct||50);
+    if (sortCol === 'reddit') return ((b.reddit||{}).mentions_7d||0) - ((a.reddit||{}).mentions_7d||0);
+    if (sortCol === 'news')   return ((b.finnhub||{}).article_count_7d||0) - ((a.finnhub||{}).article_count_7d||0);
+    return 0;
+  });
+  document.getElementById('count-label').textContent = '— ' + filtered.length + ' tickers';
+  renderTable();
+}
+
+function renderTable() {
+  var rows  = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  var html  = '';
+  rows.forEach(function(r) {
+    var st    = r.stocktwits || {};
+    var fh    = r.finnhub    || {};
+    var rd    = r.reddit     || {};
+    var buzz  = r.buzz_score || 0;
+    var sent  = r.overall_sentiment || 'neutral';
+    var sentClass = sent === 'bullish' ? 'sent-bull' : sent === 'bearish' ? 'sent-bear' : 'sent-neut';
+    var sentIcon  = sent === 'bullish' ? '&#129412;' : sent === 'bearish' ? '&#128308;' : '&#9898;';
+    var buzzColor = buzz >= 70 ? '#e67e22' : buzz >= 40 ? '#3498db' : '#8892a4';
+    var headline  = fh.latest_headline || '';
+    var url       = fh.latest_url || '';
+    var bullPct   = st.bullish_pct != null ? st.bullish_pct : '—';
+    var bearPct   = st.bearish_pct != null ? st.bearish_pct : '—';
+    html += '<tr>'
+      + '<td><span class="ticker-badge">' + r.ticker + '</span></td>'
+      + '<td>'
+        + '<div class="buzz-bar"><div class="buzz-fill" style="width:'+buzz+'%;background:'+buzzColor+'"></div></div>'
+        + '<strong style="color:'+buzzColor+'">' + buzz + '</strong>'
+      + '</td>'
+      + '<td><span class="'+sentClass+'">' + sentIcon + ' ' + sent + '</span></td>'
+      + '<td>' + (bullPct !== '—' ? '<span style="color:var(--green);font-weight:600">'+bullPct+'%</span>' : '—') + '</td>'
+      + '<td>' + (bearPct !== '—' ? '<span style="color:var(--red)">'+bearPct+'%</span>' : '—') + '</td>'
+      + '<td>' + (st.message_count || '—') + '</td>'
+      + '<td>' + (rd.mentions_7d != null ? rd.mentions_7d : '—') + '</td>'
+      + '<td>' + (fh.article_count_7d != null ? fh.article_count_7d : '—') + '</td>'
+      + '<td class="headline">' + (headline ? (url ? '<a href="'+url+'" target="_blank">'+escHtml(headline)+'</a>' : escHtml(headline)) : '—') + '</td>'
+      + '</tr>';
+  });
+  document.getElementById('sent-body').innerHTML = html || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">No tickers match filters</td></tr>';
+  document.getElementById('pg-info').textContent  = 'Page ' + (page + 1) + ' of ' + Math.max(1, Math.ceil(filtered.length / pageSize));
+  document.getElementById('pg-prev').disabled = page === 0;
+  document.getElementById('pg-next').disabled = (page + 1) * pageSize >= filtered.length;
+}
+
+function renderReddit() {
+  // Show top Reddit posts across all tickers
+  var posts = [];
+  allData.forEach(function(r) {
+    var rd = r.reddit || {};
+    if (rd.top_post_title && rd.top_post_score > 10) {
+      posts.push({ ticker: r.ticker, title: rd.top_post_title, score: rd.top_post_score });
+    }
+  });
+  if (!posts.length) return;
+  posts.sort(function(a, b) { return b.score - a.score; });
+  var html = posts.slice(0, 10).map(function(p) {
+    return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)22">'
+      + '<span style="font-weight:700;min-width:60px;color:var(--amber)">' + p.ticker + '</span>'
+      + '<span style="flex:1;color:var(--text);font-size:12px">' + escHtml(p.title) + '</span>'
+      + '<span style="color:var(--muted);font-size:11px">&#9650; ' + p.score + '</span>'
+      + '</div>';
+  }).join('');
+  document.getElementById('reddit-posts').innerHTML = html;
+  document.getElementById('reddit-section').style.display = 'block';
+}
+
+function prevPage() { if(page>0){page--;renderTable();} }
+function nextPage() { if((page+1)*pageSize<filtered.length){page++;renderTable();} }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+load();
 </script>
 </body>
 </html>"""
@@ -2595,6 +2906,7 @@ code{background:var(--bg);padding:2px 6px;border-radius:4px;font-family:monospac
       <a class="nav-pill" href="/">&#128202; Dashboard</a>
       <a class="nav-pill" href="/analytics">&#128200; Analytics</a>
       <a class="nav-pill" href="/smart-money">&#127974; Smart Money</a>
+      <a class="nav-pill" href="/sentiment">&#128293; Sentiment</a>
       <a class="nav-pill active" href="/optimizer">&#128202; Optimizer</a>
     </div>
     <span class="ver"><!--VERSION--></span>
