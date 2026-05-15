@@ -2388,7 +2388,7 @@ function renderInsiders() {
     var rc = roleClass(r.title);
     var starred = smWatchlist[r.ticker] ? ' starred' : '';
     html += '<tr>'
-      + '<td><button id="smstar-'+r.ticker+'" class="star-btn'+starred+'" onclick="toggleSMWatch(\''+r.ticker+'\')" title="Add to dashboard watchlist">&#11088;</button></td>'
+      + '<td><button id="smstar-'+r.ticker+'" class="star-btn'+starred+'" data-ticker="'+r.ticker+'" onclick="toggleSMWatch(this.dataset.ticker)" title="Add to dashboard watchlist">&#11088;</button></td>'
       + '<td>' + (r.date||'—') + '</td>'
       + '<td><span class="ticker-badge">' + r.ticker + '</span>'
       + (match ? '<span class="scanner-match">📡 In scanner</span>' : '') + '</td>'
@@ -2418,7 +2418,7 @@ function renderInstitutions() {
       var barW     = Math.round(h.value / maxVal * 100);
       html += '<div class="holding-row">';
       html += '<div style="display:flex;align-items:center;gap:4px">'
-            + (h.ticker ? '<button id="smstar-'+h.ticker+'" class="star-btn'+hStarred+'" onclick="toggleSMWatch(\''+h.ticker+'\')" title="Add to watchlist">&#11088;</button>' : '')
+            + (h.ticker ? '<button id="smstar-'+h.ticker+'" class="star-btn'+hStarred+'" data-ticker="'+h.ticker+'" onclick="toggleSMWatch(this.dataset.ticker)" title="Add to watchlist">&#11088;</button>' : '')
             + '<div><div class="h-ticker">' + (h.ticker || '—') + (match ? ' 📡' : '') + '</div>'
             + '<div class="h-bar" style="width:' + barW + '%"></div></div></div>';
       html += '<div class="h-name">' + h.name + '</div>';
@@ -2777,7 +2777,7 @@ function renderTable() {
 
     var starred = watchlist[r.ticker] ? ' starred' : '';
     html += '<tr>'
-      + '<td><button id="star-'+r.ticker+'" class="star-btn'+starred+'" onclick="toggleWatch(\''+r.ticker+'\')" title="Add to dashboard watchlist">&#11088;</button></td>'
+      + '<td><button id="star-'+r.ticker+'" class="star-btn'+starred+'" data-ticker="'+r.ticker+'" onclick="toggleWatch(this.dataset.ticker)" title="Add to dashboard watchlist">&#11088;</button></td>'
       + '<td><span class="ticker-badge">' + r.ticker + '</span></td>'
       + '<td>'
         + '<div class="buzz-bar"><div class="buzz-fill" style="width:'+buzz+'%;background:'+buzzColor+'"></div></div>'
