@@ -1,15 +1,21 @@
 """
 Sentiment Tracker
 =================
-Fetches news sentiment for scanner picks from Finnhub and pushes to Firebase.
+Fetches news sentiment for an expanded universe and pushes to Firebase.
+
+Universe (merged, deduplicated):
+  1. All current scanner picks  (/scanner/all_stocks)
+  2. Recent IPOs                (Finnhub /calendar/ipo, last 30 days)
+  3. Recent history picks       (/scanner/history, last 14 days)
 
 What works on Finnhub free tier:
-  - /company-news  : article list + headlines (confirmed working)
+  - /company-news    : article list + headlines (confirmed working)
+  - /calendar/ipo    : recent IPOs (confirmed working)
 
 What does NOT work on free tier (removed):
-  - /news-sentiment : premium only
-  - StockTwits      : Cloudflare bot protection blocks scripts
-  - Reddit          : API requires OAuth, bot detection
+  - /news-sentiment  : premium only
+  - StockTwits       : Cloudflare bot protection blocks scripts
+  - Reddit           : API requires OAuth, bot detection
 
 Sentiment is derived by keyword analysis across all fetched headlines.
 Buzz is derived from article volume (log-normalized to 0-100).
@@ -19,13 +25,15 @@ Firebase paths:
   /scanner/sentiment/_updated   : last run timestamp
 
 Usage:
-    python sentiment.py                        # all top scanner picks
+    python sentiment.py                        # expanded universe (default)
     python sentiment.py --tickers AAPL,TSLA    # specific tickers
-    python sentiment.py --limit 50             # top N picks (default 100)
+    python sentiment.py --limit 200            # cap universe size (default 200)
+    python sentiment.py --ipo-days 30          # IPO lookback window (default 30)
+    python sentiment.py --history-days 14      # history lookback (default 14)
 """
 
 import os, time, math, logging, argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 def _load_dotenv():
@@ -110,6 +118,105 @@ def fetch_finnhub_news(ticker, days=7):
     except Exception as e:
         log.warning(f"  Finnhub news error for {ticker}: {e}")
         return []
+
+
+# ── Finnhub IPO calendar ──────────────────────────────────────────────────────
+def fetch_ipo_tickers(days=30):
+    """Return set of ticker symbols from recent IPOs (Finnhub free tier)."""
+    if not FINNHUB_KEY:
+        return set()
+    try:
+        today   = datetime.now().strftime("%Y-%m-%d")
+        from_dt = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        r = requests.get(
+            "https://finnhub.io/api/v1/calendar/ipo",
+            params={"from": from_dt, "to": today, "token": FINNHUB_KEY},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            log.warning(f"  IPO calendar returned {r.status_code}")
+            return set()
+        data = r.json() or {}
+        ipoCalendar = data.get("ipoCalendar", [])
+        tickers = {
+            item["symbol"].strip().upper()
+            for item in ipoCalendar
+            if item.get("symbol") and item.get("exchange", "").upper() in ("NYSE", "NASDAQ", "")
+        }
+        log.info(f"  IPO calendar: {len(tickers)} tickers (last {days} days)")
+        return tickers
+    except Exception as e:
+        log.warning(f"  IPO calendar error: {e}")
+        return set()
+
+
+# ── Firebase history picks ─────────────────────────────────────────────────────
+def fetch_history_tickers(days=14):
+    """Return set of tickers that appeared in /scanner/history in the last N days."""
+    try:
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        snap = db.reference("/scanner/history").get()
+        if not snap:
+            return set()
+        tickers = set()
+        for date_key, day_data in snap.items():
+            if date_key < cutoff:
+                continue
+            if isinstance(day_data, dict):
+                tickers.update(day_data.keys())
+        log.info(f"  History tickers (last {days} days): {len(tickers)}")
+        return tickers
+    except Exception as e:
+        log.warning(f"  History tickers error: {e}")
+        return set()
+
+
+# ── Build full sentiment universe ──────────────────────────────────────────────
+def build_universe(limit, ipo_days, history_days):
+    """
+    Merge three sources into an ordered list of tickers:
+      1. All scanner picks (sorted by score desc) — highest priority
+      2. Recent IPOs from Finnhub calendar
+      3. Recent history picks (appeared in last history_days)
+    Deduplicates while preserving insertion order, then caps at limit.
+    """
+    ordered = []
+    seen    = set()
+
+    # 1. Scanner picks
+    try:
+        snap = db.reference("/scanner/all_stocks").get() or {}
+        scanner_tickers = sorted(
+            snap.keys(),
+            key=lambda t: (snap[t] or {}).get("score", 0),
+            reverse=True,
+        )
+        for t in scanner_tickers:
+            if t not in seen:
+                ordered.append(t)
+                seen.add(t)
+        log.info(f"  Scanner picks: {len(scanner_tickers)}")
+    except Exception as e:
+        log.warning(f"  Scanner picks error: {e}")
+
+    # 2. IPO calendar
+    ipo_tickers = fetch_ipo_tickers(days=ipo_days)
+    time.sleep(1.1)  # rate limit
+    for t in sorted(ipo_tickers):
+        if t not in seen:
+            ordered.append(t)
+            seen.add(t)
+
+    # 3. History tickers
+    hist_tickers = fetch_history_tickers(days=history_days)
+    for t in sorted(hist_tickers):
+        if t not in seen:
+            ordered.append(t)
+            seen.add(t)
+
+    universe = ordered[:limit]
+    log.info(f"  Universe: {len(universe)} tickers (cap={limit})")
+    return universe
 
 
 # ── Sentiment from headlines ───────────────────────────────────────────────────
@@ -208,22 +315,20 @@ def run(tickers):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tickers", help="Comma-separated tickers (default: top scanner picks)")
-    parser.add_argument("--limit",   type=int, default=100, help="Max tickers to process (default 100)")
+    parser.add_argument("--tickers",      help="Comma-separated tickers (overrides auto universe)")
+    parser.add_argument("--limit",        type=int, default=200, help="Max tickers in universe (default 200)")
+    parser.add_argument("--ipo-days",     type=int, default=30,  help="IPO calendar lookback days (default 30)")
+    parser.add_argument("--history-days", type=int, default=14,  help="History lookback days (default 14)")
     args = parser.parse_args()
 
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     else:
-        snap = db.reference("/scanner/all_stocks").get()
-        if not snap:
-            log.error("No scanner data found in Firebase. Run live_scanner.py first.")
-            exit(1)
-        tickers = sorted(
-            snap.keys(),
-            key=lambda t: (snap[t] or {}).get("score", 0),
-            reverse=True
-        )[:args.limit]
+        tickers = build_universe(
+            limit        = args.limit,
+            ipo_days     = args.ipo_days,
+            history_days = args.history_days,
+        )
 
     if not tickers:
         log.error("No tickers to process.")
