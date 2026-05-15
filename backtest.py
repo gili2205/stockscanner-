@@ -125,41 +125,58 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
     """
     Download OHLCV for all tickers. Returns {ticker: DataFrame}.
     Caches result to disk so VM restarts don't trigger a full re-download.
-    Cache is invalidated after 12 hours or if the date range changes.
+
+    Cache key uses ISO week (not exact date) so it stays stable across daily
+    restarts within the same week.  The cache is written incrementally after
+    every batch so a crash/restart can resume from where it left off rather
+    than re-downloading from scratch.
     """
     import pickle
 
     start_str = str(start - timedelta(days=90))
-    end_str   = str(end   + timedelta(days=5))
-    cache_key = f"{len(tickers)}_{start_str}_{end_str}"
+    # Use ISO year+week so the key doesn't change day-to-day
+    iso_year, iso_week, _ = date.today().isocalendar()
+    cache_key = f"{len(tickers)}_{start_str}_w{iso_year}w{iso_week:02d}"
 
-    # ── Try loading from disk cache ───────────────────────────────────────────
+    batch_size = 50
+    batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
+    # end_str only needed for yfinance calls
+    end_str = str(end + timedelta(days=5))
+
+    # ── Try loading from disk cache (full or partial) ─────────────────────────
+    result       = {}
+    resume_from  = 0   # batch index to start/resume from
+
     if PRICE_CACHE_PATH.exists():
         try:
-            age_hours = (time.time() - PRICE_CACHE_PATH.stat().st_mtime) / 3600
-            if age_hours < PRICE_CACHE_MAX_AGE_HOURS:
-                with open(PRICE_CACHE_PATH, "rb") as f:
-                    cached = pickle.load(f)
-                if cached.get("key") == cache_key:
-                    result = cached["data"]
-                    log.info(f"Loaded {len(result)} tickers from disk cache "
-                             f"(age: {age_hours:.1f}h)")
+            with open(PRICE_CACHE_PATH, "rb") as f:
+                cached = pickle.load(f)
+            if cached.get("key") == cache_key:
+                result = cached.get("data", {})
+                if cached.get("complete"):
+                    log.info(f"Loaded {len(result)} tickers from complete disk cache")
                     return result
                 else:
-                    log.info("Cache key mismatch — re-downloading")
+                    resume_from = cached.get("batches_done", 0)
+                    log.info(f"Resuming from batch {resume_from+1}/{len(batches)} "
+                             f"({len(result)} tickers already cached)")
             else:
-                log.info(f"Cache expired ({age_hours:.1f}h) — re-downloading")
+                log.info(f"Cache key mismatch — starting fresh download")
         except Exception as e:
-            log.warning(f"Cache load failed: {e} — re-downloading")
+            log.warning(f"Cache load failed: {e} — starting fresh download")
+            result = {}
+            resume_from = 0
 
-    # ── Full download ─────────────────────────────────────────────────────────
-    log.info(f"Downloading price data for {len(tickers)} tickers: {start} to {end}...")
-
-    result = {}
-    batch_size = 50   # smaller batches = less likely to timeout
-    batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
+    # ── Download remaining batches ────────────────────────────────────────────
+    if resume_from == 0:
+        log.info(f"Downloading price data for {len(tickers)} tickers: {start} to {end}...")
+    else:
+        log.info(f"Continuing download: batches {resume_from+1}–{len(batches)}")
 
     for i, batch in enumerate(batches):
+        if i < resume_from:
+            continue   # already in cache
+
         log.info(f"  Batch {i+1}/{len(batches)} ({len(batch)} tickers)...")
         raw = None
         for attempt in range(1, 4):
@@ -177,9 +194,7 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
         if raw is None or (hasattr(raw, 'empty') and raw.empty):
             log.warning(f"  Batch {i+1} gave no data after 3 attempts, skipping")
             time.sleep(2)
-            continue
-
-        if isinstance(raw.columns, pd.MultiIndex):
+        elif isinstance(raw.columns, pd.MultiIndex):
             for ticker in batch:
                 try:
                     df = raw.xs(ticker, level=1, axis=1).dropna(how="all")
@@ -191,18 +206,22 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
             if len(raw) >= 30:
                 result[batch[0]] = raw
 
+        # ── Incremental save after every batch ────────────────────────────────
+        is_last = (i == len(batches) - 1)
+        try:
+            with open(PRICE_CACHE_PATH, "wb") as f:
+                pickle.dump({
+                    "key":          cache_key,
+                    "complete":     is_last,
+                    "batches_done": i + 1,
+                    "data":         result,
+                }, f)
+        except Exception as e:
+            log.warning(f"  Incremental cache save failed: {e}")
+
         time.sleep(1)
 
     log.info(f"Downloaded {len(result)} tickers with sufficient history")
-
-    # ── Save to disk cache ────────────────────────────────────────────────────
-    try:
-        import pickle
-        with open(PRICE_CACHE_PATH, "wb") as f:
-            pickle.dump({"key": cache_key, "data": result}, f)
-        log.info(f"Price data cached to {PRICE_CACHE_PATH}")
-    except Exception as e:
-        log.warning(f"Cache save failed: {e}")
     return result
 
 
