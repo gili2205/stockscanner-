@@ -851,11 +851,12 @@ function makeCard(s, rank) {{
   var riskColor=riskCat==='Low'?'#27ae60':riskCat==='Medium'?'#e67e22':'#e74c3c';
   var riskBg=riskCat==='Low'?'#1a3d2b':riskCat==='Medium'?'#3d2e10':'#3d1a1a';
 
-  // Stop distance is INVERSELY related to risk:
-  //   Low risk  = high conviction setup → give it more room (wide stop, 7–8%)
-  //   Medium    = moderate confidence   → normal stop (5%)
-  //   High risk = uncertain setup       → cut losses fast (tight stop, 3%)
-  var stopDist=riskCat==='Low'?0.08:riskCat==='Medium'?0.05:0.03;
+  // Stop distance derived continuously from ATR (inverse relationship):
+  //   Low ATR  (stable)   → wide stop  up to 9%  (high conviction, give it room)
+  //   High ATR (volatile) → tight stop down to 3% (uncertain, cut losses fast)
+  //   Formula: 0.02 / ATR, clamped to [3%, 9%]
+  //   Examples: ATR=0.25 → 8%, ATR=0.40 → 5%, ATR=0.67 → 3%
+  var stopDist=Math.min(0.09,Math.max(0.03,0.02/(s.atr||0.3)));
   var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
   var rewardCat=rp>=3?'High':rp>=2?'Medium':'Low';
   var rewardColor=rp>=3?'#27ae60':rp>=2?'#e67e22':'#e74c3c';
