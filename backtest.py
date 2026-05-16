@@ -62,7 +62,7 @@ first_ref = db.reference("/scanner/first_seen")
 # Format: "v{N}_{short_description}"
 # Every pick stored in Firebase carries this tag so the optimizer can filter
 # by version and experiments can be compared apples-to-apples.
-SCORING_VERSION = "v3_three_layer"
+SCORING_VERSION = "v4_quality_setup"
 
 # ── Universe ──────────────────────────────────────────────────────────────────
 def get_universe():
@@ -229,6 +229,13 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
 def compute_ema(series: pd.Series, period: int) -> float:
     return float(series.ewm(span=period, adjust=False).mean().iloc[-1])
 
+def compute_rsi(close: pd.Series, period: int = 14) -> float:
+    delta = close.diff()
+    gain  = delta.clip(lower=0).ewm(span=period, adjust=False).mean()
+    loss  = (-delta.clip(upper=0)).ewm(span=period, adjust=False).mean()
+    rs    = gain.iloc[-1] / max(float(loss.iloc[-1]), 1e-10)
+    return round(100 - 100 / (1 + rs), 1)
+
 
 def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict | None:
     """Score a stock using only data available up to as_of date."""
@@ -299,6 +306,9 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         # Momentum
         mom1m = round((price / float(close.iloc[-21]) - 1) * 100, 1) if len(close) >= 21 else 0.0
         mom3m = round((price / float(close.iloc[-63]) - 1) * 100, 1) if len(close) >= 63 else mom1m
+
+        # RSI (14)
+        rsi14 = compute_rsi(close)
 
         # Flags
         pre_breakout = (atr_pct <= 0.03 and vol_c <= 0.7 and dist <= 5
@@ -377,6 +387,36 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         track  = "CATALYST" if score_catalyst > score_technical else "BREAKOUT"
         status = "READY" if score >= 72 else "WATCH" if score >= 55 else "BUILDING"
 
+        # ════════════════════════════════════════════════════════════════
+        # NEW: Quality / Setup / Buy-Now scores
+        # RS percentile not available per-date in backtest (requires
+        # cross-stock comparison). Proxied from 3M momentum bucket.
+        # ════════════════════════════════════════════════════════════════
+        rs_proxy = 85 if mom3m >= 40 else 70 if mom3m >= 20 else 55 if mom3m >= 5 else 35
+
+        q = 0
+        q += 30 if rs_proxy >= 90 else 22 if rs_proxy >= 80 else 14 if rs_proxy >= 70 else 7 if rs_proxy >= 60 else 0
+        q += 12 if ema_stack == "full" else 7 if ema_stack == "partial" else 2 if ema_stack == "weak" else 0
+        q += 13 if mom1m >= 20 else 10 if mom1m >= 10 else 6 if mom1m >= 5 else 2 if mom1m >= 0 else 0
+        q += 13 if mom3m >= 40 else 9 if mom3m >= 20 else 5 if mom3m >= 8 else 1 if mom3m >= 0 else 0
+        q += 10 if hh_hl >= 0.85 else 7 if hh_hl >= 0.70 else 4 if hh_hl >= 0.55 else 0
+        # score_fundamental = 0 in backtest; no per-date fundamental data
+        q += 10 if avg_dollar_vol >= 200e6 else 7 if avg_dollar_vol >= 50e6 else 4 if avg_dollar_vol >= 20e6 else 2
+        score_quality = min(100, q)
+
+        t = 0
+        t += 20 if ema_stack == "full" else 10 if ema_stack == "partial" else 2 if ema_stack == "weak" else 0
+        t += 20 if atr_c <= 0.15 else 15 if atr_c <= 0.25 else 10 if atr_c <= 0.35 else 3 if atr_c <= 0.50 else 0
+        t += 18 if vol_c <= 0.50 else 12 if vol_c <= 0.65 else 6 if vol_c <= 0.80 else 0
+        t += 14 if dist <= 1.0 else 10 if dist <= 2.0 else 6 if dist <= 3.5 else 2 if dist <= 6.0 else 0
+        t += 8  if hh_hl >= 0.85 else 5 if hh_hl >= 0.70 else 2 if hh_hl >= 0.55 else 0
+        t += 8  if rsi14 <= 55 else 6 if rsi14 <= 65 else 3 if rsi14 <= 75 else 0
+        t += 7  if vol_ratio >= 3.0 else 4 if vol_ratio >= 2.0 else 2 if vol_ratio >= 1.5 else 0
+        t += 5  if pre_breakout else 4 if bull_flag else 0
+        # days_to_earnings not available in backtest — no earnings penalty
+        score_setup    = min(100, max(0, t))
+        score_buy_now  = round((score_quality * score_setup) ** 0.5)
+
         if score < 25:
             return None
 
@@ -404,6 +444,10 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
             "pre_breakout":      pre_breakout,
             "bull_flag":         bull_flag,
             "rs_percentile":     None,
+            "rsi":               rsi14,
+            "score_quality":     score_quality,
+            "score_setup":       score_setup,
+            "score_buy_now":     score_buy_now,
             "returns":           {}
         }
     except Exception as e:
@@ -662,11 +706,24 @@ if __name__ == "__main__":
                             "Run as an experiment — results go to "
                             "/scanner/experiments/{NAME}/history instead of production. "
                             "Use this to test scoring changes before promoting to main. "
-                            "Example: --experiment v2_momentum_reweight"
+                            "Example: --experiment v4_quality_setup"
                         ))
+    parser.add_argument("--delete-experiment", type=str, default=None, metavar="NAME",
+                        help="Delete all Firebase data for an experiment and exit. "
+                             "Example: --delete-experiment v3_three_layer")
     args = parser.parse_args()
 
-    if args.update_returns:
+    if args.delete_experiment:
+        name = args.delete_experiment
+        log.info(f"Deleting experiment '{name}' from Firebase...")
+        ref = db.reference(f"/scanner/experiments/{name}")
+        existing = ref.get()
+        if existing is None:
+            log.warning(f"Experiment '{name}' not found in Firebase — nothing to delete.")
+        else:
+            ref.delete()
+            log.info(f"Deleted /scanner/experiments/{name} ✓")
+    elif args.update_returns:
         update_all_returns()
     else:
         specific = date.fromisoformat(args.date) if args.date else None

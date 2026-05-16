@@ -1839,11 +1839,10 @@ var fdb = firebase.database();
             <th onclick="sortBy('scan_date')">First Flagged ↕</th>
             <th onclick="sortBy('ticker')">Ticker ↕</th>
             <th onclick="sortBy('price_at_scan')">Entry $</th>
-            <th onclick="sortBy('score')">Score ↕</th>
-            <th onclick="sortBy('score_technical')" style="color:var(--blue)">Tech ↕</th>
-            <th onclick="sortBy('score_catalyst')" style="color:var(--amber)">Cat ↕</th>
+            <th onclick="setSort('buy_now')" style="color:#27ae60;cursor:pointer" title="Geometric mean of Quality × Setup">Score ↕</th>
+            <th onclick="setSort('quality')" style="color:#5b8dd9;cursor:pointer" title="RS · Trend · Momentum · Fundamentals">Quality ↕</th>
+            <th onclick="setSort('setup')"   style="color:#e67e22;cursor:pointer" title="Coil · Vol · Level · RSI · EMA">Setup ↕</th>
             <th>Status</th>
-            <th>Setup</th>
             <th onclick="sortBy('rs_percentile')">RS %ile</th>
             <th onclick="sortBy('vol_contraction')">Vol dry</th>
             <th onclick="sortBy('atr')">ATR</th>
@@ -2353,20 +2352,20 @@ function renderPicks(tf) {
     var ret1w = p.returns&&p.returns['1w']!=null ? p.returns['1w'] : null;
     var ret1m = p.returns&&p.returns['1m']!=null ? p.returns['1m'] : null;
     var ret3m = p.returns&&p.returns['3m']!=null ? p.returns['3m'] : null;
-    var setup = p.pre_breakout?'Pre-brkout':p.bull_flag?'Bull flag':'Breakout';
     var dol   = p.days_on_list || 1;
     var dolColor = dol >= 5 ? 'var(--green)' : dol >= 3 ? 'var(--amber)' : 'var(--muted)';
-    var techScore = p.score_technical != null ? p.score_technical : aEstimateTech(p);
-    var catScore  = p.score_catalyst  != null ? p.score_catalyst  : aEstimateCat(p);
+    var bns   = p.score_buy_now  != null ? p.score_buy_now  : computeBuyNow(p);
+    var qs    = p.score_quality  != null ? p.score_quality  : computeQualityScore(p);
+    var ss    = p.score_setup    != null ? p.score_setup    : computeSetupScore(p);
+    var bnsColor = bns>=65?'var(--green)':bns>=40?'var(--amber)':'var(--red)';
     html += '<tr>'
       +'<td>'+p.scan_date+'</td>'
       +'<td><strong>'+p.ticker+'</strong></td>'
       +'<td>$'+(p.price_at_scan?p.price_at_scan.toFixed(2):'—')+'</td>'
-      +'<td>'+aBlendScore(p)+'</td>'
-      +'<td style="color:var(--blue)">'+(techScore||'—')+'</td>'
-      +'<td style="color:var(--amber)">'+(catScore||'—')+'</td>'
+      +'<td style="color:'+bnsColor+';font-weight:700">'+bns+'</td>'
+      +'<td style="color:#5b8dd9">'+qs+'</td>'
+      +'<td style="color:#e67e22">'+ss+'</td>'
       +'<td><span class="badge '+(p.status||'')+'">'+p.status+'</span></td>'
-      +'<td>'+setup+'</td>'
       +'<td>'+(p.rs_percentile!=null?p.rs_percentile+'th':'—')+'</td>'
       +'<td>'+(p.vol_contraction!=null?Math.round(p.vol_contraction*100)+'%':'—')+'</td>'
       +'<td>'+(p.atr!=null?p.atr.toFixed(2):'—')+'</td>'
