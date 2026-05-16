@@ -555,15 +555,22 @@ def fetch_institutional_holdings():
 # ── ARK Invest ETF Holdings ───────────────────────────────────────────────────
 
 ARK_BASE = "https://assets.ark-funds.com/fund-documents/funds-etf-csv/"
+# Each fund can have multiple candidate filenames — tried in order until one succeeds.
 ARK_FUNDS = {
-    "ARKK": "ARK_INNOVATION_ETF_ARKK_HOLDINGS.csv",
-    "ARKG": "ARK_GENOMIC_REVOLUTION_ETF_ARKG_HOLDINGS.csv",
-    "ARKW": "ARK_NEXT_GENERATION_INTERNET_ETF_ARKW_HOLDINGS.csv",
-    "ARKQ": "ARK_AUTONOMOUS_TECHNOLOGY_&_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
-    "ARKF": "ARK_FINTECH_INNOVATION_ETF_ARKF_HOLDINGS.csv",
-    "ARKX": "ARK_SPACE_EXPLORATION_&_INNOVATION_ETF_ARKX_HOLDINGS.csv",
+    "ARKK": ["ARK_INNOVATION_ETF_ARKK_HOLDINGS.csv"],
+    "ARKG": ["ARK_GENOMIC_REVOLUTION_ETF_ARKG_HOLDINGS.csv"],
+    "ARKW": ["ARK_NEXT_GENERATION_INTERNET_ETF_ARKW_HOLDINGS.csv"],
+    "ARKQ": ["ARK_AUTONOMOUS_TECH._&_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
+             "ARK_AUTONOMOUS_TECHNOLOGY_&_ROBOTICS_ETF_ARKQ_HOLDINGS.csv"],
+    "ARKF": ["ARK_FINTECH_INNOVATION_ETF_ARKF_HOLDINGS.csv"],
+    "ARKX": ["ARK_SPACE_EXPLORATION_&_INNOVATION_ETF_ARKX_HOLDINGS.csv"],
 }
 ARK_MIN_WEIGHT = 0.5   # ignore positions < 0.5% weight (noise)
+
+def _firebase_key(ticker):
+    """Sanitize a ticker for use as a Firebase Realtime DB key.
+    Firebase forbids: . $ # [ ] / in key names."""
+    return re.sub(r'[.$#\[\]/]', '_', ticker)
 
 def fetch_ark_holdings():
     """
@@ -574,14 +581,18 @@ def fetch_ark_holdings():
     import csv, io
     holdings = {}
 
-    for symbol, filename in ARK_FUNDS.items():
-        url = ARK_BASE + filename
-        try:
-            r = requests.get(url, timeout=15,
+    for symbol, candidates in ARK_FUNDS.items():
+        r = None
+        for filename in candidates:
+            r = requests.get(ARK_BASE + filename, timeout=15,
                              headers={"User-Agent": "stockscanner/1.0"})
-            if r.status_code != 200:
-                log.warning(f"  ARK {symbol}: HTTP {r.status_code}")
-                continue
+            if r.status_code == 200:
+                break
+            log.warning(f"  ARK {symbol}: HTTP {r.status_code} for {filename}")
+            r = None
+        if not r:
+            continue
+        try:
 
             reader = csv.DictReader(io.StringIO(r.text))
             fund_count = 0
@@ -602,19 +613,21 @@ def fetch_ark_holdings():
                 if weight < ARK_MIN_WEIGHT:
                     continue
 
-                if ticker not in holdings:
-                    holdings[ticker] = {
-                        "ticker":       ticker,
+                # Sanitize key: Firebase rejects . $ # [ ] / in key names
+                key = _firebase_key(ticker)
+                if key not in holdings:
+                    holdings[key] = {
+                        "ticker":       ticker,   # original (may contain dots)
                         "funds":        [],
                         "total_weight": 0.0,
                         "total_value":  0,
                         "date":         date_str,
                     }
-                if symbol not in holdings[ticker]["funds"]:
-                    holdings[ticker]["funds"].append(symbol)
-                holdings[ticker]["total_weight"] = round(
-                    holdings[ticker]["total_weight"] + weight, 2)
-                holdings[ticker]["total_value"] += int(value)
+                if symbol not in holdings[key]["funds"]:
+                    holdings[key]["funds"].append(symbol)
+                holdings[key]["total_weight"] = round(
+                    holdings[key]["total_weight"] + weight, 2)
+                holdings[key]["total_value"] += int(value)
                 fund_count += 1
 
             log.info(f"  ARK {symbol}: {fund_count} qualifying positions")
@@ -649,7 +662,7 @@ def _extract_ticker_from_senate(description, ticker_field):
         return m.group(1)
     return None
 
-def fetch_senate_trades(days_back=90):
+def fetch_senate_trades(days_back=365):
     """
     Fetch recent Senate stock trades from the senate-stock-watcher GitHub dataset.
     Returns list of buy/sell trades sorted newest-first, capped at 300.
@@ -887,7 +900,7 @@ if __name__ == "__main__":
 
     if run_congress:
         log.info("=== FETCHING SENATE TRADES ===")
-        congress = fetch_senate_trades(days_back=90)
+        congress = fetch_senate_trades(days_back=365)
         payload["congress"]       = congress
         payload["congress_count"] = len(congress)
         log.info(f"Senate trades: {len(congress)}")
