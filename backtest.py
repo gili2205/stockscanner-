@@ -566,70 +566,133 @@ def run_backtest(n_days: int = None, specific_date: date = None, experiment: str
     # Get existing first_seen data
     existing_first = first_ref.get() or {}
 
+    def fb_write(ref, data, retries=4, label="Firebase write"):
+        """Write to Firebase with retries — network blips won't crash the run."""
+        for attempt in range(1, retries + 1):
+            try:
+                ref.set(data)
+                return True
+            except Exception as e:
+                log.warning(f"  {label} attempt {attempt}/{retries} failed: {e}")
+                if attempt < retries:
+                    time.sleep(5 * attempt)
+        log.error(f"  {label} failed after {retries} attempts — skipping")
+        return False
+
     # Process each day
+    days_done = 0
+    days_failed = 0
     for day in all_dates:
-        log.info(f"\n--- Processing {day} ---")
+        log.info(f"\n--- Processing {day} ({days_done+1}/{len(all_dates)}) ---")
         day_t = time.time()
 
-        # Skip dates already processed (works for both production and experiments)
-        check_ref = write_ref.child(day.isoformat())
-        existing = check_ref.get()
-        if existing and len(existing) > 50:
-            log.info(f"  Already have {len(existing)} records for {day}, skipping")
-            continue
+        try:
+            # Skip dates already processed (works for both production and experiments)
+            day_str  = day.isoformat()
+            check_ref = write_ref.child(day_str)
+            try:
+                existing = check_ref.get()
+            except Exception as e:
+                log.warning(f"  Could not check existing data: {e} — processing anyway")
+                existing = None
+            if existing and len(existing) > 50:
+                log.info(f"  Already have {len(existing)} records for {day}, skipping")
+                days_done += 1
+                continue
 
-        # Score all stocks as of this day
-        results = []
-        for ticker, df in prices.items():
-            r = score_stock_historical(ticker, df, day)
-            if r:
-                results.append(r)
+            # Score all stocks as of this day
+            results = []
+            for ticker, df in prices.items():
+                try:
+                    r = score_stock_historical(ticker, df, day)
+                    if r:
+                        results.append(r)
+                except Exception as e:
+                    log.debug(f"  score_stock_historical({ticker}) failed: {e}")
 
-        if not results:
-            log.warning(f"  No results for {day}")
-            continue
+            if not results:
+                log.warning(f"  No results for {day}")
+                days_done += 1
+                continue
 
-        # Assign RS percentiles
-        scores = [r["score"] for r in results]
-        for r in results:
-            r["rs_percentile"] = round(
-                sum(1 for s in scores if s < r["score"]) / len(scores) * 100, 1
-            )
-
-        # Sort and take top 200
-        results.sort(key=lambda x: x["score"], reverse=True)
-        top200 = results[:200]
-
-        # Compute forward returns for each pick
-        for r in top200:
-            ticker = r["ticker"]
-            if ticker in prices:
-                r["returns"] = compute_returns(
-                    r["price_at_scan"], ticker, prices[ticker], day
+            # Assign RS percentiles (cross-sectional rank on this day)
+            scores = [r["score"] for r in results]
+            n = len(scores)
+            for r in results:
+                r["rs_percentile"] = round(
+                    sum(1 for s in scores if s < r["score"]) / n * 100, 1
                 )
 
-        # Write to Firebase (experiment path or production)
-        day_str = day.isoformat()
-        write_ref.child(day_str).set({r["ticker"]: r for r in top200})
+            # Sort and take top 200
+            results.sort(key=lambda x: x["score"], reverse=True)
+            top200 = results[:200]
 
-        # Update first_seen — production only
-        new_first = {}
-        if not experiment:
+            # Compute forward returns for each pick
             for r in top200:
-                t = r["ticker"]
-                if t not in existing_first:
-                    new_first[t] = {
-                        "date":  day_str,
-                        "price": r["price_at_scan"],
-                        "score": r["score"],
-                    }
-                    existing_first[t] = new_first[t]
-            if new_first:
-                first_ref.update(new_first)
+                ticker = r["ticker"]
+                if ticker in prices:
+                    try:
+                        r["returns"] = compute_returns(
+                            r["price_at_scan"], ticker, prices[ticker], day
+                        )
+                    except Exception:
+                        r["returns"] = {}
 
-        elapsed = round(time.time() - day_t, 1)
-        seen_msg = f", {len(new_first)} new first-seen" if not experiment else ""
-        log.info(f"  {day}: {len(top200)} picks stored{seen_msg} | {elapsed}s")
+            # Write to Firebase — with retry so a blip doesn't kill the run
+            fb_write(check_ref, {r["ticker"]: r for r in top200},
+                     label=f"day {day_str}")
+
+            # Update first_seen — production only
+            new_first = {}
+            if not experiment:
+                for r in top200:
+                    t = r["ticker"]
+                    if t not in existing_first:
+                        new_first[t] = {
+                            "date":  day_str,
+                            "price": r["price_at_scan"],
+                            "score": r["score"],
+                        }
+                        existing_first[t] = new_first[t]
+                if new_first:
+                    try:
+                        first_ref.update(new_first)
+                    except Exception as e:
+                        log.warning(f"  first_seen update failed: {e}")
+
+            days_done += 1
+            elapsed = round(time.time() - day_t, 1)
+            seen_msg = f", {len(new_first)} new first-seen" if not experiment else ""
+            log.info(f"  {day}: {len(top200)} picks stored{seen_msg} | {elapsed}s "
+                     f"[{days_done}/{len(all_dates)} done]")
+
+            # Periodic meta update so we can see progress in Firebase
+            if experiment and days_done % 10 == 0:
+                try:
+                    meta_ref.update({"days_done": days_done,
+                                     "last_date": day_str,
+                                     "updated_at": datetime.now().isoformat()})
+                except Exception:
+                    pass
+
+        except KeyboardInterrupt:
+            log.info(f"\nInterrupted after {days_done} days. "
+                     f"Re-run same command to resume — already-written days are skipped.")
+            if experiment:
+                try:
+                    meta_ref.update({"status": "interrupted", "days_done": days_done,
+                                     "last_date": day.isoformat()})
+                except Exception:
+                    pass
+            raise
+
+        except Exception as e:
+            days_failed += 1
+            log.error(f"  Day {day} failed unexpectedly: {e} — continuing to next day")
+            if days_failed >= 10:
+                log.error("10 consecutive-ish day failures — aborting run")
+                break
+            continue
 
     total_elapsed = round((time.time() - t_total) / 60, 1)
 
