@@ -1897,6 +1897,40 @@ function aBlendScore(p) {
   return Math.min(100, Math.round((50*tech + 30*fund + 20*cat) / total));
 }
 
+// ── Three-score system (mirrored from dashboard) ──────────────────────────────
+function computeQualityScore(p) {
+  var q = 0;
+  var rs = p.rs_percentile||0;
+  if (rs>=90) q+=35; else if (rs>=80) q+=25; else if (rs>=70) q+=15; else if (rs>=60) q+=8;
+  var es = p.ema_stack||'';
+  if (es==='full') q+=20; else if (es==='partial') q+=12; else if (es==='weak') q+=4;
+  var m1 = p.momentum_1m||p.change_pct||0;
+  if (m1>=20) q+=20; else if (m1>=10) q+=15; else if (m1>=5) q+=10; else if (m1>=0) q+=4;
+  var fund = p.score_fundamental||0;
+  q+=Math.round(fund*0.15);
+  var adv = p.avg_dollar_vol||0;
+  if (adv>=200e6) q+=10; else if (adv>=50e6) q+=7; else if (adv>=20e6) q+=4; else q+=2;
+  return Math.min(100, q);
+}
+
+function computeSetupScore(p) {
+  var t = 0;
+  var atr = p.atr||1;
+  if (atr<=0.15) t+=35; else if (atr<=0.25) t+=25; else if (atr<=0.35) t+=15; else if (atr<=0.50) t+=5;
+  var vc = p.vol_contraction||1;
+  if (vc<=0.50) t+=30; else if (vc<=0.65) t+=20; else if (vc<=0.80) t+=10;
+  var d = p.dist_to_level||99;
+  if (d<=1) t+=20; else if (d<=2) t+=15; else if (d<=3.5) t+=10; else if (d<=6) t+=4;
+  var rsi = p.rsi||50;
+  if (rsi<=60) t+=10; else if (rsi<=70) t+=6; else if (rsi<=80) t+=2;
+  if (p.pre_breakout||p.bull_flag) t+=5;
+  return Math.min(100, t);
+}
+
+function computeBuyNow(p) {
+  return Math.round(Math.sqrt(computeQualityScore(p) * computeSetupScore(p)));
+}
+
 function setLayerFocus(f) {
   // Legacy wrapper — kept for backward compat
   var map = { all:'buy_now', tech:'setup', cat:'quality' };
