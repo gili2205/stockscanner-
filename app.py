@@ -840,20 +840,23 @@ function makeCard(s, rank) {{
   var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
   var dailyAtrPct=Math.min(0.12,Math.max(0.01,base*(s.atr||1)));
   var entryNum=price*1.0025;
-  // Stop = 1.5× daily ATR, clamped 2–12%. No artificial floor so each stock
-  // gets its own stop level rather than all snapping to 5% or 7%.
-  var stopDist=Math.min(0.12,Math.max(0.02,dailyAtrPct*1.5));
-  var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
-
-  // Risk/Reward
+  // Risk category from ATR bucket (same scale as filter chips)
   var sig_rs  = (s.rs_percentile||0)>=80;
   var sig_vol = (s.vol_contraction||1)<=0.7;
   var sig_lvl = (s.level||'').indexOf('ATH')>=0||(s.level||'').indexOf('multi')>=0;
   var sig_ema = (s.ema_stack||'')==='full';
   var rp = (sig_rs?1:0)+(sig_vol?1:0)+(sig_lvl?1:0)+(sig_ema?1:0);
-  var riskCat=stopDist<0.04?'Low':stopDist<0.07?'Medium':'High';
+  var atrRisk = riskBucket(s.atr||0.3);   // 'low' | 'med' | 'high'
+  var riskCat = atrRisk==='low'?'Low':atrRisk==='med'?'Medium':'High';
   var riskColor=riskCat==='Low'?'#27ae60':riskCat==='Medium'?'#e67e22':'#e74c3c';
   var riskBg=riskCat==='Low'?'#1a3d2b':riskCat==='Medium'?'#3d2e10':'#3d1a1a';
+
+  // Stop distance is INVERSELY related to risk:
+  //   Low risk  = high conviction setup → give it more room (wide stop, 7–8%)
+  //   Medium    = moderate confidence   → normal stop (5%)
+  //   High risk = uncertain setup       → cut losses fast (tight stop, 3%)
+  var stopDist=riskCat==='Low'?0.08:riskCat==='Medium'?0.05:0.03;
+  var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
   var rewardCat=rp>=3?'High':rp>=2?'Medium':'Low';
   var rewardColor=rp>=3?'#27ae60':rp>=2?'#e67e22':'#e74c3c';
   var rewardBg=rp>=3?'#1a3d2b':rp>=2?'#3d2e10':'#3d1a1a';
@@ -1414,7 +1417,11 @@ def api_card_data(ticker):
         if hist.empty:
             return jsonify({'error': 'No data'}), 404
 
-        closes = hist['Close'].tolist()
+        import math as _math
+        # Strip NaN — yfinance returns NaN for today's unsettled bar
+        closes = [c for c in hist['Close'].tolist() if c is not None and not _math.isnan(c)]
+        if len(closes) < 2:
+            return jsonify({'error': 'No data'}), 404
         price  = closes[-1]
 
         # ── Performance (uses full 1y history) ───────────────────────────────
