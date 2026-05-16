@@ -142,31 +142,39 @@ def get_recent_form4_filings(days_back=14):
         log.error(f"Failed to fetch quarterly index: {e}")
         return []
 
-    # form.idx fixed-width columns:
-    #   0-11:  Form Type  (12 chars)
-    #   12-73: Company Name (62 chars)
-    #   74-85: CIK (12 chars)
-    #   86-97: Date Filed YYYY-MM-DD (12 chars)
-    #   98+:   Filename (e.g. edgar/data/CIK/ACCNO.txt)
-    # form.idx is served without a text/* content-type so iter_lines returns bytes.
-    # Decode explicitly to str before slicing.
+    # form.idx has variable column widths (form-type field is ~17 chars wide,
+    # not 12 as historically documented). Use regex to reliably extract fields.
     filings = []
     for raw in r.iter_lines():
         if isinstance(raw, bytes):
             raw = raw.decode("latin-1", errors="replace")
-        if not raw or len(raw) < 98:
-            continue
-        form_type = raw[:12].strip()
-        if form_type != "4":
+        if not raw:
             continue
 
-        filed = raw[86:98].strip()
+        # Form type must be exactly "4" at the start of the line
+        ft_m = re.match(r'^(4)\s+', raw)
+        if not ft_m:
+            continue
+
+        # Date: always YYYY-MM-DD
+        date_m = re.search(r'(\d{4}-\d{2}-\d{2})', raw)
+        if not date_m:
+            continue
+        filed = date_m.group(1)
         if filed < start:
-            continue   # too old (index is sorted by company name, not date)
+            continue   # too old
 
-        company         = raw[12:74].strip()
-        cik             = raw[74:86].strip()
-        filename        = raw[98:].strip()
+        # CIK and filename from edgar/data/{CIK}/{file} path
+        path_m = re.search(r'edgar/data/(\d+)/(\S+)', raw)
+        if not path_m:
+            continue
+        cik      = path_m.group(1)
+        filename = path_m.group(2)
+
+        # Company name: between end of form-type match and the date
+        company = raw[ft_m.end():date_m.start()].strip()
+        # Strip trailing CIK digits (appear between company name and date)
+        company = re.sub(r'\s+\d+\s*$', '', company).strip()
 
         m = re.search(r'(\d{10}-\d{2}-\d{6})', filename)
         if not m:

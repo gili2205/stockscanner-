@@ -2456,7 +2456,7 @@ var fdb = firebase.database();
       <h2>🏛️ Congressional Trades
         <span id="congress-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
       </h2>
-      <p class="sub">Senate STOCK Act disclosures — last 90 days. Trades must be reported within 45 days of execution.</p>
+      <p class="sub">Senate &amp; House STOCK Act disclosures. Trades must be reported within 45 days of execution. <span style="color:var(--amber)">⚠️ Congressional data requires a paid API — free sources are currently unavailable. Data will appear here once connected.</span></p>
       <div class="toolbar">
         <input type="text" class="search-box" id="congress-search" placeholder="🔍 Search ticker or senator…"
           oninput="renderCongress()">
@@ -2474,13 +2474,13 @@ var fdb = firebase.database();
 
     <!-- Activist Investors 13D/13G -->
     <div class="section">
-      <h2>🎯 Activist Investors
+      <h2>🎯 Activist &amp; Large Investors
         <span id="activist-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
       </h2>
-      <p class="sub">SC 13D/13G filings — investors crossing 5% ownership. 13D = activist intent (wants board seat/buyback/sale). 13G = passive large holder.</p>
+      <p class="sub">SC 13D/13G filings — when an investor crosses 5% ownership they must disclose within 10 days. <strong style="color:var(--purple)">13D ACTIVIST</strong> = intends to influence management (board seat, buyback, sale). <strong style="color:var(--muted)">13G PASSIVE</strong> = large holder, no activist intent. <em>The "Investor" column is who filed; the "Target" column is the stock being accumulated.</em></p>
       <table class="sm-table">
         <thead><tr>
-          <th>⭐</th><th>Filed</th><th>Type</th><th>Filer</th><th>Company</th><th>Ticker</th><th>% Owned</th>
+          <th>⭐</th><th>Filed</th><th>Type</th><th>Investor (who filed)</th><th>Target Company</th><th>Ticker</th><th>% Owned</th>
         </tr></thead>
         <tbody id="activist-body"></tbody>
       </table>
