@@ -307,6 +307,9 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 
 <div class="sortrow">
   <select id="ssort" onchange="render()">
+    <option value="buy_now">Sort: Buy Now</option>
+    <option value="quality">Sort: Quality</option>
+    <option value="setup">Sort: Setup</option>
     <option value="score">Sort: score</option>
     <option value="dist">Sort: nearest trigger</option>
     <option value="atr">Sort: tightest coil</option>
@@ -369,6 +372,56 @@ function estimateTech(s) {{
   if (d>15) t=Math.max(0,t-12);
   if ((s.momentum_1m||0)<-5) t=Math.max(0,t-10);
   return Math.min(100,t);
+}}
+
+// ── Three-score system ────────────────────────────────────────────────────────
+// Quality  : How strong/healthy is this stock? (RS, trend, momentum, fundamentals)
+// Setup    : Is the entry timing good right now? (ATR coil, vol contraction, distance, RSI)
+// Buy Now  : Geometric mean — requires BOTH quality AND setup to score high
+function computeQualityScore(s) {{
+  var q = 0;
+  // RS Percentile (0–35): strength vs market
+  var rs = s.rs_percentile||0;
+  if (rs>=90) q+=35; else if (rs>=80) q+=25; else if (rs>=70) q+=15; else if (rs>=60) q+=8;
+  // EMA Stack (0–20): trend quality
+  var es = s.ema_stack||'';
+  if (es==='full') q+=20; else if (es==='partial') q+=12; else if (es==='weak') q+=4;
+  // Momentum 1M (0–20): recent performance
+  var m1 = s.momentum_1m||s.change_pct||0;
+  if (m1>=20) q+=20; else if (m1>=10) q+=15; else if (m1>=5) q+=10; else if (m1>=0) q+=4;
+  // Fundamentals (0–15): stored fundamental score
+  var fund = s.score_fundamental||0;
+  q+=Math.round(fund*0.15);
+  // Liquidity (0–10): tradeable size
+  var adv = s.avg_dollar_vol||0;
+  if (adv>=200e6) q+=10; else if (adv>=50e6) q+=7; else if (adv>=20e6) q+=4; else q+=2;
+  return Math.min(100, q);
+}}
+
+function computeSetupScore(s) {{
+  var t = 0;
+  // ATR Coil (0–35): lower ATR = tighter coil = better entry
+  var atr = s.atr||1;
+  if (atr<=0.15) t+=35; else if (atr<=0.25) t+=25; else if (atr<=0.35) t+=15; else if (atr<=0.50) t+=5;
+  // Volume Contraction (0–30): dry volume = about to expand
+  var vc = s.vol_contraction||1;
+  if (vc<=0.50) t+=30; else if (vc<=0.65) t+=20; else if (vc<=0.80) t+=10;
+  // Distance to Level (0–20): close to ATH/support = better entry
+  var d = s.dist_to_level||99;
+  if (d<=1) t+=20; else if (d<=2) t+=15; else if (d<=3.5) t+=10; else if (d<=6) t+=4;
+  // RSI (0–10): not overbought
+  var rsi = s.rsi||50;
+  if (rsi<=60) t+=10; else if (rsi<=70) t+=6; else if (rsi<=80) t+=2;
+  // Pattern bonus (0–5)
+  if (s.pre_breakout||s.bull_flag) t+=5;
+  return Math.min(100, t);
+}}
+
+function computeBuyNow(s) {{
+  var q = computeQualityScore(s);
+  var st = computeSetupScore(s);
+  // Geometric mean: both must be good — a perfect stock with 0 setup = don't buy
+  return Math.round(Math.sqrt(q * st));
 }}
 
 function estimateCat(s) {{
@@ -751,9 +804,15 @@ function render() {{
     var ab=bp>=80?10:bp>=65?7:bp>=50?4:bp>0?1:0;
     var ac=na>=10?8:na>=5?5:na>=2?2:0;
     s._unified=blendScore(s);
+    s._qualityScore  = computeQualityScore(s);
+    s._setupScore    = computeSetupScore(s);
+    s._buyNowScore   = computeBuyNow(s);
   }});
   var fns = {{
     score:    function(a,b){{ return (b._unified||0)-(a._unified||0); }},
+    buy_now:  function(a,b){{ return (b._buyNowScore||0)-(a._buyNowScore||0); }},
+    quality:  function(a,b){{ return (b._qualityScore||0)-(a._qualityScore||0); }},
+    setup:    function(a,b){{ return (b._setupScore||0)-(a._setupScore||0); }},
     dist:     function(a,b){{ return (a.dist_to_level||99)-(b.dist_to_level||99); }},
     atr:      function(a,b){{ return (a.atr||1)-(b.atr||1); }},
     vol:      function(a,b){{ return (a.vol_contraction||1)-(b.vol_contraction||1); }},
@@ -835,6 +894,10 @@ function makeCard(s, rank) {{
   var fundScore     = s.score_fundamental != null ? s.score_fundamental : 0;
   var catalystScore = s.score_catalyst    != null ? s.score_catalyst    : s.catalyst_score || 0;
   var unifiedScore  = blendScore(s);
+  var qualityScore  = s._qualityScore  != null ? s._qualityScore  : computeQualityScore(s);
+  var setupScore    = s._setupScore    != null ? s._setupScore    : computeSetupScore(s);
+  var buyNowScore   = s._buyNowScore   != null ? s._buyNowScore   : computeBuyNow(s);
+  var buyNowColor   = buyNowScore>=65?'#27ae60':buyNowScore>=40?'#e67e22':'#e74c3c';
 
   // Stop/entry
   var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
@@ -942,8 +1005,15 @@ function makeCard(s, rank) {{
   h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
-  h += '<div id="'+scoreId+'" style="font-size:32px;font-weight:700;color:'+color+';cursor:pointer;line-height:1" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
-  h += '<div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:'+color+';margin-top:3px">'+s.status+'</div>';
+  h += '<div id="'+scoreId+'" style="cursor:pointer" onclick="event.stopPropagation();showBreakdown(this)">';
+  h += '<div style="font-size:30px;font-weight:700;color:'+buyNowColor+';line-height:1">'+buyNowScore+'</div>';
+  h += '<div style="font-size:9px;font-weight:700;letter-spacing:.8px;color:'+buyNowColor+';margin-top:2px;text-align:center">BUY NOW</div>';
+  h += '<div style="margin-top:6px;display:flex;gap:12px;justify-content:flex-end">';
+  h += '<div style="text-align:center"><div style="font-size:13px;font-weight:700;color:#5b8dd9">'+qualityScore+'</div><div style="font-size:8px;color:var(--muted);letter-spacing:.5px">QUALITY</div></div>';
+  h += '<div style="text-align:center"><div style="font-size:13px;font-weight:700;color:#e67e22">'+setupScore+'</div><div style="font-size:8px;color:var(--muted);letter-spacing:.5px">SETUP</div></div>';
+  h += '</div>';
+  h += '</div>';
+  h += '<div style="font-size:10px;font-weight:600;letter-spacing:.5px;color:var(--muted);margin-top:5px;text-align:right">'+s.status+'</div>';
   h += '</div>';
   h += '</div>';
   // Performance row — directly under title, no 1D (already shown in price line)
@@ -1714,11 +1784,14 @@ var fdb = firebase.database();
       <!-- Table sort + search -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Sort:</span>
-        <button class="sort-btn active" id="sort-btn-date"  onclick="setSort('scan_date')">📅 Date</button>
-        <button class="sort-btn"        id="sort-btn-abc"   onclick="setSort('ticker_asc')">🔤 A–Z</button>
-        <button class="sort-btn"        id="sort-btn-score" onclick="setSort('score')">⭐ Score</button>
-        <button class="sort-btn"        id="sort-btn-tech"  onclick="setSort('score_technical')">📊 Tech</button>
-        <button class="sort-btn"        id="sort-btn-cat"   onclick="setSort('score_catalyst')">⚡ Catalyst</button>
+        <button class="sort-btn active" id="sort-btn-buy_now" onclick="setSort('buy_now')" style="background:#1a3d2b;border-color:#27ae60;color:#27ae60;font-weight:700">🎯 Buy Now</button>
+        <button class="sort-btn"        id="sort-btn-quality" onclick="setSort('quality')">💎 Quality</button>
+        <button class="sort-btn"        id="sort-btn-setup"   onclick="setSort('setup')">🎣 Setup</button>
+        <button class="sort-btn"        id="sort-btn-date"    onclick="setSort('scan_date')">📅 Date</button>
+        <button class="sort-btn"        id="sort-btn-abc"     onclick="setSort('ticker_asc')">🔤 A–Z</button>
+        <button class="sort-btn"        id="sort-btn-score"   onclick="setSort('score')">⭐ Score</button>
+        <button class="sort-btn"        id="sort-btn-tech"    onclick="setSort('score_technical')">📊 Tech</button>
+        <button class="sort-btn"        id="sort-btn-cat"     onclick="setSort('score_catalyst')">⚡ Catalyst</button>
         <button class="sort-btn"        id="sort-btn-ret1w" onclick="setSort('ret_1w')">1W Return</button>
         <button class="sort-btn"        id="sort-btn-ret1m" onclick="setSort('ret_1m')">1M Return</button>
         <button class="sort-btn"        id="sort-btn-ret3m" onclick="setSort('ret_3m')">3M Return</button>
@@ -1981,13 +2054,14 @@ function getFiltered() {
 function setSort(col) {
   sortCol = col;
   sortAsc = (col === 'ticker_asc');
-  var btns = ['date','abc','score','tech','cat','ret1w','ret1m','ret3m'];
-  var map  = {scan_date:'date', ticker_asc:'abc', score:'score',
+  var btns = ['buy_now','quality','setup','date','abc','score','tech','cat','ret1w','ret1m','ret3m'];
+  var map  = {buy_now:'buy_now', quality:'quality', setup:'setup',
+              scan_date:'date', ticker_asc:'abc', score:'score',
               score_technical:'tech', score_catalyst:'cat',
               ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m'};
-  btns.forEach(function(b) { document.getElementById('sort-btn-'+b).classList.remove('active'); });
+  btns.forEach(function(b) { var el=document.getElementById('sort-btn-'+b); if(el) el.classList.remove('active'); });
   var active = map[col];
-  if (active) document.getElementById('sort-btn-'+active).classList.add('active');
+  if (active) { var el=document.getElementById('sort-btn-'+active); if(el) el.classList.add('active'); }
   page = 0;
   render();
 }
@@ -2004,6 +2078,15 @@ function render() {
       var va = a.returns && a.returns[key] != null ? a.returns[key] : -Infinity;
       var vb = b.returns && b.returns[key] != null ? b.returns[key] : -Infinity;
       return vb - va;
+    }
+    if (sortCol === 'buy_now') {
+      return computeBuyNow(b) - computeBuyNow(a);
+    }
+    if (sortCol === 'quality') {
+      return computeQualityScore(b) - computeQualityScore(a);
+    }
+    if (sortCol === 'setup') {
+      return computeSetupScore(b) - computeSetupScore(a);
     }
     if (sortCol === 'score') {
       return aBlendScore(b) - aBlendScore(a);
