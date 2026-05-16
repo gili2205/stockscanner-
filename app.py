@@ -385,19 +385,25 @@ function estimateTech(s) {{
 // Buy Now  : Geometric mean — requires BOTH quality AND setup to score high
 function computeQualityScore(s) {{
   var q = 0;
-  // RS Percentile (0–35): strength vs market
+  // RS Percentile (0–30): relative strength vs the whole market
   var rs = s.rs_percentile||0;
-  if (rs>=90) q+=35; else if (rs>=80) q+=25; else if (rs>=70) q+=15; else if (rs>=60) q+=8;
-  // EMA Stack (0–20): trend quality
+  if (rs>=90) q+=30; else if (rs>=80) q+=22; else if (rs>=70) q+=14; else if (rs>=60) q+=7;
+  // EMA Stack (0–12): trend quality (also in Setup; smaller weight here = stock health)
   var es = s.ema_stack||'';
-  if (es==='full') q+=20; else if (es==='partial') q+=12; else if (es==='weak') q+=4;
-  // Momentum 1M (0–20): recent performance
+  if (es==='full') q+=12; else if (es==='partial') q+=7; else if (es==='weak') q+=2;
+  // Momentum 1M (0–13): recent leadership
   var m1 = s.momentum_1m||s.change_pct||0;
-  if (m1>=20) q+=20; else if (m1>=10) q+=15; else if (m1>=5) q+=10; else if (m1>=0) q+=4;
-  // Fundamentals (0–15): stored fundamental score
+  if (m1>=20) q+=13; else if (m1>=10) q+=10; else if (m1>=5) q+=6; else if (m1>=0) q+=2;
+  // Momentum 3M (0–13): sustained strength (1M pop could be noise; 3M confirms trend)
+  var m3 = s.momentum_3m||0;
+  if (m3>=40) q+=13; else if (m3>=20) q+=9; else if (m3>=8) q+=5; else if (m3>=0) q+=1;
+  // HH/HL structure (0–10): consistent higher highs + higher lows = sustained institutional buying
+  var hh = s.hh_hl||0;
+  if (hh>=0.85) q+=10; else if (hh>=0.70) q+=7; else if (hh>=0.55) q+=4;
+  // Fundamentals (0–12): stored fundamental score (PE, margins, growth, analyst ratings)
   var fund = s.score_fundamental||0;
-  q+=Math.round(fund*0.15);
-  // Liquidity (0–10): tradeable size
+  q+=Math.round(fund*0.12);
+  // Liquidity (0–10): must be tradeable — large avg daily dollar volume
   var adv = s.avg_dollar_vol||0;
   if (adv>=200e6) q+=10; else if (adv>=50e6) q+=7; else if (adv>=20e6) q+=4; else q+=2;
   return Math.min(100, q);
@@ -405,27 +411,40 @@ function computeQualityScore(s) {{
 
 function computeSetupScore(s) {{
   var t = 0;
-  // ATR Coil (0–35): lower ATR = tighter coil = better entry
+  // EMA Stack (0–20): trend must be aligned for a valid entry — full stack = all EMAs rising
+  var es = s.ema_stack||'';
+  if (es==='full') t+=20; else if (es==='partial') t+=10; else if (es==='weak') t+=2;
+  // ATR Coil (0–20): tight daily range = compression = energy building for breakout
   var atr = s.atr||1;
-  if (atr<=0.15) t+=35; else if (atr<=0.25) t+=25; else if (atr<=0.35) t+=15; else if (atr<=0.50) t+=5;
-  // Volume Contraction (0–30): dry volume = about to expand
+  if (atr<=0.15) t+=20; else if (atr<=0.25) t+=15; else if (atr<=0.35) t+=10; else if (atr<=0.50) t+=3;
+  // Volume Contraction (0–18): dry volume = sellers exhausted, institutional accumulation complete
   var vc = s.vol_contraction||1;
-  if (vc<=0.50) t+=30; else if (vc<=0.65) t+=20; else if (vc<=0.80) t+=10;
-  // Distance to Level (0–20): close to ATH/support = better entry
+  if (vc<=0.50) t+=18; else if (vc<=0.65) t+=12; else if (vc<=0.80) t+=6;
+  // Distance to Level (0–14): close to ATH/key level = clear trigger point, minimal overhead
   var d = s.dist_to_level||99;
-  if (d<=1) t+=20; else if (d<=2) t+=15; else if (d<=3.5) t+=10; else if (d<=6) t+=4;
-  // RSI (0–10): not overbought
+  if (d<=1) t+=14; else if (d<=2) t+=10; else if (d<=3.5) t+=6; else if (d<=6) t+=2;
+  // HH/HL into base (0–8): stock making higher highs + lows = healthy consolidation, not breakdown
+  var hh = s.hh_hl||0;
+  if (hh>=0.85) t+=8; else if (hh>=0.70) t+=5; else if (hh>=0.55) t+=2;
+  // RSI (0–8): not overbought — room to run without immediate mean reversion pressure
   var rsi = s.rsi||50;
-  if (rsi<=60) t+=10; else if (rsi<=70) t+=6; else if (rsi<=80) t+=2;
-  // Pattern bonus (0–5)
-  if (s.pre_breakout||s.bull_flag) t+=5;
-  return Math.min(100, t);
+  if (rsi<=55) t+=8; else if (rsi<=65) t+=6; else if (rsi<=75) t+=3;
+  // Vol ratio (0–7): recent accumulation volume — institutions loading before the move
+  var vr = s.vol_ratio||1;
+  if (vr>=3) t+=7; else if (vr>=2) t+=4; else if (vr>=1.5) t+=2;
+  // Pattern bonus (0–5): confirmed pre-breakout or bull flag structure
+  if (s.pre_breakout) t+=5; else if (s.bull_flag) t+=4;
+  // Earnings penalty: binary event risk — tight setup into earnings = gambling, not trading
+  var earn = s.days_to_earnings;
+  if (earn!=null && earn>=0 && earn<=7)  t-=20;  // earnings this week — avoid
+  else if (earn!=null && earn>=0 && earn<=14) t-=10;  // earnings next 2 weeks — caution
+  return Math.min(100, Math.max(0, t));
 }}
 
 function computeBuyNow(s) {{
   var q = computeQualityScore(s);
   var st = computeSetupScore(s);
-  // Geometric mean: both must be good — a perfect stock with 0 setup = don't buy
+  // Geometric mean: both must be strong — great stock + bad setup = don't buy yet
   return Math.round(Math.sqrt(q * st));
 }}
 
@@ -1901,13 +1920,17 @@ function aBlendScore(p) {
 function computeQualityScore(p) {
   var q = 0;
   var rs = p.rs_percentile||0;
-  if (rs>=90) q+=35; else if (rs>=80) q+=25; else if (rs>=70) q+=15; else if (rs>=60) q+=8;
+  if (rs>=90) q+=30; else if (rs>=80) q+=22; else if (rs>=70) q+=14; else if (rs>=60) q+=7;
   var es = p.ema_stack||'';
-  if (es==='full') q+=20; else if (es==='partial') q+=12; else if (es==='weak') q+=4;
+  if (es==='full') q+=12; else if (es==='partial') q+=7; else if (es==='weak') q+=2;
   var m1 = p.momentum_1m||p.change_pct||0;
-  if (m1>=20) q+=20; else if (m1>=10) q+=15; else if (m1>=5) q+=10; else if (m1>=0) q+=4;
+  if (m1>=20) q+=13; else if (m1>=10) q+=10; else if (m1>=5) q+=6; else if (m1>=0) q+=2;
+  var m3 = p.momentum_3m||0;
+  if (m3>=40) q+=13; else if (m3>=20) q+=9; else if (m3>=8) q+=5; else if (m3>=0) q+=1;
+  var hh = p.hh_hl||0;
+  if (hh>=0.85) q+=10; else if (hh>=0.70) q+=7; else if (hh>=0.55) q+=4;
   var fund = p.score_fundamental||0;
-  q+=Math.round(fund*0.15);
+  q+=Math.round(fund*0.12);
   var adv = p.avg_dollar_vol||0;
   if (adv>=200e6) q+=10; else if (adv>=50e6) q+=7; else if (adv>=20e6) q+=4; else q+=2;
   return Math.min(100, q);
@@ -1915,16 +1938,25 @@ function computeQualityScore(p) {
 
 function computeSetupScore(p) {
   var t = 0;
+  var es = p.ema_stack||'';
+  if (es==='full') t+=20; else if (es==='partial') t+=10; else if (es==='weak') t+=2;
   var atr = p.atr||1;
-  if (atr<=0.15) t+=35; else if (atr<=0.25) t+=25; else if (atr<=0.35) t+=15; else if (atr<=0.50) t+=5;
+  if (atr<=0.15) t+=20; else if (atr<=0.25) t+=15; else if (atr<=0.35) t+=10; else if (atr<=0.50) t+=3;
   var vc = p.vol_contraction||1;
-  if (vc<=0.50) t+=30; else if (vc<=0.65) t+=20; else if (vc<=0.80) t+=10;
+  if (vc<=0.50) t+=18; else if (vc<=0.65) t+=12; else if (vc<=0.80) t+=6;
   var d = p.dist_to_level||99;
-  if (d<=1) t+=20; else if (d<=2) t+=15; else if (d<=3.5) t+=10; else if (d<=6) t+=4;
+  if (d<=1) t+=14; else if (d<=2) t+=10; else if (d<=3.5) t+=6; else if (d<=6) t+=2;
+  var hh = p.hh_hl||0;
+  if (hh>=0.85) t+=8; else if (hh>=0.70) t+=5; else if (hh>=0.55) t+=2;
   var rsi = p.rsi||50;
-  if (rsi<=60) t+=10; else if (rsi<=70) t+=6; else if (rsi<=80) t+=2;
-  if (p.pre_breakout||p.bull_flag) t+=5;
-  return Math.min(100, t);
+  if (rsi<=55) t+=8; else if (rsi<=65) t+=6; else if (rsi<=75) t+=3;
+  var vr = p.vol_ratio||1;
+  if (vr>=3) t+=7; else if (vr>=2) t+=4; else if (vr>=1.5) t+=2;
+  if (p.pre_breakout) t+=5; else if (p.bull_flag) t+=4;
+  var earn = p.days_to_earnings;
+  if (earn!=null && earn>=0 && earn<=7)  t-=20;
+  else if (earn!=null && earn>=0 && earn<=14) t-=10;
+  return Math.min(100, Math.max(0, t));
 }
 
 function computeBuyNow(p) {
