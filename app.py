@@ -287,10 +287,12 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <div class="fgroup">
       <div class="fgrouplabel">&#128279; Cross-tab Signals</div>
       <div class="fchips">
-        <div class="fchip amber" data-group="signal" data-val="buzz"      onclick="toggleChip(this)"><span class="fcheck"></span>&#128293; High Buzz</div>
-        <div class="fchip green" data-group="signal" data-val="bullish"   onclick="toggleChip(this)"><span class="fcheck"></span>&#129412; Bullish news</div>
-        <div class="fchip blue"  data-group="signal" data-val="insider"   onclick="toggleChip(this)"><span class="fcheck"></span>&#128024; Insider buy</div>
-        <div class="fchip blue"  data-group="signal" data-val="hedge"     onclick="toggleChip(this)"><span class="fcheck"></span>&#127974; Hedge fund</div>
+        <div class="fchip amber"  data-group="signal" data-val="buzz"      onclick="toggleChip(this)"><span class="fcheck"></span>&#128293; High Buzz</div>
+        <div class="fchip green"  data-group="signal" data-val="bullish"   onclick="toggleChip(this)"><span class="fcheck"></span>&#129412; Bullish news</div>
+        <div class="fchip blue"   data-group="signal" data-val="insider"   onclick="toggleChip(this)"><span class="fcheck"></span>&#128024; Insider buy</div>
+        <div class="fchip blue"   data-group="signal" data-val="hedge"     onclick="toggleChip(this)"><span class="fcheck"></span>&#127974; Hedge fund</div>
+        <div class="fchip teal"   data-group="signal" data-val="ark"       onclick="toggleChip(this)"><span class="fcheck"></span>&#128640; ARK Hold</div>
+        <div class="fchip purple" data-group="signal" data-val="congress"  onclick="toggleChip(this)"><span class="fcheck"></span>&#127963; Congress Buy</div>
         <div class="fchip" style="border-color:#f1c40f" data-group="signal" data-val="watchlist" onclick="toggleChip(this)"><span class="fcheck"></span>&#11088; Watchlist</div>
       </div>
     </div>
@@ -549,6 +551,8 @@ function passesFilters(s) {{
     if (activeFilters.signal.includes("bullish")   && _sd && _sd.overall_sentiment === "bullish") sigOk = true;
     if (activeFilters.signal.includes("insider")   && _sm && _sm.insider)    sigOk = true;
     if (activeFilters.signal.includes("hedge")     && _sm && _sm.institution) sigOk = true;
+    if (activeFilters.signal.includes("ark")       && _sm && _sm.ark)        sigOk = true;
+    if (activeFilters.signal.includes("congress")  && _sm && _sm.congress)   sigOk = true;
     if (activeFilters.signal.includes("watchlist") && watchlistTickers[s.ticker]) sigOk = true;
     if (!sigOk) return false;
   }}
@@ -565,7 +569,7 @@ function getActiveDesc() {{
   if (activeFilters.setup.length)    parts.push(activeFilters.setup.map(function(v){{return {{breakout:"Breakout",catalyst:"Catalyst",bullflag:"Bull Flag",prebreak:"Pre-breakout",earnings:"Earnings soon"}}[v]||v;}}).join(" or "));
   if (activeFilters.timeframe && activeFilters.timeframe.length) parts.push(activeFilters.timeframe.map(function(v){{return {{short:"Short (1-2w)",mid:"Mid (1-3m)",long:"Long (3m+)"}}[v]||v;}}).join(" or "));
   if (activeFilters.momentum.length) parts.push({{hot:"Hot +30%",strong:"Strong +15%",pos:"Positive",neg:"Pullback"}}[activeFilters.momentum[0]]||activeFilters.momentum[0]);
-  if (activeFilters.signal && activeFilters.signal.length) parts.push(activeFilters.signal.map(function(v){{return {{buzz:"High Buzz",bullish:"Bullish news",insider:"Insider buy",hedge:"Hedge fund",watchlist:"\u2b50 Watchlist"}}[v]||v;}}).join(" or "));
+  if (activeFilters.signal && activeFilters.signal.length) parts.push(activeFilters.signal.map(function(v){{return {{buzz:"High Buzz",bullish:"Bullish news",insider:"Insider buy",hedge:"Hedge fund",ark:"\ud83d\ude80 ARK Hold",congress:"\ud83c\udfd9 Congress Buy",watchlist:"\u2b50 Watchlist"}}[v]||v;}}).join(" or "));
   if (!parts.length) return "Showing all stocks \u2014 select filters above to narrow down";
   return "Filters: " + parts.join(" \u00b7 ");
 }}
@@ -689,6 +693,18 @@ fbCached('/scanner/smart_money', BADGE_CACHE_TTL, function(d) {{
   (d.insiders || []).forEach(function(b) {{ if(b.ticker) {{ smartMoneyTickers[b.ticker] = smartMoneyTickers[b.ticker] || {{}}; smartMoneyTickers[b.ticker].insider = true; }} }});
   (d.institutions || []).forEach(function(fund) {{
     (fund.holdings || []).forEach(function(h) {{ if(h.ticker) {{ smartMoneyTickers[h.ticker] = smartMoneyTickers[h.ticker] || {{}}; smartMoneyTickers[h.ticker].institution = true; }} }});
+  }});
+  // ARK holdings (keyed by ticker)
+  Object.keys(d.ark_holdings || {{}}).forEach(function(t) {{
+    smartMoneyTickers[t] = smartMoneyTickers[t] || {{}};
+    smartMoneyTickers[t].ark = true;
+  }});
+  // Congressional buys
+  (d.congress || []).forEach(function(t) {{
+    if (t.ticker && t.type === 'buy') {{
+      smartMoneyTickers[t.ticker] = smartMoneyTickers[t.ticker] || {{}};
+      smartMoneyTickers[t.ticker].congress = true;
+    }}
   }});
 }});
 
@@ -2266,6 +2282,20 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .star-btn{background:none;border:none;cursor:pointer;font-size:16px;padding:2px 4px;opacity:.35;transition:opacity .15s,transform .1s;}
 .star-btn:hover{opacity:.75;}
 .star-btn.starred{opacity:1;transform:scale(1.15);}
+/* ARK grid */
+.ark-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
+.ark-card{background:var(--bg3);border-radius:8px;padding:12px 14px;}
+.ark-ticker{font-size:15px;font-weight:700;}
+.ark-funds{font-size:10px;color:var(--blue);margin:2px 0 6px;}
+.ark-bar-wrap{height:4px;background:var(--border);border-radius:2px;margin-bottom:4px;}
+.ark-bar{height:4px;background:var(--blue);border-radius:2px;}
+.ark-weight{font-size:11px;font-weight:600;color:var(--text);}
+.ark-val{font-size:10px;color:var(--muted);}
+/* Congress table */
+.buy-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#1a3d2b;color:var(--green);}
+.sell-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#3d1a1a;color:var(--red);}
+.activist-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#2d1a3d;color:var(--purple);}
+.passive-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--bg3);color:var(--muted);}
 </style>
 <!--FB_CONFIG-->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -2343,12 +2373,63 @@ var fdb = firebase.database();
       <div id="fund-grid" class="fund-grid"></div>
     </div>
 
+    <!-- ARK Invest Holdings -->
+    <div class="section">
+      <h2>🚀 ARK Invest Holdings
+        <span id="ark-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
+      </h2>
+      <p class="sub">Cathie Wood's 6 ETFs — ARKK, ARKG, ARKW, ARKQ, ARKF, ARKX. Updated daily. Only positions ≥ 0.5% weight shown.</p>
+      <div class="toolbar">
+        <input type="text" class="search-box" id="ark-search" placeholder="🔍 Search ticker…"
+          oninput="this.value=this.value.toUpperCase();renderARK()">
+      </div>
+      <div id="ark-grid" class="ark-grid"></div>
+    </div>
+
+    <!-- Senate Trades -->
+    <div class="section">
+      <h2>🏛️ Congressional Trades
+        <span id="congress-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
+      </h2>
+      <p class="sub">Senate STOCK Act disclosures — last 90 days. Trades must be reported within 45 days of execution.</p>
+      <div class="toolbar">
+        <input type="text" class="search-box" id="congress-search" placeholder="🔍 Search ticker or senator…"
+          oninput="renderCongress()">
+        <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px">
+          <input type="checkbox" id="congress-buys-only" onchange="renderCongress()"> Buys only
+        </label>
+      </div>
+      <table class="sm-table">
+        <thead><tr>
+          <th>⭐</th><th>Date</th><th>Senator</th><th>Ticker</th><th>Type</th><th>Amount</th><th>Owner</th>
+        </tr></thead>
+        <tbody id="congress-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Activist Investors 13D/13G -->
+    <div class="section">
+      <h2>🎯 Activist Investors
+        <span id="activist-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
+      </h2>
+      <p class="sub">SC 13D/13G filings — investors crossing 5% ownership. 13D = activist intent (wants board seat/buyback/sale). 13G = passive large holder.</p>
+      <table class="sm-table">
+        <thead><tr>
+          <th>⭐</th><th>Filed</th><th>Type</th><th>Filer</th><th>Company</th><th>Ticker</th><th>% Owned</th>
+        </tr></thead>
+        <tbody id="activist-body"></tbody>
+      </table>
+    </div>
+
   </div>
 </div>
 
 <script>
 var insiderData      = [];
 var institutionData  = [];
+var arkData          = {};   // ticker → {ticker, funds, total_weight, total_value, date}
+var congressData     = [];
+var activistData     = [];
 var scannerTickers   = new Set();
 var smWatchlist      = {};  // ticker → true
 
@@ -2473,6 +2554,104 @@ function renderInstitutions() {
     '<div style="color:var(--muted);padding:20px">No institutional data yet. Run smart_money.py on the VM.</div>';
 }
 
+function renderARK() {
+  var search = (document.getElementById('ark-search').value || '').trim().toUpperCase();
+  var items = Object.values(arkData).filter(function(h) {
+    return !search || h.ticker.indexOf(search) !== -1;
+  });
+  // Sort by total_weight desc
+  items.sort(function(a,b) { return b.total_weight - a.total_weight; });
+  var maxW = items.length ? items[0].total_weight : 1;
+
+  document.getElementById('ark-count').textContent =
+    '— ' + items.length + ' tickers across ' + Object.keys(ARK_FUND_LABELS).length + ' funds';
+
+  var html = '';
+  items.forEach(function(h) {
+    var match   = scannerTickers.has(h.ticker);
+    var starred = smWatchlist[h.ticker] ? ' starred' : '';
+    var barPct  = Math.min(100, Math.round(h.total_weight / maxW * 100));
+    var fundsStr = (h.funds || []).join(', ');
+    html += '<div class="ark-card">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+      + '<button id="smstar-'+h.ticker+'" class="star-btn'+starred+'" data-ticker="'+h.ticker+'" onclick="toggleSMWatch(this.dataset.ticker)" title="Add to watchlist">&#11088;</button>'
+      + '<span class="ark-ticker">' + h.ticker + '</span>'
+      + (match ? '<span class="scanner-match">📡</span>' : '')
+      + '</div>'
+      + '<div class="ark-funds">' + fundsStr + '</div>'
+      + '<div class="ark-bar-wrap"><div class="ark-bar" style="width:'+barPct+'%"></div></div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline">'
+      + '<span class="ark-weight">' + h.total_weight.toFixed(1) + '% weight</span>'
+      + '<span class="ark-val">' + fmtVal(h.total_value) + '</span>'
+      + '</div>'
+      + '</div>';
+  });
+
+  document.getElementById('ark-grid').innerHTML = html ||
+    '<div style="color:var(--muted);padding:20px">No ARK holdings data yet. Run smart_money.py --ark on the VM.</div>';
+}
+
+var ARK_FUND_LABELS = {ARKK:1,ARKG:1,ARKW:1,ARKQ:1,ARKF:1,ARKX:1};
+
+function renderCongress() {
+  var search   = (document.getElementById('congress-search').value || '').trim().toUpperCase();
+  var buysOnly = document.getElementById('congress-buys-only').checked;
+
+  var rows = congressData.filter(function(t) {
+    if (buysOnly && t.type !== 'buy') return false;
+    if (search && t.ticker.indexOf(search) === -1 &&
+        (t.senator||'').toUpperCase().indexOf(search) === -1) return false;
+    return true;
+  });
+
+  document.getElementById('congress-count').textContent = '— ' + rows.length + ' trades';
+
+  var html = '';
+  rows.forEach(function(t) {
+    var match   = scannerTickers.has(t.ticker);
+    var starred = smWatchlist[t.ticker] ? ' starred' : '';
+    var badge   = t.type === 'buy'
+      ? '<span class="buy-badge">BUY</span>'
+      : '<span class="sell-badge">SELL</span>';
+    html += '<tr>'
+      + '<td><button id="smstar-c-'+t.ticker+'" class="star-btn'+starred+'" data-ticker="'+t.ticker+'" onclick="toggleSMWatch(this.dataset.ticker)">&#11088;</button></td>'
+      + '<td>' + (t.date||'—') + '</td>'
+      + '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (t.senator||'—') + '</td>'
+      + '<td><span class="ticker-badge">' + t.ticker + '</span>' + (match?' <span class="scanner-match">📡</span>':'') + '</td>'
+      + '<td>' + badge + '</td>'
+      + '<td style="color:var(--muted);font-size:11px">' + (t.amount||'—') + '</td>'
+      + '<td style="color:var(--muted);font-size:11px">' + (t.owner||'Self') + '</td>'
+      + '</tr>';
+  });
+  document.getElementById('congress-body').innerHTML = html ||
+    '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:30px">No congressional trades found.</td></tr>';
+}
+
+function renderActivist() {
+  document.getElementById('activist-count').textContent =
+    '— ' + activistData.length + ' recent filings';
+
+  var html = '';
+  activistData.forEach(function(f) {
+    var match   = f.ticker && scannerTickers.has(f.ticker);
+    var starred = f.ticker && smWatchlist[f.ticker] ? ' starred' : '';
+    var badge   = f.is_activist
+      ? '<span class="activist-badge">13D ACTIVIST</span>'
+      : '<span class="passive-badge">13G PASSIVE</span>';
+    html += '<tr>'
+      + '<td>' + (f.ticker ? '<button id="smstar-a-'+f.ticker+'" class="star-btn'+starred+'" data-ticker="'+f.ticker+'" onclick="toggleSMWatch(this.dataset.ticker)">&#11088;</button>' : '') + '</td>'
+      + '<td>' + (f.filed||'—') + '</td>'
+      + '<td>' + badge + '</td>'
+      + '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (f.filer||'—') + '</td>'
+      + '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">' + (f.company||'—') + '</td>'
+      + '<td>' + (f.ticker ? '<span class="ticker-badge">'+(match?'📡 ':'')+f.ticker+'</span>' : '—') + '</td>'
+      + '<td>' + (f.pct_owned != null ? f.pct_owned.toFixed(1)+'%' : '—') + '</td>'
+      + '</tr>';
+  });
+  document.getElementById('activist-body').innerHTML = html ||
+    '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:30px">No activist filings found. Run smart_money.py --activist on the VM.</td></tr>';
+}
+
 function loadData() {
   // Load current scanner tickers (cached 10 min — changes rarely)
   fbCached('scanner/all_stocks', SM_CACHE_TTL, function(stocks) {
@@ -2492,12 +2671,18 @@ function loadData() {
 
     insiderData     = data.insiders     || [];
     institutionData = data.institutions || [];
+    arkData         = data.ark_holdings || {};
+    congressData    = data.congress     || [];
+    activistData    = data.activist     || [];
 
     var updated = data.last_updated ? new Date(data.last_updated).toLocaleString() : '—';
     document.getElementById('last-updated').textContent = 'Last updated: ' + updated + ' (cached)';
 
     renderInsiders();
     renderInstitutions();
+    renderARK();
+    renderCongress();
+    renderActivist();
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';

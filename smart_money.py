@@ -1,22 +1,30 @@
 """
 Smart Money Tracker
 ===================
-Fetches institutional & insider trading data from SEC EDGAR and pushes
-to Firebase. Run every 4 hours via cron.
+Fetches institutional & insider trading data and pushes to Firebase.
 
 Data sources (all free, no API key):
-  - Form 4 (SEC EDGAR)  : insider buy/sell transactions, filed within 2 days
-  - 13F-HR (SEC EDGAR)  : quarterly hedge fund holdings (top 10 funds)
+  - Form 4 (SEC EDGAR)     : insider buy/sell > $100K, filed within 2 days
+  - 13F-HR (SEC EDGAR)     : quarterly hedge fund holdings (top 10 funds)
+  - ARK Invest CSVs        : Cathie Wood's 6 ETFs, updated daily
+  - Senate Stock Watcher   : congressional trades (GitHub raw data)
+  - SC 13D/13G (SEC EDGAR) : activist investors crossing 5% ownership
 
 Firebase paths:
   /scanner/smart_money/insiders      : recent insider buys > $100K
-  /scanner/smart_money/institutions  : top hedge fund holdings
+  /scanner/smart_money/institutions  : top hedge fund holdings (13F)
+  /scanner/smart_money/ark_holdings  : ARK ETF holdings keyed by ticker
+  /scanner/smart_money/congress      : recent Senate stock trades
+  /scanner/smart_money/activist      : recent SC 13D/13G activist filings
   /scanner/smart_money/last_updated  : timestamp
 
 Usage:
-    python smart_money.py              # fetch everything
-    python smart_money.py --insiders   # only insider data
-    python smart_money.py --institutions # only 13F data
+    python smart_money.py                # fetch everything
+    python smart_money.py --insiders     # only Form 4 insider data
+    python smart_money.py --institutions # only 13F hedge fund data
+    python smart_money.py --ark          # only ARK holdings
+    python smart_money.py --congress     # only Senate trades
+    python smart_money.py --activist     # only 13D/13G filings
 """
 
 import os, re, time, json, logging, argparse
@@ -544,33 +552,352 @@ def fetch_institutional_holdings():
     return all_institutions
 
 
+# ── ARK Invest ETF Holdings ───────────────────────────────────────────────────
+
+ARK_BASE = "https://assets.ark-funds.com/fund-documents/funds-etf-csv/"
+ARK_FUNDS = {
+    "ARKK": "ARK_INNOVATION_ETF_ARKK_HOLDINGS.csv",
+    "ARKG": "ARK_GENOMIC_REVOLUTION_ETF_ARKG_HOLDINGS.csv",
+    "ARKW": "ARK_NEXT_GENERATION_INTERNET_ETF_ARKW_HOLDINGS.csv",
+    "ARKQ": "ARK_AUTONOMOUS_TECHNOLOGY_&_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
+    "ARKF": "ARK_FINTECH_INNOVATION_ETF_ARKF_HOLDINGS.csv",
+    "ARKX": "ARK_SPACE_EXPLORATION_&_INNOVATION_ETF_ARKX_HOLDINGS.csv",
+}
+ARK_MIN_WEIGHT = 0.5   # ignore positions < 0.5% weight (noise)
+
+def fetch_ark_holdings():
+    """
+    Fetch daily holdings CSVs for all 6 ARK ETFs.
+    Returns dict keyed by ticker: {ticker, funds, total_weight, total_value, date}
+    Aggregates across funds — a ticker in ARKK + ARKW gets combined weight.
+    """
+    import csv, io
+    holdings = {}
+
+    for symbol, filename in ARK_FUNDS.items():
+        url = ARK_BASE + filename
+        try:
+            r = requests.get(url, timeout=15,
+                             headers={"User-Agent": "stockscanner/1.0"})
+            if r.status_code != 200:
+                log.warning(f"  ARK {symbol}: HTTP {r.status_code}")
+                continue
+
+            reader = csv.DictReader(io.StringIO(r.text))
+            fund_count = 0
+            for row in reader:
+                ticker = (row.get("ticker") or "").strip().upper()
+                if not ticker or ticker in ("--", "NAN", ""):
+                    continue
+
+                weight_str = (row.get("weight (%)") or "0").strip().rstrip("%")
+                value_str  = (row.get("market value ($)") or "0").strip().replace("$","").replace(",","")
+                date_str   = (row.get("date") or "").strip()
+
+                try:
+                    weight = float(weight_str)
+                    value  = float(value_str)
+                except ValueError:
+                    continue
+                if weight < ARK_MIN_WEIGHT:
+                    continue
+
+                if ticker not in holdings:
+                    holdings[ticker] = {
+                        "ticker":       ticker,
+                        "funds":        [],
+                        "total_weight": 0.0,
+                        "total_value":  0,
+                        "date":         date_str,
+                    }
+                if symbol not in holdings[ticker]["funds"]:
+                    holdings[ticker]["funds"].append(symbol)
+                holdings[ticker]["total_weight"] = round(
+                    holdings[ticker]["total_weight"] + weight, 2)
+                holdings[ticker]["total_value"] += int(value)
+                fund_count += 1
+
+            log.info(f"  ARK {symbol}: {fund_count} qualifying positions")
+        except Exception as e:
+            log.warning(f"  ARK {symbol} error: {e}")
+        time.sleep(0.5)
+
+    log.info(f"ARK holdings: {len(holdings)} unique tickers across all funds")
+    return holdings
+
+
+# ── Senate Stock Trades ───────────────────────────────────────────────────────
+
+SENATE_JSON_URL = (
+    "https://raw.githubusercontent.com/timothycarambat/"
+    "senate-stock-watcher-data/master/aggregate/all_transactions.json"
+)
+
+def _extract_ticker_from_senate(description, ticker_field):
+    """Extract ticker from senate disclosure fields.
+    Senate data sometimes puts ticker in ticker_field, sometimes in description."""
+    t = (ticker_field or "").strip()
+    if t and t not in ("--", "N/A", ""):
+        return t.upper()
+    # Pattern: "COMPANY NAME (TICK) - Stock"
+    m = re.search(r'\(([A-Z]{1,5})\)', description or "")
+    if m:
+        return m.group(1)
+    # Pattern: "TICK - Company Name"
+    m = re.match(r'^([A-Z]{1,5})\s*[-–]\s*', (description or "").strip())
+    if m:
+        return m.group(1)
+    return None
+
+def fetch_senate_trades(days_back=90):
+    """
+    Fetch recent Senate stock trades from the senate-stock-watcher GitHub dataset.
+    Returns list of buy/sell trades sorted newest-first, capped at 300.
+    """
+    log.info(f"Fetching Senate stock trades (last {days_back} days)...")
+    try:
+        r = requests.get(SENATE_JSON_URL, timeout=30)
+        if r.status_code != 200:
+            log.warning(f"  Senate data HTTP {r.status_code}")
+            return []
+        data = r.json()
+    except Exception as e:
+        log.warning(f"  Senate data error: {e}")
+        return []
+
+    cutoff = (date.today() - timedelta(days=days_back))
+    trades  = []
+
+    for txn in data:
+        # Date is "MM/DD/YYYY"
+        try:
+            tx_date = datetime.strptime(txn.get("transaction_date", ""), "%m/%d/%Y").date()
+        except ValueError:
+            continue
+        if tx_date < cutoff:
+            continue
+
+        asset_type = (txn.get("asset_type") or "").strip()
+        if "Stock" not in asset_type:
+            continue
+
+        tx_type = (txn.get("type") or "").strip()
+        if not any(x in tx_type for x in ("Purchase", "Sale")):
+            continue
+
+        ticker = _extract_ticker_from_senate(
+            txn.get("asset_description"), txn.get("ticker")
+        )
+        if not ticker:
+            continue
+
+        trades.append({
+            "senator":  txn.get("senator", "Unknown"),
+            "ticker":   ticker,
+            "company":  txn.get("asset_description", ""),
+            "type":     "buy" if "Purchase" in tx_type else "sell",
+            "amount":   txn.get("amount", ""),
+            "date":     tx_date.isoformat(),
+            "owner":    txn.get("owner", ""),
+            "chamber":  "Senate",
+        })
+
+    trades.sort(key=lambda x: x["date"], reverse=True)
+    log.info(f"Senate trades: {len(trades)} in last {days_back} days")
+    return trades[:300]
+
+
+# ── Activist Investors — SC 13D / SC 13G ─────────────────────────────────────
+
+def fetch_activist_filings(days_back=30):
+    """
+    Fetch recent SC 13D and SC 13G filings from the EDGAR quarterly index.
+    SC 13D = activist investor crossing 5% and intending to influence management.
+    SC 13G = passive large holder crossing 5% with no activist intent.
+    Returns list sorted by filed date desc.
+    """
+    start = (date.today() - timedelta(days=days_back)).isoformat()
+    log.info(f"Fetching activist 13D/13G filings since {start}...")
+
+    today   = date.today()
+    quarter = (today.month - 1) // 3 + 1
+    idx_url = (f"https://www.sec.gov/Archives/edgar/full-index/"
+               f"{today.year}/QTR{quarter}/form.idx")
+
+    try:
+        r = requests.get(idx_url, headers=HEADERS, timeout=60, stream=True)
+        if r.status_code != 200:
+            log.error(f"  EDGAR index HTTP {r.status_code}")
+            return []
+    except Exception as e:
+        log.error(f"  EDGAR index error: {e}")
+        return []
+
+    target_forms = {"SC 13D", "SC 13G", "SC 13D/A", "SC 13G/A"}
+    filings = []
+
+    for raw in r.iter_lines():
+        if isinstance(raw, bytes):
+            raw = raw.decode("latin-1", errors="replace")
+        if not raw or len(raw) < 98:
+            continue
+        form_type = raw[:12].strip()
+        if form_type not in target_forms:
+            continue
+        filed = raw[86:98].strip()
+        if filed < start:
+            continue
+        company  = raw[12:74].strip()
+        cik      = raw[74:86].strip()
+        filename = raw[98:].strip()
+        m = re.search(r'(\d{10}-\d{2}-\d{6})', filename)
+        if not m:
+            continue
+        filings.append({
+            "form_type": form_type,
+            "filer":     company,
+            "cik":       cik,
+            "accession": m.group(1).replace("-", ""),
+            "filed":     filed,
+        })
+
+    log.info(f"Found {len(filings)} 13D/13G filings — parsing top 50...")
+    results = []
+    for f in filings[:50]:
+        parsed = _parse_13dg_filing(f)
+        if parsed:
+            results.append(parsed)
+        time.sleep(0.15)
+
+    results.sort(key=lambda x: x["filed"], reverse=True)
+    log.info(f"Activist filings parsed: {len(results)}")
+    return results
+
+
+def _parse_13dg_filing(filing):
+    """Parse SC 13D/G to extract target company name, CUSIP, ticker, % owned."""
+    base_url = (f"https://www.sec.gov/Archives/edgar/data/"
+                f"{filing['cik']}/{filing['accession']}/")
+    r_dir = sec_get(base_url)
+    if not r_dir:
+        return None
+
+    # Find the main filing document (not an exhibit, not the index)
+    doc_links = re.findall(r'href="([^"]*\.(htm[l]?|txt))"', r_dir.text, re.IGNORECASE)
+    doc_file  = None
+    for link, _ in doc_links:
+        name = link.lower().split("/")[-1]
+        if "index" not in name and not name.startswith("ex") and not name.startswith("exhibit"):
+            doc_file = name
+            break
+    if not doc_file:
+        return None
+
+    r = sec_get(f"{base_url}{doc_file}")
+    if not r:
+        return None
+
+    # Strip HTML and collapse whitespace for regex
+    clean = re.sub(r'<[^>]+>', ' ', r.text[:60000])
+    clean = re.sub(r'\s+', ' ', clean)
+
+    # CUSIP (9 alphanumeric chars after "CUSIP")
+    cusip_m = re.search(
+        r'CUSIP\s*(?:No\.?|Number)?\s*[:\.]?\s*([0-9A-Z]{9})',
+        clean, re.IGNORECASE
+    )
+    cusip = cusip_m.group(1) if cusip_m else None
+
+    # Issuer name (Item 1 of the form)
+    issuer_m = re.search(
+        r'(?:Name of Issuer|1\s*[\.:]?\s*Name of Issuer)[:\s]+([A-Z][^<\n\r]{3,60}?)(?:\s{2,}|CUSIP|Item\s*2)',
+        clean, re.IGNORECASE
+    )
+    company = issuer_m.group(1).strip() if issuer_m else ""
+
+    # Percent of class owned (Item 11 or "Percent of Class")
+    pct_m = re.search(
+        r'(?:Percent of Class|11\s*[\.:])[:\s]*([\d.]+)\s*%',
+        clean, re.IGNORECASE
+    )
+    pct_owned = round(float(pct_m.group(1)), 1) if pct_m else None
+
+    if not company and not cusip:
+        return None
+
+    result = {
+        "form_type":   filing["form_type"],
+        "filer":       filing["filer"].title(),
+        "company":     company.title() if company else "",
+        "cusip":       cusip or "",
+        "ticker":      "",
+        "pct_owned":   pct_owned,
+        "filed":       filing["filed"],
+        "is_activist": "13D" in filing["form_type"],
+    }
+
+    if cusip:
+        ticker_map      = cusip_to_ticker([cusip])
+        result["ticker"] = ticker_map.get(cusip, "")
+
+    return result
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--insiders",      action="store_true")
     parser.add_argument("--institutions",  action="store_true")
+    parser.add_argument("--ark",           action="store_true")
+    parser.add_argument("--congress",      action="store_true")
+    parser.add_argument("--activist",      action="store_true")
     args = parser.parse_args()
 
-    # Default: run both
-    run_insiders     = args.insiders     or not (args.insiders or args.institutions)
-    run_institutions = args.institutions or not (args.insiders or args.institutions)
+    run_all          = not any([args.insiders, args.institutions,
+                                args.ark, args.congress, args.activist])
+    run_insiders     = args.insiders     or run_all
+    run_institutions = args.institutions or run_all
+    run_ark          = args.ark          or run_all
+    run_congress     = args.congress     or run_all
+    run_activist     = args.activist     or run_all
 
     payload = {}
 
     if run_insiders:
         log.info("=== FETCHING INSIDER BUYS ===")
         buys = fetch_insider_buys()
-        payload["insiders"]     = buys
+        payload["insiders"]       = buys
         payload["insiders_count"] = len(buys)
         log.info(f"Insider buys: {len(buys)} transactions")
 
     if run_institutions:
-        log.info("=== FETCHING INSTITUTIONAL HOLDINGS ===")
+        log.info("=== FETCHING INSTITUTIONAL HOLDINGS (13F) ===")
         institutions = fetch_institutional_holdings()
         payload["institutions"]       = institutions
         payload["institutions_count"] = len(institutions)
         log.info(f"Institutions: {len(institutions)} funds")
+
+    if run_ark:
+        log.info("=== FETCHING ARK INVEST HOLDINGS ===")
+        ark = fetch_ark_holdings()
+        payload["ark_holdings"]       = ark
+        payload["ark_holdings_count"] = len(ark)
+        log.info(f"ARK holdings: {len(ark)} tickers")
+
+    if run_congress:
+        log.info("=== FETCHING SENATE TRADES ===")
+        congress = fetch_senate_trades(days_back=90)
+        payload["congress"]       = congress
+        payload["congress_count"] = len(congress)
+        log.info(f"Senate trades: {len(congress)}")
+
+    if run_activist:
+        log.info("=== FETCHING ACTIVIST 13D/13G FILINGS ===")
+        activist = fetch_activist_filings(days_back=30)
+        payload["activist"]       = activist
+        payload["activist_count"] = len(activist)
+        log.info(f"Activist filings: {len(activist)}")
 
     payload["last_updated"] = datetime.now().isoformat()
 
