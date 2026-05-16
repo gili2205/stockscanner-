@@ -752,25 +752,49 @@ def fetch_activist_filings(days_back=30):
     for raw in r.iter_lines():
         if isinstance(raw, bytes):
             raw = raw.decode("latin-1", errors="replace")
-        if not raw or len(raw) < 98:
+        if not raw or "SC 13" not in raw[:20]:
             continue
-        form_type = raw[:12].strip()
+
+        # Use regex instead of fixed column offsets — the form.idx column widths
+        # vary between SEC versions; fixed positions give wrong CIK/date values.
+
+        # Form type: at the start of the line
+        ft_m = re.match(r'^(SC\s+13[DG](?:/A)?)\s+', raw)
+        if not ft_m:
+            continue
+        form_type = re.sub(r'\s+', ' ', ft_m.group(1).strip())
         if form_type not in target_forms:
             continue
-        filed = raw[86:98].strip()
+
+        # Date: always YYYY-MM-DD
+        date_m = re.search(r'(\d{4}-\d{2}-\d{2})', raw)
+        if not date_m:
+            continue
+        filed = date_m.group(1)
         if filed < start:
             continue
-        company  = raw[12:74].strip()
-        cik      = raw[74:86].strip()
-        filename = raw[98:].strip()
-        m = re.search(r'(\d{10}-\d{2}-\d{6})', filename)
-        if not m:
+
+        # Filename: always contains 'edgar/data/' — CIK is embedded in path
+        path_m = re.search(r'edgar/data/(\d+)/(\S+)', raw)
+        if not path_m:
             continue
+        cik      = path_m.group(1)
+        fname    = path_m.group(2)
+
+        # Accession number from filename
+        acc_m = re.search(r'(\d{10}-\d{2}-\d{6})', fname)
+        if not acc_m:
+            continue
+
+        # Filer name: between end of form-type match and the date/CIK area
+        filer_raw = raw[ft_m.end():date_m.start()].strip()
+        filer = re.split(r'\s{3,}', filer_raw)[0].strip()
+
         filings.append({
             "form_type": form_type,
-            "filer":     company,
+            "filer":     filer,
             "cik":       cik,
-            "accession": m.group(1).replace("-", ""),
+            "accession": acc_m.group(1).replace("-", ""),
             "filed":     filed,
         })
 
