@@ -840,9 +840,9 @@ function makeCard(s, rank) {{
   var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
   var dailyAtrPct=Math.min(0.12,Math.max(0.01,base*(s.atr||1)));
   var entryNum=price*1.0025;
-  var atrStop=Math.min(0.12,Math.max(0.02,dailyAtrPct*1.5));
-  var minStop=atrStop<=0.05?0.05:atrStop<=0.08?0.07:0.08;
-  var stopDist=Math.max(atrStop,minStop);
+  // Stop = 1.5× daily ATR, clamped 2–12%. No artificial floor so each stock
+  // gets its own stop level rather than all snapping to 5% or 7%.
+  var stopDist=Math.min(0.12,Math.max(0.02,dailyAtrPct*1.5));
   var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
 
   // Risk/Reward
@@ -851,7 +851,7 @@ function makeCard(s, rank) {{
   var sig_lvl = (s.level||'').indexOf('ATH')>=0||(s.level||'').indexOf('multi')>=0;
   var sig_ema = (s.ema_stack||'')==='full';
   var rp = (sig_rs?1:0)+(sig_vol?1:0)+(sig_lvl?1:0)+(sig_ema?1:0);
-  var riskCat=stopDist<=0.05?'Low':stopDist<=0.08?'Medium':'High';
+  var riskCat=stopDist<0.04?'Low':stopDist<0.07?'Medium':'High';
   var riskColor=riskCat==='Low'?'#27ae60':riskCat==='Medium'?'#e67e22':'#e74c3c';
   var riskBg=riskCat==='Low'?'#1a3d2b':riskCat==='Medium'?'#3d2e10':'#3d1a1a';
   var rewardCat=rp>=3?'High':rp>=2?'Medium':'Low';
@@ -1127,13 +1127,19 @@ function applyCardData(ticker) {{
   setPct('p6m-'+ticker, d.change_6m);
 }}
 
-async function fetchCardData(ticker) {{
+async function fetchCardData(ticker, attempt) {{
+  attempt = attempt || 1;
   if (_cardData[ticker]) {{ applyCardData(ticker); return; }}
   if (_cardCache[ticker]) return;
   _cardCache[ticker] = true;
   try {{
     var resp = await fetch('/api/card-data/' + ticker);
-    if (!resp.ok) {{ _cardCache[ticker] = false; return; }}
+    if (!resp.ok) {{
+      _cardCache[ticker] = false;
+      // Retry once after 4s on rate-limit or server error
+      if (attempt < 3) setTimeout(function() {{ fetchCardData(ticker, attempt+1); }}, 4000 * attempt);
+      return;
+    }}
     var d = await resp.json();
     if (d.error) {{ _cardCache[ticker] = false; return; }}
     _cardData[ticker] = d;
@@ -1398,8 +1404,13 @@ def api_card_data(ticker):
     if not ticker or len(ticker) > 6:
         return jsonify({'error': 'Invalid ticker'}), 400
     try:
+        import time as _time
         tk   = yf.Ticker(ticker)
         hist = tk.history(period='1y', interval='1d')
+        if hist.empty:
+            # Retry once — Yahoo Finance occasionally rate-limits the first call
+            _time.sleep(1.0)
+            hist = tk.history(period='3mo', interval='1d')
         if hist.empty:
             return jsonify({'error': 'No data'}), 404
 
@@ -1439,7 +1450,9 @@ def api_card_data(ticker):
         info   = tk.info or {}
         pe     = info.get('trailingPE') or info.get('forwardPE')
         target = info.get('targetMeanPrice')
-        upside = round((target - price) / price * 100, 1) if target and price else None
+        # Use real-time price for upside so intraday moves don't skew the %
+        current_price = info.get('currentPrice') or getattr(fi, 'last_price', None) or price
+        upside = round((target - current_price) / current_price * 100, 1) if target and current_price else None
 
         return jsonify({
             'market_cap':      mc_str,
