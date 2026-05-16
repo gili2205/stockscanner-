@@ -877,10 +877,10 @@ function makeCard(s, rank) {{
   var rr=riskCat+'/'+rewardCat,setupCat,setupColor,setupBg,setupIcon;
   if     (rr==='Low/High')    {{ setupCat='Best setup';  setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#11088;'; }}
   else if(rr==='Low/Medium')  {{ setupCat='Good setup';  setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#9989;'; }}
-  else if(rr==='Medium/High') {{ setupCat='High upside'; setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127919;'; }}
-  else if(rr==='Medium/Medium'){{ setupCat='Balanced';   setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#128202;'; }}
-  else if(rr==='High/High')   {{ setupCat='Aggressive';  setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127922;'; }}
-  else if(rr==='Low/Low')     {{ setupCat='Weak upside'; setupColor='#8892a4';setupBg='#22263a';setupIcon='&#128201;'; }}
+  else if(rr==='Medium/High') {{ setupCat='Strong reward'; setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127919;'; }}
+  else if(rr==='Medium/Medium'){{ setupCat='Balanced';    setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#128202;'; }}
+  else if(rr==='High/High')   {{ setupCat='Aggressive';   setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127922;'; }}
+  else if(rr==='Low/Low')     {{ setupCat='Weak reward';  setupColor='#8892a4';setupBg='#22263a';setupIcon='&#128201;'; }}
   else                        {{ setupCat='Skip';        setupColor='#e74c3c';setupBg='#3d1a1a';setupIcon='&#9888;'; }}
 
   // Signal chips
