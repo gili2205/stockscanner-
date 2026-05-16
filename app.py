@@ -1066,87 +1066,38 @@ document.addEventListener('click', function(e) {{
   if(p && !p.contains(e.target)) p.style.display = 'none';
 }});
 
-// _fundData stores fetched data persistently across re-renders
-// _fundCache tracks which tickers are currently being fetched
-var _fundData  = {{}};
-var _fundCache = {{}};
+// _cardData stores combined fundamentals+perf persistently across re-renders.
+// Replaces the old separate _fundData/_perfData — halves yfinance API calls.
+var _cardData  = {{}};
+var _cardCache = {{}};
 
-function applyFundamentals(ticker) {{
-  var d = _fundData[ticker];
+function applyCardData(ticker) {{
+  var d = _cardData[ticker];
   if (!d) return;
   var card = document.getElementById('card-'+ticker);
   if (!card) return;
-  if(d.pe_ratio) {{
-    var pe=d.pe_ratio;
-    var peEl=card.querySelector('.fund-pe-val'), peSub=card.querySelector('.fund-pe-sub');
-    if(peEl){{peEl.textContent=pe.toFixed(1);peEl.style.color=pe<20?'var(--green)':pe<40?'var(--amber)':'var(--red)';}}
-    if(peSub) peSub.textContent=pe<20?'Cheap':pe<40?'Fair':'Pricey';
+  // ── Fundamentals ──────────────────────────────────────────────────────────
+  if (d.pe_ratio) {{
+    var pe = d.pe_ratio;
+    var peEl = card.querySelector('.fund-pe-val'), peSub = card.querySelector('.fund-pe-sub');
+    if (peEl) {{ peEl.textContent = pe.toFixed(1); peEl.style.color = pe<20?'var(--green)':pe<40?'var(--amber)':'var(--red)'; }}
+    if (peSub) peSub.textContent = pe<20?'Cheap':pe<40?'Fair':'Pricey';
   }}
-  if(d.rsi!=null) {{
-    var rsi=d.rsi;
-    var rsiEl=card.querySelector('.fund-rsi-val'), rsiSub=card.querySelector('.fund-rsi-sub');
-    if(rsiEl){{rsiEl.textContent=rsi.toFixed(0);rsiEl.style.color=rsi>=70?'var(--red)':rsi<=30?'var(--blue)':'var(--green)';}}
-    if(rsiSub) rsiSub.textContent=rsi>=70?'Overbought':rsi<=30?'Oversold':'Healthy';
+  if (d.rsi != null) {{
+    var rsi = d.rsi;
+    var rsiEl = card.querySelector('.fund-rsi-val'), rsiSub = card.querySelector('.fund-rsi-sub');
+    if (rsiEl) {{ rsiEl.textContent = rsi.toFixed(0); rsiEl.style.color = rsi>=70?'var(--red)':rsi<=30?'var(--blue)':'var(--green)'; }}
+    if (rsiSub) rsiSub.textContent = rsi>=70?'Overbought':rsi<=30?'Oversold':'Healthy';
   }}
-  if(d.pe_ratio||d.rsi!=null) {{
-    var upEl=card.querySelector('.fund-tgt-val'), subEl=card.querySelector('.fund-tgt-sub');
-    var tgt=d.analyst_target, up=d.analyst_upside!=null?parseFloat(d.analyst_upside):null;
-    var col=up!=null&&up>5?'var(--green)':up!=null&&up<-5?'var(--red)':'var(--muted)';
-    if(upEl&&tgt){{upEl.textContent='$'+tgt.toFixed(0);upEl.style.color=col;}}
-    if(subEl){{subEl.textContent=up!=null?(up>=0?'+':'')+up.toFixed(1)+'%':'';subEl.style.color=col;}}
-  }}
-}}
-
-async function fetchFundamentals(ticker) {{
-  // If already have data, just apply it to current DOM
-  if(_fundData[ticker]) {{ applyFundamentals(ticker); return; }}
-  // If currently fetching, skip
-  if(_fundCache[ticker]) return;
-  _fundCache[ticker] = true;
-  try {{
-    var resp = await fetch('/lookup?t='+ticker);
-    if(!resp.ok) {{ _fundCache[ticker]=false; return; }}
-    var d = await resp.json();
-    if(d.error) {{ _fundCache[ticker]=false; return; }}
-    _fundData[ticker] = d; // persist data
-    applyFundamentals(ticker);
-  }} catch(e) {{ _fundCache[ticker]=false; }}
-}}
-
-function prefetchAllFundamentals() {{
-  // First apply cached data immediately (no delay)
-  var headers = document.querySelectorAll('.card-header');
-  var needFetch = [];
-  headers.forEach(function(hdr) {{
-    var ticker = hdr.getAttribute('data-ticker');
-    if(!ticker) return;
-    if(_fundData[ticker]) {{
-      applyFundamentals(ticker); // instant - from cache
-    }} else {{
-      needFetch.push(ticker);
-    }}
-  }});
-  // Then fetch missing ones with small stagger
-  needFetch.forEach(function(ticker, i) {{
-    setTimeout(function() {{ fetchFundamentals(ticker); }}, i * 150);
-    setTimeout(function() {{ fetchPerf(ticker); }}, i * 150 + 75);
-  }});
-  // Apply cached perf data immediately
-  headers.forEach(function(hdr) {{
-    var ticker = hdr.getAttribute('data-ticker');
-    if(ticker && _perfData[ticker]) applyPerf(ticker);
-  }});
-}}
-
-// ── Performance (market cap + 1W/1M/3M/6M) ───────────────────────────────────
-var _perfData  = {{}};
-var _perfCache = {{}};
-
-function applyPerf(ticker) {{
-  var d = _perfData[ticker];
-  if (!d) return;
+  var upEl = card.querySelector('.fund-tgt-val'), subEl = card.querySelector('.fund-tgt-sub');
+  var tgt = d.analyst_target, up = d.analyst_upside != null ? parseFloat(d.analyst_upside) : null;
+  var col = up!=null&&up>5?'var(--green)':up!=null&&up<-5?'var(--red)':'var(--muted)';
+  if (upEl && tgt) {{ upEl.textContent = '$'+tgt.toFixed(0); upEl.style.color = col; }}
+  if (subEl) {{ subEl.textContent = up!=null?(up>=0?'+':'')+up.toFixed(1)+'%':''; subEl.style.color = col; }}
+  // ── Market cap ───────────────────────────────────────────────────────────
   var mcap = document.getElementById('mcap-'+ticker);
   if (mcap && d.market_cap) mcap.textContent = d.market_cap;
+  // ── 1W/1M/3M/6M performance ──────────────────────────────────────────────
   function setPct(id, val) {{
     var el = document.getElementById(id);
     if (!el) return;
@@ -1160,18 +1111,40 @@ function applyPerf(ticker) {{
   setPct('p6m-'+ticker, d.change_6m);
 }}
 
-async function fetchPerf(ticker) {{
-  if (_perfData[ticker]) {{ applyPerf(ticker); return; }}
-  if (_perfCache[ticker]) return;
-  _perfCache[ticker] = true;
+async function fetchCardData(ticker) {{
+  if (_cardData[ticker]) {{ applyCardData(ticker); return; }}
+  if (_cardCache[ticker]) return;
+  _cardCache[ticker] = true;
   try {{
-    var resp = await fetch('/api/perf/' + ticker);
-    if (!resp.ok) {{ _perfCache[ticker] = false; return; }}
+    var resp = await fetch('/api/card-data/' + ticker);
+    if (!resp.ok) {{ _cardCache[ticker] = false; return; }}
     var d = await resp.json();
-    if (d.error) {{ _perfCache[ticker] = false; return; }}
-    _perfData[ticker] = d;
-    applyPerf(ticker);
-  }} catch(e) {{ _perfCache[ticker] = false; }}
+    if (d.error) {{ _cardCache[ticker] = false; return; }}
+    _cardData[ticker] = d;
+    applyCardData(ticker);
+  }} catch(e) {{ _cardCache[ticker] = false; }}
+}}
+
+// Keep legacy aliases so any other callers still work
+function fetchFundamentals(ticker) {{ fetchCardData(ticker); }}
+function fetchPerf(ticker)         {{ fetchCardData(ticker); }}
+
+function prefetchAllFundamentals() {{
+  var headers = document.querySelectorAll('.card-header');
+  var needFetch = [];
+  headers.forEach(function(hdr) {{
+    var ticker = hdr.getAttribute('data-ticker');
+    if (!ticker) return;
+    if (_cardData[ticker]) {{
+      applyCardData(ticker); // instant — from in-memory cache
+    }} else {{
+      needFetch.push(ticker);
+    }}
+  }});
+  // Stagger: one request per card, 250 ms apart — avoids hammering Yahoo Finance
+  needFetch.forEach(function(ticker, i) {{
+    setTimeout(function() {{ fetchCardData(ticker); }}, i * 250);
+  }});
 }}
 
 function doChart(btn) {{
@@ -1393,6 +1366,75 @@ def api_perf(ticker):
             'change_1m':  pct(21),
             'change_3m':  pct(63),
             'change_6m':  pct(126),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/card-data/<ticker>')
+def api_card_data(ticker):
+    """
+    Combined endpoint: returns fundamentals + performance in a single yfinance call.
+    Replaces the separate /lookup and /api/perf calls to halve Yahoo Finance requests
+    and avoid rate-limit timeouts that left cards with all-dash values.
+    """
+    ticker = ticker.upper().strip()
+    if not ticker or len(ticker) > 6:
+        return jsonify({'error': 'Invalid ticker'}), 400
+    try:
+        tk   = yf.Ticker(ticker)
+        hist = tk.history(period='1y', interval='1d')
+        if hist.empty:
+            return jsonify({'error': 'No data'}), 404
+
+        closes = hist['Close'].tolist()
+        price  = closes[-1]
+
+        # ── Performance (uses full 1y history) ───────────────────────────────
+        def pct(n):
+            if len(closes) > n and n > 0:
+                base = closes[-(n+1)]
+                if base and base > 0:
+                    return round((price - base) / base * 100, 1)
+            return None
+
+        # ── RSI (14) from last 15 closes ─────────────────────────────────────
+        rsi = None
+        if len(closes) >= 15:
+            deltas = [closes[i] - closes[i-1] for i in range(len(closes)-14, len(closes))]
+            gains  = [max(d, 0) for d in deltas]
+            losses = [abs(min(d, 0)) for d in deltas]
+            avg_g  = sum(gains) / 14
+            avg_l  = sum(losses) / 14
+            if avg_l == 0 and avg_g > 0:
+                rsi = 100.0
+            elif avg_l > 0:
+                rsi = round(100 - 100 / (1 + avg_g / avg_l), 1)
+
+        # ── Fundamentals (fast_info first to avoid slow info dict) ────────────
+        fi     = tk.fast_info
+        mc     = getattr(fi, 'market_cap', None)
+        mc_str = None
+        if mc:
+            if   mc >= 1e12: mc_str = f"{mc/1e12:.1f}T"
+            elif mc >= 1e9:  mc_str = f"{mc/1e9:.1f}B"
+            else:             mc_str = f"{mc/1e6:.0f}M"
+
+        info   = tk.info or {}
+        pe     = info.get('trailingPE') or info.get('forwardPE')
+        target = info.get('targetMeanPrice')
+        upside = round((target - price) / price * 100, 1) if target and price else None
+
+        return jsonify({
+            'market_cap':      mc_str,
+            'pe_ratio':        round(float(pe), 1) if pe and pe > 0 else None,
+            'rsi':             rsi,
+            'analyst_target':  round(float(target), 2) if target else None,
+            'analyst_upside':  upside,
+            'change_1w':       pct(5),
+            'change_1m':       pct(21),
+            'change_3m':       pct(63),
+            'change_6m':       pct(126),
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
