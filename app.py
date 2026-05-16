@@ -2296,6 +2296,31 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sell-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#3d1a1a;color:var(--red);}
 .activist-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#2d1a3d;color:var(--purple);}
 .passive-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--bg3);color:var(--muted);}
+/* Stats bar */
+.stats-bar{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px;}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}
+.stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.stat-val{font-size:22px;font-weight:700;line-height:1;}
+.stat-sub{font-size:10px;color:var(--muted);margin-top:4px;}
+.stat-card.green .stat-val{color:var(--green);}
+.stat-card.blue .stat-val{color:var(--blue);}
+.stat-card.amber .stat-val{color:var(--amber);}
+.stat-card.purple .stat-val{color:var(--purple);}
+.stat-card.teal .stat-val{color:#1abc9c;}
+/* Conviction grid */
+.conviction-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;}
+.cv-card{background:var(--bg3);border-radius:8px;padding:12px 14px;border-left:3px solid var(--border);cursor:default;}
+.cv-card.cv-high{border-left-color:var(--green);}
+.cv-card.cv-mid{border-left-color:var(--amber);}
+.cv-ticker{font-size:16px;font-weight:700;margin-bottom:6px;}
+.cv-score{font-size:10px;color:var(--muted);margin-bottom:6px;}
+.cv-signals{display:flex;flex-wrap:wrap;gap:4px;}
+.cv-chip{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;}
+.cv-chip.insider{background:#1a2a3d;color:var(--blue);}
+.cv-chip.hedge{background:#2d3d1a;color:#7dbb45;}
+.cv-chip.ark{background:#1a3d3d;color:#1abc9c;}
+.cv-chip.congress{background:#3d2e10;color:var(--amber);}
+.cv-chip.activist{background:#2d1a3d;color:var(--purple);}
 </style>
 <!--FB_CONFIG-->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -2333,6 +2358,46 @@ var fdb = firebase.database();
 <div class="page">
   <div id="loading" class="loading">⏳ Loading smart money data...</div>
   <div id="content" style="display:none">
+
+    <!-- Stats Bar -->
+    <div class="stats-bar" id="stats-bar">
+      <div class="stat-card green">
+        <div class="stat-label">Insider Buy Volume</div>
+        <div class="stat-val" id="st-insider-vol">—</div>
+        <div class="stat-sub" id="st-insider-n">— transactions</div>
+      </div>
+      <div class="stat-card blue">
+        <div class="stat-label">Hedge Fund Picks</div>
+        <div class="stat-val" id="st-hf-n">—</div>
+        <div class="stat-sub" id="st-hf-funds">— funds tracked</div>
+      </div>
+      <div class="stat-card teal">
+        <div class="stat-label">ARK Holdings</div>
+        <div class="stat-val" id="st-ark-n">—</div>
+        <div class="stat-sub" id="st-ark-sub">unique tickers</div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-label">Congress Trades</div>
+        <div class="stat-val" id="st-cong-n">—</div>
+        <div class="stat-sub" id="st-cong-sub">— buys · — sells</div>
+      </div>
+      <div class="stat-card purple">
+        <div class="stat-label">Activist Filings</div>
+        <div class="stat-val" id="st-act-n">—</div>
+        <div class="stat-sub" id="st-act-sub">13D/13G filings</div>
+      </div>
+    </div>
+
+    <!-- Top Conviction -->
+    <div class="section">
+      <h2>🎖️ Top Conviction Tickers
+        <span style="font-size:11px;color:var(--muted);font-weight:400" id="cv-sub">— tickers appearing across multiple smart money sources</span>
+      </h2>
+      <p class="sub">The more sources agree on a ticker, the stronger the signal. Insider + Hedge Fund + ARK = rare alignment.</p>
+      <div class="conviction-grid" id="conviction-grid">
+        <div style="color:var(--muted);padding:20px">Computing...</div>
+      </div>
+    </div>
 
     <!-- Insider Buying -->
     <div class="section">
@@ -2652,6 +2717,103 @@ function renderActivist() {
     '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:30px">No activist filings found. Run smart_money.py --activist on the VM.</td></tr>';
 }
 
+function renderStats() {
+  // ── 1. Insider stats ────────────────────────────────────────────────────────
+  var insiderVol = insiderData.reduce(function(s, r) { return s + (r.value || 0); }, 0);
+  document.getElementById('st-insider-vol').textContent = fmtVal(insiderVol) || '—';
+  document.getElementById('st-insider-n').textContent   = insiderData.length + ' transactions';
+
+  // ── 2. Hedge fund stats ─────────────────────────────────────────────────────
+  var allHFTickers = new Set();
+  institutionData.forEach(function(fund) {
+    (fund.holdings || []).forEach(function(h) { if (h.ticker) allHFTickers.add(h.ticker); });
+  });
+  document.getElementById('st-hf-n').textContent     = allHFTickers.size;
+  document.getElementById('st-hf-funds').textContent = institutionData.length + ' funds tracked';
+
+  // ── 3. ARK stats ─────────────────────────────────────────────────────────────
+  var arkCount = Object.keys(arkData).length;
+  document.getElementById('st-ark-n').textContent   = arkCount;
+  document.getElementById('st-ark-sub').textContent = 'unique tickers across ' + ['ARKK','ARKG','ARKW','ARKQ','ARKF','ARKX'].filter(function(f) {
+    return Object.values(arkData).some(function(v) { return (v.funds || []).includes(f); });
+  }).length + ' ETFs';
+
+  // ── 4. Congress stats ────────────────────────────────────────────────────────
+  var congBuys  = congressData.filter(function(t) { return (t.type||'').toLowerCase() === 'buy'; }).length;
+  var congSells = congressData.filter(function(t) { return (t.type||'').toLowerCase() === 'sell'; }).length;
+  document.getElementById('st-cong-n').textContent   = congressData.length;
+  document.getElementById('st-cong-sub').textContent = congBuys + ' buys · ' + congSells + ' sells';
+
+  // ── 5. Activist stats ────────────────────────────────────────────────────────
+  var actCount13D = activistData.filter(function(f) { return f.is_activist; }).length;
+  document.getElementById('st-act-n').textContent   = activistData.length;
+  document.getElementById('st-act-sub').textContent = actCount13D + ' activist (13D) · ' + (activistData.length - actCount13D) + ' passive (13G)';
+
+  // ── 6. Conviction grid ───────────────────────────────────────────────────────
+  // Build per-ticker signal map across all 5 sources
+  var signals = {};  // ticker → { insider, hedge, ark, congress, activist }
+
+  insiderData.forEach(function(r) {
+    if (!r.ticker) return;
+    signals[r.ticker] = signals[r.ticker] || {};
+    signals[r.ticker].insider = true;
+  });
+  institutionData.forEach(function(fund) {
+    (fund.holdings || []).forEach(function(h) {
+      if (!h.ticker) return;
+      signals[h.ticker] = signals[h.ticker] || {};
+      signals[h.ticker].hedge = true;
+    });
+  });
+  Object.keys(arkData).forEach(function(t) {
+    signals[t] = signals[t] || {};
+    signals[t].ark = true;
+  });
+  congressData.forEach(function(t) {
+    if (!t.ticker || (t.type||'').toLowerCase() !== 'buy') return;
+    signals[t.ticker] = signals[t.ticker] || {};
+    signals[t.ticker].congress = true;
+  });
+  activistData.forEach(function(f) {
+    if (!f.ticker) return;
+    signals[f.ticker] = signals[f.ticker] || {};
+    signals[f.ticker].activist = true;
+  });
+
+  // Score = count of sources; sort descending
+  var ranked = Object.keys(signals).map(function(t) {
+    var s = signals[t];
+    var score = (s.insider ? 1 : 0) + (s.hedge ? 1 : 0) + (s.ark ? 1 : 0) + (s.congress ? 1 : 0) + (s.activist ? 1 : 0);
+    return { ticker: t, score: score, signals: s };
+  }).filter(function(x) { return x.score >= 2; });
+  ranked.sort(function(a, b) { return b.score - a.score; });
+
+  var top = ranked.slice(0, 20);
+  document.getElementById('cv-sub').textContent = '— ' + top.length + ' tickers with 2+ sources';
+
+  if (!top.length) {
+    document.getElementById('conviction-grid').innerHTML =
+      '<div style="color:var(--muted);padding:20px">No overlapping signals yet — run all smart_money.py sources.</div>';
+    return;
+  }
+
+  var labels = { insider: '👤 Insider', hedge: '🏛 Hedge Fund', ark: '🚀 ARK', congress: '🏙 Congress', activist: '🎯 Activist' };
+  var html = '';
+  top.forEach(function(item) {
+    var cls = item.score >= 3 ? 'cv-high' : 'cv-mid';
+    var inScanner = scannerTickers.has(item.ticker);
+    html += '<div class="cv-card ' + cls + '">';
+    html += '<div class="cv-ticker">' + item.ticker + (inScanner ? ' <span class="scanner-match">📡</span>' : '') + '</div>';
+    html += '<div class="cv-score">' + item.score + ' of 5 sources</div>';
+    html += '<div class="cv-signals">';
+    ['insider','hedge','ark','congress','activist'].forEach(function(k) {
+      if (item.signals[k]) html += '<span class="cv-chip ' + k + '">' + labels[k] + '</span>';
+    });
+    html += '</div></div>';
+  });
+  document.getElementById('conviction-grid').innerHTML = html;
+}
+
 function loadData() {
   // Load current scanner tickers (cached 10 min — changes rarely)
   fbCached('scanner/all_stocks', SM_CACHE_TTL, function(stocks) {
@@ -2678,6 +2840,7 @@ function loadData() {
     var updated = data.last_updated ? new Date(data.last_updated).toLocaleString() : '—';
     document.getElementById('last-updated').textContent = 'Last updated: ' + updated + ' (cached)';
 
+    renderStats();
     renderInsiders();
     renderInstitutions();
     renderARK();
