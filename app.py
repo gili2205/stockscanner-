@@ -261,13 +261,13 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
       </div>
     </div>
 
-    <!-- Score focus -->
+    <!-- Score focus / sort -->
     <div class="fgroup">
-      <div class="fgrouplabel">&#127919; Score focus</div>
+      <div class="fgrouplabel">&#127919; Sort by score</div>
       <div class="fchips">
-        <div class="fchip blue"  id="preset-breakout" onclick="setPreset('breakout')"><span class="fcheck"></span>&#128202; Technical</div>
-        <div class="fchip green" id="preset-quality"  onclick="setPreset('quality')"><span class="fcheck"></span>&#127807; Tech + Fundamental</div>
-        <div class="fchip amber on" id="preset-full"  onclick="setPreset('full')"><span class="fcheck"></span>&#127919; All signals</div>
+        <div class="fchip amber on" id="preset-full"     onclick="setScoreSort('buy_now')"><span class="fcheck"></span>&#127919; Score (buy now)</div>
+        <div class="fchip blue"     id="preset-quality"  onclick="setScoreSort('quality')"><span class="fcheck"></span>&#128202; Quality</div>
+        <div class="fchip green"    id="preset-setup"    onclick="setScoreSort('setup')"><span class="fcheck"></span>&#127807; Setup</div>
       </div>
     </div>
 
@@ -307,10 +307,9 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 
 <div class="sortrow">
   <select id="ssort" onchange="render()">
-    <option value="buy_now">Sort: Buy Now</option>
+    <option value="buy_now">Sort: Score (buy now)</option>
     <option value="quality">Sort: Quality</option>
     <option value="setup">Sort: Setup</option>
-    <option value="score">Sort: score</option>
     <option value="dist">Sort: nearest trigger</option>
     <option value="atr">Sort: tightest coil</option>
     <option value="vol">Sort: driest volume</option>
@@ -338,18 +337,24 @@ var watchlistTickers  = {{}};  // ticker → true (user-starred from Sentiment/S
 var layerWeights = {{ tech: 50, fund: 30, cat: 20 }};
 
 function setPreset(name) {{
-  var presets = {{
-    breakout: {{ tech:100, fund:0,  cat:0  }},
-    quality:  {{ tech:50,  fund:50, cat:0  }},
-    full:     {{ tech:50,  fund:30, cat:20 }},
-  }};
-  if (!presets[name]) return;
-  layerWeights = Object.assign({{}}, presets[name]);
-  // Highlight active chip, clear others
-  ['breakout','quality','full'].forEach(function(p) {{
+  // Legacy — kept for backward compat; maps to setScoreSort
+  var map = {{ breakout:'setup', quality:'quality', full:'buy_now' }};
+  setScoreSort(map[name] || 'buy_now');
+}}
+
+function setScoreSort(sortKey) {{
+  // Update the ssort dropdown and re-render
+  var sel = document.getElementById('ssort');
+  if (sel) sel.value = sortKey;
+  sortBy = sortKey;
+  // Highlight active chip
+  ['full','quality','setup'].forEach(function(p) {{
     var el = document.getElementById('preset-'+p);
-    if (el) el.classList.toggle('on', p === name);
+    if (el) el.classList.remove('on');
   }});
+  var chipMap = {{ buy_now:'full', quality:'quality', setup:'setup' }};
+  var active = chipMap[sortKey];
+  if (active) {{ var el = document.getElementById('preset-'+active); if(el) el.classList.add('on'); }}
   render();
 }}
 
@@ -1006,12 +1011,8 @@ function makeCard(s, rank) {{
   h += '</div></div>';
   h += '<div style="text-align:right">';
   h += '<div id="'+scoreId+'" style="cursor:pointer" onclick="event.stopPropagation();showBreakdown(this)">';
-  h += '<div style="font-size:30px;font-weight:700;color:'+buyNowColor+';line-height:1">'+buyNowScore+'</div>';
-  h += '<div style="font-size:9px;font-weight:700;letter-spacing:.8px;color:'+buyNowColor+';margin-top:2px;text-align:center">BUY NOW</div>';
-  h += '<div style="margin-top:6px;display:flex;gap:12px;justify-content:flex-end">';
-  h += '<div style="text-align:center"><div style="font-size:13px;font-weight:700;color:#5b8dd9">'+qualityScore+'</div><div style="font-size:8px;color:var(--muted);letter-spacing:.5px">QUALITY</div></div>';
-  h += '<div style="text-align:center"><div style="font-size:13px;font-weight:700;color:#e67e22">'+setupScore+'</div><div style="font-size:8px;color:var(--muted);letter-spacing:.5px">SETUP</div></div>';
-  h += '</div>';
+  h += '<div style="font-size:32px;font-weight:700;color:'+buyNowColor+';line-height:1">'+buyNowScore+'</div>';
+  h += '<div style="font-size:9px;font-weight:700;letter-spacing:.8px;color:'+buyNowColor+';margin-top:2px;text-align:center">SCORE</div>';
   h += '</div>';
   h += '<div style="font-size:10px;font-weight:600;letter-spacing:.5px;color:var(--muted);margin-top:5px;text-align:right">'+s.status+'</div>';
   h += '</div>';
@@ -1071,6 +1072,23 @@ function makeCard(s, rank) {{
   h += '<div class="fbox"><div class="flbl">EMA stack</div><div class="fval '+('full'===(s.ema_stack||'')?'fg':'partial'===(s.ema_stack||'')?'fa':'fr')+'">'+(s.ema_stack||'&mdash;')+'</div><div class="fsub">'+('full'===(s.ema_stack||'')?'Strong trend':'partial'===(s.ema_stack||'')?'Partial':'Weak')+'</div></div>';
   h += '<div class="fbox"><div class="flbl">Level</div><div class="fval" style="color:'+(lc(s.level))+'">'+(s.level||'&mdash;')+'</div><div class="fsub">'+((s.level||'').indexOf('ATH')>=0?'No resistance':(s.level||'').indexOf('multi')>=0?'Multi-year':'Prior level')+'</div></div>';
   h += '<div class="fbox"><div class="flbl">Distance</div><div class="fval" style="color:'+pc+'">'+Math.abs(dist).toFixed(1)+'%</div><div class="fsub">'+(dist<=0?'Broke out':dist<=1?'Very close':'Away')+'</div></div>';
+  h += '</div>';
+
+  // Score breakdown row
+  var qBar=Math.round(qualityScore); var sBar=Math.round(setupScore);
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">';
+  h += '<div style="background:var(--bg3);border-radius:8px;padding:8px 12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">';
+  h += '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Quality</span>';
+  h += '<span style="font-size:14px;font-weight:700;color:#5b8dd9">'+qBar+'</span></div>';
+  h += '<div style="height:4px;background:var(--bg2);border-radius:2px"><div style="height:100%;width:'+qBar+'%;background:#5b8dd9;border-radius:2px"></div></div>';
+  h += '<div style="font-size:9px;color:var(--muted);margin-top:3px">RS · Trend · Momentum · Fundamentals</div></div>';
+  h += '<div style="background:var(--bg3);border-radius:8px;padding:8px 12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">';
+  h += '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Setup</span>';
+  h += '<span style="font-size:14px;font-weight:700;color:#e67e22">'+sBar+'</span></div>';
+  h += '<div style="height:4px;background:var(--bg2);border-radius:2px"><div style="height:100%;width:'+sBar+'%;background:#e67e22;border-radius:2px"></div></div>';
+  h += '<div style="font-size:9px;color:var(--muted);margin-top:3px">Coil · Vol dry · Level · RSI</div></div>';
   h += '</div>';
 
   // Risk/Reward
@@ -1731,12 +1749,12 @@ var fdb = firebase.database();
       <span id="data-info" style="font-size:11px;color:var(--muted)"></span>
     </div>
 
-    <!-- Score focus chips -->
+    <!-- Score focus chips (history) -->
     <div style="display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap;">
-      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Score focus:</span>
-      <button class="sort-btn active" id="focus-all"  onclick="setLayerFocus('all')">&#127919; All signals</button>
-      <button class="sort-btn"        id="focus-tech" onclick="setLayerFocus('tech')">&#128202; Technical only</button>
-      <button class="sort-btn"        id="focus-cat"  onclick="setLayerFocus('cat')">&#9889; Catalyst only</button>
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Sort score:</span>
+      <button class="sort-btn active" id="focus-all"     onclick="setHistorySort('buy_now')">&#127919; Score (buy now)</button>
+      <button class="sort-btn"        id="focus-quality" onclick="setHistorySort('quality')">&#128202; Quality</button>
+      <button class="sort-btn"        id="focus-setup"   onclick="setHistorySort('setup')">&#127807; Setup</button>
     </div>
 
     <!-- KPI row -->
@@ -1784,14 +1802,11 @@ var fdb = firebase.database();
       <!-- Table sort + search -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Sort:</span>
-        <button class="sort-btn active" id="sort-btn-buy_now" onclick="setSort('buy_now')" style="background:#1a3d2b;border-color:#27ae60;color:#27ae60;font-weight:700">🎯 Buy Now</button>
+        <button class="sort-btn active" id="sort-btn-buy_now" onclick="setSort('buy_now')" style="background:#1a3d2b;border-color:#27ae60;color:#27ae60;font-weight:700">🎯 Score</button>
         <button class="sort-btn"        id="sort-btn-quality" onclick="setSort('quality')">💎 Quality</button>
         <button class="sort-btn"        id="sort-btn-setup"   onclick="setSort('setup')">🎣 Setup</button>
         <button class="sort-btn"        id="sort-btn-date"    onclick="setSort('scan_date')">📅 Date</button>
         <button class="sort-btn"        id="sort-btn-abc"     onclick="setSort('ticker_asc')">🔤 A–Z</button>
-        <button class="sort-btn"        id="sort-btn-score"   onclick="setSort('score')">⭐ Score</button>
-        <button class="sort-btn"        id="sort-btn-tech"    onclick="setSort('score_technical')">📊 Tech</button>
-        <button class="sort-btn"        id="sort-btn-cat"     onclick="setSort('score_catalyst')">⚡ Catalyst</button>
         <button class="sort-btn"        id="sort-btn-ret1w" onclick="setSort('ret_1w')">1W Return</button>
         <button class="sort-btn"        id="sort-btn-ret1m" onclick="setSort('ret_1m')">1M Return</button>
         <button class="sort-btn"        id="sort-btn-ret3m" onclick="setSort('ret_3m')">3M Return</button>
@@ -1883,10 +1898,19 @@ function aBlendScore(p) {
 }
 
 function setLayerFocus(f) {
-  layerFocus = f;
-  ['all','tech','cat'].forEach(function(x) {
-    document.getElementById('focus-'+x).classList.toggle('active', x === f);
+  // Legacy wrapper — kept for backward compat
+  var map = { all:'buy_now', tech:'setup', cat:'quality' };
+  setHistorySort(map[f] || 'buy_now');
+}
+
+function setHistorySort(col) {
+  sortCol = col;
+  ['all','quality','setup'].forEach(function(x) {
+    var el = document.getElementById('focus-'+x); if(el) el.classList.remove('active');
   });
+  var chipMap = { buy_now:'all', quality:'quality', setup:'setup' };
+  var active = chipMap[col];
+  if (active) { var el = document.getElementById('focus-'+active); if(el) el.classList.add('active'); }
   page = 0;
   render();
 }
@@ -2054,11 +2078,9 @@ function getFiltered() {
 function setSort(col) {
   sortCol = col;
   sortAsc = (col === 'ticker_asc');
-  var btns = ['buy_now','quality','setup','date','abc','score','tech','cat','ret1w','ret1m','ret3m'];
+  var btns = ['buy_now','quality','setup','date','abc'];
   var map  = {buy_now:'buy_now', quality:'quality', setup:'setup',
-              scan_date:'date', ticker_asc:'abc', score:'score',
-              score_technical:'tech', score_catalyst:'cat',
-              ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m'};
+              scan_date:'date', ticker_asc:'abc'};
   btns.forEach(function(b) { var el=document.getElementById('sort-btn-'+b); if(el) el.classList.remove('active'); });
   var active = map[col];
   if (active) { var el=document.getElementById('sort-btn-'+active); if(el) el.classList.add('active'); }
