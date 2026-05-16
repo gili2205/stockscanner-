@@ -74,7 +74,7 @@ HEDGE_FUNDS = {
 }
 
 MIN_INSIDER_VALUE = 100_000   # $100K minimum transaction value
-MAX_INSIDER_FILINGS = 1000    # max Form 4 filings to scan per run
+MAX_INSIDER_FILINGS = 300     # max Form 4 filings to scan per run (~5 min max)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
