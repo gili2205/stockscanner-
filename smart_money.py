@@ -795,6 +795,7 @@ def fetch_activist_filings(days_back=30):
             "filer":     filer,
             "cik":       cik,
             "accession": acc_m.group(1).replace("-", ""),
+            "fname":     fname,   # raw filename from form.idx (e.g. 0001104659-26-054931.txt)
             "filed":     filed,
         })
 
@@ -812,72 +813,79 @@ def fetch_activist_filings(days_back=30):
 
 
 def _parse_13dg_filing(filing):
-    """Parse SC 13D/G to extract target company name, CUSIP, ticker, % owned."""
-    base_url = (f"https://www.sec.gov/Archives/edgar/data/"
-                f"{filing['cik']}/{filing['accession']}/")
-    r_dir = sec_get(base_url)
-    if not r_dir:
+    """
+    Parse SC 13D/G filing to extract ticker, activist filer name, and % owned.
+
+    Strategy (simpler and more reliable than HTML directory parsing):
+    1. EDGAR submissions JSON → ticker symbol and company name from subject CIK
+    2. First 6 KB of the SGML .txt submission → extract FILED BY name and % owned
+    """
+    cik = filing["cik"]
+
+    # 1. Get ticker from EDGAR submissions API using subject company CIK
+    padded_cik = cik.zfill(10)
+    r_sub = sec_get(f"https://data.sec.gov/submissions/CIK{padded_cik}.json")
+    if not r_sub:
+        return None
+    try:
+        sub_data = r_sub.json()
+    except Exception:
         return None
 
-    # Find the main filing document (not an exhibit, not the index)
-    doc_links = re.findall(r'href="([^"]*\.(htm[l]?|txt))"', r_dir.text, re.IGNORECASE)
-    doc_file  = None
-    for link, _ in doc_links:
-        name = link.lower().split("/")[-1]
-        if "index" not in name and not name.startswith("ex") and not name.startswith("exhibit"):
-            doc_file = name
-            break
-    if not doc_file:
+    tickers = sub_data.get("tickers") or []
+    company = sub_data.get("name", filing.get("filer", "")).title()
+    ticker  = tickers[0] if tickers else ""
+
+    # 2. Fetch first 6 KB of .txt SGML file for filer name + % owned
+    # The filename stored in filing['fname_path'] is the direct URL path
+    txt_url  = f"https://www.sec.gov/Archives/edgar/data/{cik}/{filing['fname']}"
+    activist = ""
+    pct_owned = None
+    try:
+        r_txt = requests.get(txt_url, headers=HEADERS, timeout=20, stream=True)
+        if r_txt.status_code == 200:
+            chunk = b""
+            for c in r_txt.iter_content(8192):
+                chunk += c
+                if len(chunk) >= 8192:
+                    break
+            r_txt.close()
+            header_text = chunk.decode("latin-1", errors="replace")
+
+            # Activist filer name from FILED BY block
+            fb_m = re.search(
+                r'FILED BY:.*?COMPANY CONFORMED NAME:\s+(.+)',
+                header_text, re.DOTALL
+            )
+            if fb_m:
+                activist = fb_m.group(1).split("\n")[0].strip().title()
+
+            # % owned — often in first few KB as "X.X%" after percent-related keywords
+            pct_m = re.search(
+                r'(?:Percent of Class|percent of.*?class|aggregate.*?percent)[^\d]*([\d.]+)\s*%',
+                header_text, re.IGNORECASE
+            )
+            if pct_m:
+                try:
+                    pct_owned = round(float(pct_m.group(1)), 1)
+                except ValueError:
+                    pass
+    except Exception as e:
+        log.debug(f"  13D/G txt fetch error for {cik}: {e}")
+
+    # A filing must have at least a ticker or company to be useful
+    if not ticker and not company:
         return None
 
-    r = sec_get(f"{base_url}{doc_file}")
-    if not r:
-        return None
-
-    # Strip HTML and collapse whitespace for regex
-    clean = re.sub(r'<[^>]+>', ' ', r.text[:60000])
-    clean = re.sub(r'\s+', ' ', clean)
-
-    # CUSIP (9 alphanumeric chars after "CUSIP")
-    cusip_m = re.search(
-        r'CUSIP\s*(?:No\.?|Number)?\s*[:\.]?\s*([0-9A-Z]{9})',
-        clean, re.IGNORECASE
-    )
-    cusip = cusip_m.group(1) if cusip_m else None
-
-    # Issuer name (Item 1 of the form)
-    issuer_m = re.search(
-        r'(?:Name of Issuer|1\s*[\.:]?\s*Name of Issuer)[:\s]+([A-Z][^<\n\r]{3,60}?)(?:\s{2,}|CUSIP|Item\s*2)',
-        clean, re.IGNORECASE
-    )
-    company = issuer_m.group(1).strip() if issuer_m else ""
-
-    # Percent of class owned (Item 11 or "Percent of Class")
-    pct_m = re.search(
-        r'(?:Percent of Class|11\s*[\.:])[:\s]*([\d.]+)\s*%',
-        clean, re.IGNORECASE
-    )
-    pct_owned = round(float(pct_m.group(1)), 1) if pct_m else None
-
-    if not company and not cusip:
-        return None
-
-    result = {
+    return {
         "form_type":   filing["form_type"],
-        "filer":       filing["filer"].title(),
-        "company":     company.title() if company else "",
-        "cusip":       cusip or "",
-        "ticker":      "",
+        "filer":       activist or filing.get("filer", "").title(),
+        "company":     company,
+        "ticker":      ticker,
         "pct_owned":   pct_owned,
         "filed":       filing["filed"],
         "is_activist": "13D" in filing["form_type"],
     }
-
-    if cusip:
-        ticker_map      = cusip_to_ticker([cusip])
-        result["ticker"] = ticker_map.get(cusip, "")
-
-    return result
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
