@@ -413,44 +413,46 @@ def apply_approved_recommendation():
     code = scanner_path.read_text()
     applied = []
 
-    # Map weight keys to the exact patterns in live_scanner.py
+    # Map weight keys to exact regex patterns in live_scanner.py (ta= technical score)
+    # Format: param_key → (regex_pattern, current_value_str, description)
     PATCH_PATTERNS = {
-        "breakout_momentum_max":  (r"(# 1\. Momentum.*?ba\+=)28",            "28",   "max momentum pts"),
-        "breakout_ema_full":      (r"(if\s+ema==\"full\":\s+ba\+=)22",       "22",   "ema full pts"),
-        "breakout_ema_partial":   (r"(elif\s+ema==\"partial\":\s+ba\+=)12",  "12",   "ema partial pts"),
-        "breakout_hh_hl_strong":  (r"(hh_hl>=0\.85:\s+ba\+=)6",             "6",    "hh_hl strong pts"),
-        "breakout_hh_hl_ok":      (r"(hh_hl>=0\.70:\s+ba\+=)3",             "3",    "hh_hl ok pts"),
-        "breakout_atr_max":       (r"(atr_c<=0\.20:\s+ba\+=)12",             "12",   "atr max pts"),
-        "breakout_vol_max":       (r"(vc<=0\.50:\s+ba\+=)8",                 "8",    "vol max pts"),
-        "breakout_dist_max":      (r"(dist<=1\.0:\s+ba\+=)18",               "18",   "dist max pts"),
-        "breakout_liquidity_max": (r"(avg_dollar_vol>=200_000_000:\s+ba\+=)7","7",   "liquidity max pts"),
-        "penalty_weak_ema":       (r"(if\s+ema==\"weak\".*?ba-=)18",         "18",   "weak ema penalty"),
-        "penalty_far_dist":       (r"(if\s+dist>15.*?ba-=)12",               "12",   "far dist penalty"),
-        "penalty_neg_mom":        (r"(if\s+mom1m<-5.*?ba-=)12",              "12",   "neg mom penalty"),
-        "penalty_high_vol_atr":   (r"(atr_c>0\.7.*?ba-=)8",                 "8",    "high vol penalty"),
-        "threshold_ready":        (r"(status\s*=\s*\"READY\"\s+if\s+score>=)72", "72", "ready threshold"),
-        "threshold_watch":        (r"(\"WATCH\"\s+if\s+score>=)55",          "55",   "watch threshold"),
+        # EMA trend structure
+        "ema_full":    (r"(if\s+ema==\"full\":\s+ta\+=)(\d+)",    "EMA full pts"),
+        "ema_partial": (r"(elif\s+ema==\"partial\":\s+ta\+=)(\d+)","EMA partial pts"),
+        # ATR compression
+        "atr_025":     (r"(elif\s+atr_c<=0\.25:\s+ta\+=)(\d+)",   "ATR ≤0.25 pts"),
+        "atr_030":     (r"(elif\s+atr_c<=0\.30:\s+ta\+=)(\d+)",   "ATR ≤0.30 pts"),
+        # Volume contraction
+        "vc_050":      (r"(if\s+vc<=0\.50:\s+ta\+=)(\d+)",        "Vol contraction ≤50% pts"),
+        "vc_065":      (r"(elif\s+vc<=0\.65:\s+ta\+=)(\d+)",      "Vol contraction ≤65% pts"),
+        # HH/HL structure
+        "hh_hl_85":   (r"(if\s+hh_hl>=0\.85:\s+ta\+=)(\d+)",     "HH/HL ≥0.85 pts"),
+        "hh_hl_70":   (r"(elif\s+hh_hl>=0\.70:\s+ta\+=)(\d+)",   "HH/HL ≥0.70 pts"),
+        # Distance to level
+        "dist_1":      (r"(if\s+dist<=1\.0:\s+ta\+=)(\d+)",       "Dist ≤1% pts"),
+        "dist_3p5":    (r"(elif\s+dist<=3\.5:\s+ta\+=)(\d+)",     "Dist ≤3.5% pts"),
     }
 
     import re as re_mod
     for key, new_val in changes.items():
         if key not in PATCH_PATTERNS:
+            log.warning(f"  No patch pattern for '{key}' — edit live_scanner.py manually")
             continue
-        pattern, old_val, desc = PATCH_PATTERNS[key]
-        current = DEFAULT_WEIGHTS.get(key)
-        if new_val == current:
-            continue
+        pattern, desc = PATCH_PATTERNS[key]
+        # Pattern captures (prefix)(current_number) — replace number with new_val
         new_code = re_mod.sub(
-            pattern.replace(old_val, str(current)),
+            pattern,
             lambda m, nv=str(new_val): m.group(1) + nv,
-            code, flags=re_mod.DOTALL
+            code
         )
         if new_code != code:
+            old_match = re_mod.search(pattern, code)
+            old_val = old_match.group(2) if old_match else "?"
             code = new_code
-            applied.append(f"  {key}: {current} → {new_val}  ({desc})")
-            log.info(f"  Patched {key}: {current} → {new_val}")
+            applied.append(f"  {key}: {old_val} → {new_val}  ({desc})")
+            log.info(f"  Patched {key}: {old_val} → {new_val}")
         else:
-            log.warning(f"  Could not patch {key} (pattern not matched) — edit manually")
+            log.warning(f"  Could not patch {key} (pattern not matched) — edit live_scanner.py manually")
 
     if not applied:
         log.warning("No changes could be applied automatically. Edit live_scanner.py manually.")
@@ -469,10 +471,94 @@ def apply_approved_recommendation():
     log.info(f"Marked recommendation {ts} as applied in Firebase.")
     log.info("Next steps:")
     log.info("  1. Restart live_scanner.py for the new scoring to take effect in production")
-    log.info(f"  2. Run a real experiment backtest to verify on historical data:")
-    log.info(f"       python backtest.py --days 60 --experiment {experiment_id}")
-    log.info(f"       python optimizer.py --compare {experiment_id}")
+    log.info(f"  2. Run a backtest experiment to verify on historical data:")
+    log.info(f"       python backtest.py --days 60 --experiment post_weight_change")
+    log.info(f"       python optimizer.py --all-windows")
     log.info(f"  3. Bump SCORING_VERSION in backtest.py to document the change")
+
+
+def apply_stat_suggestions():
+    """
+    Apply statistically-derived suggestions queued by the Optimizer UI.
+    Reads /scanner/optimizer_suggestions, applies approved+unapplied ones
+    to live_scanner.py using the same PATCH_PATTERNS as AI suggestions.
+    """
+    import re as re_mod
+    sugs_ref = db.reference("/scanner/optimizer_suggestions")
+    all_sugs = sugs_ref.get() or {}
+
+    pending = [
+        (rec_id, rec) for rec_id, rec in all_sugs.items()
+        if rec.get("status") == "approved" and not rec.get("applied")
+    ]
+    if not pending:
+        log.info("No pending stat suggestions to apply.")
+        return
+
+    log.info(f"Found {len(pending)} stat suggestion(s) to apply")
+
+    scanner_path = Path(__file__).parent / "live_scanner.py"
+    if not scanner_path.exists():
+        log.error("live_scanner.py not found")
+        return
+
+    # Backup
+    backup_path = scanner_path.with_suffix(f".py.bak_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    backup_path.write_text(scanner_path.read_text())
+    log.info(f"Backup: {backup_path}")
+
+    code = scanner_path.read_text()
+
+    PATCH_PATTERNS = {
+        "ema_full":    r"(if\s+ema==\"full\":\s+ta\+=)(\d+)",
+        "ema_partial": r"(elif\s+ema==\"partial\":\s+ta\+=)(\d+)",
+        "atr_025":     r"(elif\s+atr_c<=0\.25:\s+ta\+=)(\d+)",
+        "atr_030":     r"(elif\s+atr_c<=0\.30:\s+ta\+=)(\d+)",
+        "vc_050":      r"(if\s+vc<=0\.50:\s+ta\+=)(\d+)",
+        "vc_065":      r"(elif\s+vc<=0\.65:\s+ta\+=)(\d+)",
+        "hh_hl_85":   r"(if\s+hh_hl>=0\.85:\s+ta\+=)(\d+)",
+        "hh_hl_70":   r"(elif\s+hh_hl>=0\.70:\s+ta\+=)(\d+)",
+        "dist_1":      r"(if\s+dist<=1\.0:\s+ta\+=)(\d+)",
+        "dist_3p5":    r"(elif\s+dist<=3\.5:\s+ta\+=)(\d+)",
+    }
+
+    applied_ids = []
+    for rec_id, rec in pending:
+        param       = rec.get("param")
+        new_val     = rec.get("proposed_pts")
+        factor      = rec.get("factor", param)
+        if not param or new_val is None:
+            log.warning(f"  Skipping {rec_id}: missing param or proposed_pts")
+            continue
+        pattern = PATCH_PATTERNS.get(param)
+        if not pattern:
+            log.warning(f"  No patch pattern for param='{param}' — edit live_scanner.py manually")
+            continue
+        old_match = re_mod.search(pattern, code)
+        old_val   = old_match.group(2) if old_match else "?"
+        new_code  = re_mod.sub(pattern, lambda m, nv=str(new_val): m.group(1) + nv, code)
+        if new_code != code:
+            code = new_code
+            log.info(f"  Patched {param} ({factor}): {old_val} → {new_val}")
+            applied_ids.append(rec_id)
+        else:
+            log.warning(f"  Could not patch {param} — pattern not matched, edit manually")
+
+    if not applied_ids:
+        log.warning("No stat suggestions could be applied automatically.")
+        return
+
+    scanner_path.write_text(code)
+    log.info(f"live_scanner.py updated with {len(applied_ids)} stat suggestion(s).")
+
+    # Mark applied in Firebase
+    for rec_id in applied_ids:
+        sugs_ref.child(rec_id).update({
+            "applied":    True,
+            "applied_at": datetime.now().isoformat()
+        })
+    log.info("Marked suggestions as applied in Firebase.")
+    log.info("Next: restart live_scanner.py, then run optimizer.py to verify impact.")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -571,7 +657,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.apply:
-        apply_approved_recommendation()
+        apply_approved_recommendation()   # AI recommendations
+        apply_stat_suggestions()          # Statistical optimizer suggestions
         sys.exit(0)
 
     if args.check_and_run:

@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.2.0"
+VERSION = "v4.3.0"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -3595,28 +3595,35 @@ def reject_recommendation(rec_id):
 
 @app.route('/api/optimizer-suggestions/approve', methods=['POST'])
 def approve_optimizer_suggestion():
-    """Approve a statistically-derived optimizer suggestion."""
+    """Queue a statistically-derived scoring suggestion for --apply on the VM."""
     try:
         import datetime
-        data     = request.get_json()
-        weights  = data.get('weights', {})
-        label    = data.get('label', 'Optimizer suggestion')
-        db_url   = FIREBASE_CONFIG.get('databaseURL', '')
-        ts       = datetime.datetime.now().isoformat()
-        rec_id   = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        # Save suggestion record
+        data         = request.get_json()
+        label        = data.get('label', 'Optimizer suggestion')
+        param        = data.get('param')        # e.g. "atr_025"
+        proposed_pts = data.get('proposed_pts') # e.g. 19
+        factor       = data.get('factor', '')
+        direction    = data.get('direction', 'boost')
+        db_url       = FIREBASE_CONFIG.get('databaseURL', '')
+        ts           = datetime.datetime.now().isoformat()
+        rec_id       = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+
+        record = {
+            'label':        label,
+            'param':        param,
+            'proposed_pts': proposed_pts,
+            'factor':       factor,
+            'direction':    direction,
+            'approved_at':  ts,
+            'status':       'approved',
+            'applied':      False
+        }
+        # Save to optimizer_suggestions list
         requests.put(
             f"{db_url}/scanner/optimizer_suggestions/{rec_id}.json",
-            json={'label': label, 'weights': weights, 'approved_at': ts, 'status': 'approved'},
-            timeout=10
+            json=record, timeout=10
         )
-        # Write to approved_weights (same path as AI suggestions)
-        requests.put(
-            f"{db_url}/scanner/approved_weights.json",
-            json={**weights, '_approved_from': f'optimizer_{rec_id}', '_approved_at': ts},
-            timeout=10
-        )
-        return jsonify({'ok': True, 'message': 'Approved. Run python ai_optimizer.py --apply on the VM to update live_scanner.py.'})
+        return jsonify({'ok': True, 'message': 'Queued. Run python ai_optimizer.py --apply on the VM to patch live_scanner.py.'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -3797,6 +3804,21 @@ code{background:var(--bg);padding:2px 6px;border-radius:4px;font-family:monospac
 firebase.initializeApp(FIREBASE_CONFIG);
 var fdb = firebase.database();
 
+// Factor name → concrete patching info (mirrors live_scanner.py ta= assignments)
+// boostPts / reducePts = what to suggest when lift is positive / negative
+var FACTOR_PATCH_MAP = {
+  'EMA stack = FULL':    {param:'ema_full',   curPts:25, boostPts:30, reducePts:18, loc:'Technical score — EMA trend block'},
+  'EMA stack = PARTIAL': {param:'ema_partial', curPts:15, boostPts:19, reducePts:10, loc:'Technical score — EMA trend block'},
+  'ATR ≤ 0.25':     {param:'atr_025',   curPts:15, boostPts:19, reducePts:10, loc:'Technical score — ATR compression block'},
+  'ATR ≤ 0.35':     {param:'atr_030',   curPts:10, boostPts:13, reducePts:7,  loc:'Technical score — ATR compression block'},
+  'Vol dry ≤ 50%':  {param:'vc_050',    curPts:15, boostPts:18, reducePts:10, loc:'Technical score — Volume contraction block'},
+  'Vol dry ≤ 70%':  {param:'vc_065',    curPts:10, boostPts:13, reducePts:7,  loc:'Technical score — Volume contraction block'},
+  'HH/HL ≥ 0.85':   {param:'hh_hl_85', curPts:12, boostPts:16, reducePts:8,  loc:'Technical score — HH/HL structure block'},
+  'HH/HL ≥ 0.70':   {param:'hh_hl_70', curPts:8,  boostPts:11, reducePts:5,  loc:'Technical score — HH/HL structure block'},
+  'Dist ≤ 1%':      {param:'dist_1',   curPts:20, boostPts:24, reducePts:14, loc:'Technical score — Distance to level block'},
+  'Dist ≤ 3%':      {param:'dist_3p5', curPts:11, boostPts:14, reducePts:8,  loc:'Technical score — Distance to level block'}
+};
+
 // Factor name → v4 scoring component info
 // Maps optimizer.py factor names to their v4 Quality/Setup score components
 var FACTOR_V4_MAP = {
@@ -3876,88 +3898,154 @@ function statusBadge(status, applied) {
   return '<span class="badge '+cls+'">'+txt+'</span>';
 }
 
-// ── Derive optimizer suggestions from factor analysis (v4) ────────────────────
-// Returns two arrays: reinforce (positive lift) and reduce (negative lift).
-// Each entry carries the full data from optimizer.py so the UI can back up
-// every suggestion with actual numbers — no auto-apply, advisory only.
-function deriveOptSuggestions(factors) {
+// ── Derive optimizer suggestions from factor analysis ─────────────────────────
+// Returns {reinforce, reduce} — each entry has full data + concrete weight change.
+function deriveOptSuggestions(factors, baselineWR) {
   var seen = {};
   var reinforce = [], reduce = [];
   factors.forEach(function(f) {
     var lift  = parseFloat(f.wr_diff || f.wr_lift) || 0;
     var n     = parseInt(f.n_with || f.n) || 0;
     var info  = FACTOR_V4_MAP[f.factor];
+    var patch = FACTOR_PATCH_MAP[f.factor];
     if (!info || seen[f.factor]) return;
-    if (Math.abs(lift) < 5 || n < 10) return;  // only meaningful signals
+    if (Math.abs(lift) < 5 || n < 10) return;
     seen[f.factor] = true;
 
+    var wr_with = parseFloat(f.wr_with) || null;
+
     var entry = {
-      factor:    f.factor,
-      component: info.component,
-      score:     info.score,
-      maxPts:    info.maxPts,
-      desc:      info.desc,
-      lift:      lift,
-      wr_with:   parseFloat(f.wr_with)   || null,
-      wr_wout:   parseFloat(f.wr_without || f.wr_wout) || null,
-      avg_with:  parseFloat(f.avg_ret_with || f.avg_with) || null,
-      n:         n
+      factor:     f.factor,
+      component:  info.component,
+      score:      info.score,
+      maxPts:     info.maxPts,
+      desc:       info.desc,
+      lift:       lift,
+      wr_with:    wr_with,
+      wr_wout:    parseFloat(f.wr_without || f.wr_wout) || null,
+      avg_with:   parseFloat(f.avg_ret_with || f.avg_with) || null,
+      n:          n,
+      baselineWR: baselineWR,
+      // Concrete weight change (only for factors with a patchable param)
+      patch:      patch || null,
+      curPts:     patch ? patch.curPts : null,
+      proposedPts:patch ? (lift >= 5 ? patch.boostPts : patch.reducePts) : null,
+      param:      patch ? patch.param  : null
     };
 
     if (lift >= 5)  reinforce.push(entry);
     else            reduce.push(entry);
   });
 
-  // Sort strongest first within each group
   reinforce.sort(function(a,b){ return b.lift - a.lift; });
   reduce.sort(function(a,b){ return a.lift - b.lift; });
   return {reinforce: reinforce, reduce: reduce};
 }
 
-function buildSugCard(s) {
-  var isGood = s.lift >= 0;
+function buildSugCard(s, idx) {
+  var isGood    = s.lift >= 0;
   var borderCol = isGood ? '#27ae6033' : '#e74c3c33';
   var liftCol   = isGood ? 'var(--green)' : 'var(--red)';
   var liftSign  = isGood ? '+' : '';
+  var cardId    = 'sug-' + idx;
 
-  // Build advice text
+  // Advice text
   var advice = '';
   if (s.lift >= 15) {
-    advice = '&#11088; <strong>Strong predictor.</strong> This signal adds '
-      + s.lift.toFixed(1) + '% to win rate. Its current weight ('
-      + (s.maxPts != null ? s.maxPts + 'pts' : 'threshold') + ') is justified. '
-      + 'Prioritize stocks that have this signal.';
+    advice = '&#11088; <strong>Strong predictor (+' + s.lift.toFixed(1) + '% WR lift).</strong> '
+      + 'Stocks with this signal win significantly more often. ';
+    if (s.patch) advice += 'Increasing its weight from <strong>' + s.curPts + 'pts → ' + s.proposedPts + 'pts</strong> will rank these stocks higher in the scanner.';
+    else         advice += 'Prioritize stocks with this signal — no direct weight to tune.';
   } else if (s.lift >= 5) {
-    advice = '&#128994; <strong>Positive predictor.</strong> Win rate is '
-      + s.lift.toFixed(1) + '% higher with this signal. '
-      + 'Consider keeping or slightly increasing its weight in the '
-      + (s.score === 'quality' ? 'Quality' : s.score === 'setup' ? 'Setup' : 'Quality + Setup') + ' score.';
+    advice = '&#128994; <strong>Positive predictor (+' + s.lift.toFixed(1) + '% WR lift).</strong> '
+      + 'Win rate is reliably higher with this signal. ';
+    if (s.patch) advice += 'Suggested: increase weight <strong>' + s.curPts + 'pts → ' + s.proposedPts + 'pts</strong> in live_scanner.py.';
+    else         advice += 'No direct scoring weight to tune for this signal.';
   } else if (s.lift <= -15) {
-    advice = '&#128308; <strong>Hurts performance.</strong> Stocks with this signal win '
-      + Math.abs(s.lift).toFixed(1) + '% <em>less</em> often. '
-      + (s.maxPts != null
-        ? 'Its ' + s.maxPts + 'pt weight in the scoring may be overstated — consider reducing or removing it.'
-        : 'This threshold may be filtering out better setups.');
+    advice = '&#128308; <strong>Hurts performance (' + s.lift.toFixed(1) + '% WR drag).</strong> '
+      + 'Stocks with this signal win significantly <em>less</em> often. ';
+    if (s.patch) advice += 'Suggested: reduce weight <strong>' + s.curPts + 'pts → ' + s.proposedPts + 'pts</strong> so these stocks rank lower.';
+    else         advice += 'Review whether this threshold is filtering out better setups.';
   } else {
-    advice = '&#9888; <strong>Drags performance.</strong> Win rate is '
-      + Math.abs(s.lift).toFixed(1) + '% lower with this signal present. '
-      + 'Review whether its current weight reflects its actual predictive value.';
+    advice = '&#9888; <strong>Drags performance (' + s.lift.toFixed(1) + '% WR drag).</strong> '
+      + 'Win rate is consistently lower with this signal. ';
+    if (s.patch) advice += 'Suggested: reduce weight <strong>' + s.curPts + 'pts → ' + s.proposedPts + 'pts</strong>.';
   }
 
-  var h = '<div class="suggestion-item" style="border-color:'+borderCol+'">';
+  // Projected WR row
+  var projHtml = '';
+  if (s.wr_with != null && s.baselineWR != null) {
+    var bWR = parseFloat(s.baselineWR);
+    var projWR = isGood
+      ? Math.min(s.wr_with, bWR + s.lift * 0.4)   // conservative estimate
+      : Math.max(s.wr_with, bWR + s.lift * 0.4);
+    projHtml = '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;">'
+      + '<span style="color:var(--muted)">Projected WR impact:</span>'
+      + '<span style="color:var(--muted)">Current <strong style="color:var(--text)">' + bWR.toFixed(1) + '%</strong></span>'
+      + '<span style="color:var(--muted)">→</span>'
+      + '<span><strong style="color:' + liftCol + '">'
+      + (isGood ? '▲ up to ' : '▲ approx ') + s.wr_with.toFixed(1) + '%</strong>'
+      + ' <span style="color:var(--muted);font-size:11px">(WR of picks WITH this signal)</span></span>'
+      + '</div>';
+  }
+
+  // Accept button (only if we have a patchable param)
+  var acceptHtml = '';
+  if (s.patch) {
+    acceptHtml = '<div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+      + '<button class="btn btn-approve" style="padding:6px 16px;font-size:12px;" '
+      + 'onclick="acceptSuggestion(\'' + cardId + '\',\'' + s.param + '\',' + s.proposedPts + ',\'' + s.factor + '\',\'' + (isGood?'boost':'reduce') + '\')">'
+      + (isGood ? '&#8593; Accept: raise to ' : '&#8595; Accept: reduce to ') + s.proposedPts + 'pts</button>'
+      + '<span style="font-size:11px;color:var(--muted)">Queues a change to live_scanner.py · run <code>python ai_optimizer.py --apply</code> on VM to apply</span>'
+      + '</div>';
+  }
+
+  var h = '<div class="suggestion-item" style="border-color:' + borderCol + '" id="' + cardId + '">';
   h += '<div class="sug-top">';
-  h += '<div class="sug-factor"><div class="sug-factor-name">'+s.factor+'</div>';
-  h += '<div class="sug-factor-comp">'+s.component+'</div></div>';
+  h += '<div class="sug-factor"><div class="sug-factor-name">' + s.factor + '</div>';
+  h += '<div class="sug-factor-comp">' + s.component + '</div></div>';
   h += '<div class="sug-pills">';
-  if (s.wr_with  != null) h += '<span class="dpill '+(isGood?'g':'r')+'">WR with: '+s.wr_with.toFixed(1)+'%</span>';
-  if (s.wr_wout  != null) h += '<span class="dpill">WR without: '+s.wr_wout.toFixed(1)+'%</span>';
-  h += '<span class="dpill '+(isGood?'g':'r')+'">Lift: '+liftSign+s.lift.toFixed(1)+'%</span>';
-  if (s.avg_with != null) h += '<span class="dpill '+(s.avg_with>=0?'g':'r')+'">Avg ret: '+(s.avg_with>=0?'+':'')+s.avg_with.toFixed(2)+'%</span>';
-  h += '<span class="dpill">N: '+s.n+'</span>';
+  if (s.wr_with  != null) h += '<span class="dpill ' + (isGood?'g':'r') + '">WR with: ' + s.wr_with.toFixed(1) + '%</span>';
+  if (s.wr_wout  != null) h += '<span class="dpill">WR without: ' + s.wr_wout.toFixed(1) + '%</span>';
+  h += '<span class="dpill ' + (isGood?'g':'r') + '">Lift: ' + liftSign + s.lift.toFixed(1) + '%</span>';
+  if (s.avg_with != null) h += '<span class="dpill ' + (s.avg_with>=0?'g':'r') + '">Avg ret: ' + (s.avg_with>=0?'+':'') + s.avg_with.toFixed(2) + '%</span>';
+  h += '<span class="dpill">N: ' + s.n + '</span>';
   h += '</div></div>';
-  h += '<div class="sug-advice" style="color:'+liftCol+'">'+advice+'</div>';
+  h += '<div class="sug-advice" style="color:' + liftCol + '">' + advice + '</div>';
+  h += projHtml;
+  h += acceptHtml;
   h += '</div>';
   return h;
+}
+
+async function acceptSuggestion(cardId, param, proposedPts, factor, direction) {
+  var btn = document.querySelector('#' + cardId + ' .btn-approve');
+  if (btn) { btn.disabled = true; btn.textContent = 'Queuing...'; }
+  try {
+    var resp = await fetch('/api/optimizer-suggestions/approve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        param:        param,
+        proposed_pts: proposedPts,
+        factor:       factor,
+        direction:    direction,
+        label:        'Statistical suggestion: ' + factor + ' → ' + proposedPts + 'pts'
+      })
+    });
+    var data = await resp.json();
+    if (data.ok) {
+      var bar = document.querySelector('#' + cardId + ' div:last-child');
+      if (bar) bar.innerHTML = '<span class="badge badge-approved" style="margin-right:8px">&#10003; Queued</span>'
+        + '<span style="font-size:11px;color:var(--muted)">Run <code>python ai_optimizer.py --apply</code> on the VM then restart the scanner.</span>';
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Error — retry'; }
+      alert('Error: ' + (data.error || 'Unknown'));
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Error — retry'; }
+    alert('Network error: ' + e.message);
+  }
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
@@ -4022,23 +4110,25 @@ function renderPage() {
       h += '</tbody></table></div>';
     }
 
-    // Data-backed suggestions (advisory only — no auto-apply)
-    var sugs = deriveOptSuggestions(factors);
+    // Data-backed suggestions with concrete weight changes + Accept button
+    var baselineWR = parseFloat(stats.win_rate) || null;
+    var sugs = deriveOptSuggestions(factors, baselineWR);
     var totalSugs = sugs.reinforce.length + sugs.reduce.length;
     if (totalSugs > 0) {
-      h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 4px;">Scoring Suggestions — based on '+(stats.total_picks||'N')+" picks &middot; advisory only</div>";
-      h += '<div style="font-size:11px;color:var(--muted);margin-bottom:14px;">Each suggestion is backed by actual win-rate data. These are observations, not automatic changes — apply your own judgment.</div>';
+      h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 4px;">Scoring Suggestions — based on '+(stats.total_picks||'N')+" picks</div>";
+      h += '<div style="font-size:11px;color:var(--muted);margin-bottom:14px;">Backed by actual win-rate data. Accepting queues a change to live_scanner.py (requires <code>--apply</code> on VM to take effect).</div>';
 
+      var cardIdx = 0;
       if (sugs.reinforce.length) {
-        h += '<div class="sug-section-hdr" style="color:var(--green)">&#9650; Reinforce — strong predictors (keep or boost weight)</div>';
+        h += '<div class="sug-section-hdr" style="color:var(--green)">&#9650; Reinforce — strong predictors · boost weight</div>';
         h += '<div class="suggestions">';
-        sugs.reinforce.forEach(function(s){ h += buildSugCard(s); });
+        sugs.reinforce.forEach(function(s){ h += buildSugCard(s, cardIdx++); });
         h += '</div>';
       }
       if (sugs.reduce.length) {
-        h += '<div class="sug-section-hdr" style="color:var(--red)">&#9660; Review — signals that drag performance (consider reducing weight)</div>';
+        h += '<div class="sug-section-hdr" style="color:var(--red)">&#9660; Review — signals that drag performance · reduce weight</div>';
         h += '<div class="suggestions">';
-        sugs.reduce.forEach(function(s){ h += buildSugCard(s); });
+        sugs.reduce.forEach(function(s){ h += buildSugCard(s, cardIdx++); });
         h += '</div>';
       }
     } else {
