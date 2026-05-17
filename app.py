@@ -3942,114 +3942,117 @@ function deriveOptSuggestions(factors, baselineWR) {
   return {reinforce: reinforce, reduce: reduce};
 }
 
-function buildSugCard(s, idx) {
-  var isGood    = s.lift >= 0;
-  var borderCol = isGood ? '#27ae6033' : '#e74c3c33';
-  var liftCol   = isGood ? 'var(--green)' : 'var(--red)';
-  var liftSign  = isGood ? '+' : '';
-  var cardId    = 'sug-' + idx;
+// ── Build ONE consolidated suggestion card from all signals ───────────────────
+function buildConsolidatedSug(sugs, baselineWR) {
+  var patchable = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return s.patch; });
+  var observeOnly = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return !s.patch; });
+  var totalChanges = patchable.length;
 
-  // Advice text
-  var advice = '';
-  if (s.lift >= 15) {
-    advice = '&#11088; <strong>Strong predictor (+' + s.lift.toFixed(1) + '% WR lift).</strong> '
-      + 'Stocks with this signal win significantly more often. ';
-    if (s.patch) advice += 'Increasing its weight from <strong>' + s.curPts + 'pts → ' + s.proposedPts + 'pts</strong> will rank these stocks higher in the scanner.';
-    else         advice += 'Prioritize stocks with this signal — no direct weight to tune.';
-  } else if (s.lift >= 5) {
-    advice = '&#128994; <strong>Positive predictor (+' + s.lift.toFixed(1) + '% WR lift).</strong> '
-      + 'Win rate is reliably higher with this signal. ';
-    if (s.patch) advice += 'Suggested: increase weight <strong>' + s.curPts + 'pts → ' + s.proposedPts + 'pts</strong> in live_scanner.py.';
-    else         advice += 'No direct scoring weight to tune for this signal.';
-  } else if (s.lift <= -15) {
-    advice = '&#128308; <strong>Hurts performance (' + s.lift.toFixed(1) + '% WR drag).</strong> '
-      + 'Stocks with this signal win significantly <em>less</em> often. ';
-    if (s.patch) advice += 'Suggested: reduce weight <strong>' + s.curPts + 'pts → ' + s.proposedPts + 'pts</strong> so these stocks rank lower.';
-    else         advice += 'Review whether this threshold is filtering out better setups.';
-  } else {
-    advice = '&#9888; <strong>Drags performance (' + s.lift.toFixed(1) + '% WR drag).</strong> '
-      + 'Win rate is consistently lower with this signal. ';
-    if (s.patch) advice += 'Suggested: reduce weight <strong>' + s.curPts + 'pts → ' + s.proposedPts + 'pts</strong>.';
+  // Best projected WR = highest wr_with among boost signals (conservative: take min of boost signals)
+  var bestWR = null;
+  sugs.reinforce.forEach(function(s){ if (s.wr_with && (bestWR === null || s.wr_with < bestWR)) bestWR = s.wr_with; });
+
+  var h = '<div class="suggestion-item" id="consolidated-sug" style="border-color:#27ae6033">';
+
+  // Header
+  h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">';
+  h += '<span style="font-size:14px;font-weight:700">&#128200; Recommended Scoring Changes</span>';
+  if (totalChanges > 0) h += '<span class="dpill g">' + totalChanges + ' weight change' + (totalChanges > 1 ? 's' : '') + '</span>';
+  if (baselineWR && bestWR) {
+    h += '<span class="dpill g">Projected WR: ' + baselineWR.toFixed(1) + '% &rarr; up to ' + bestWR.toFixed(1) + '%</span>';
+  }
+  h += '</div>';
+
+  // Boost changes table
+  if (sugs.reinforce.length) {
+    h += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--green);margin-bottom:6px">&#9650; Boost weight — strong predictors</div>';
+    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;">';
+    h += '<thead><tr style="border-bottom:1px solid var(--border)">';
+    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Signal</th>';
+    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Component</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR Lift</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR with</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">N</th>';
+    if (totalChanges > 0) h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Weight change</th>';
+    h += '</tr></thead><tbody>';
+    sugs.reinforce.forEach(function(s) {
+      h += '<tr style="border-bottom:1px solid var(--border)22">';
+      h += '<td style="padding:6px 8px;font-weight:600">' + s.factor + '</td>';
+      h += '<td style="padding:6px 8px;color:var(--muted);font-size:11px">' + s.component + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--green);font-weight:700">+' + s.lift.toFixed(1) + '%</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--green)">' + (s.wr_with ? s.wr_with.toFixed(1) + '%' : '—') + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--muted)">' + s.n + '</td>';
+      if (s.patch) h += '<td style="padding:6px 8px;text-align:right"><span style="color:var(--muted)">' + s.curPts + 'pts</span> &rarr; <strong style="color:var(--green)">' + s.proposedPts + 'pts</strong></td>';
+      else         h += '<td style="padding:6px 8px;text-align:right;color:var(--muted);font-size:11px">observation only</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
   }
 
-  // Projected WR row
-  var projHtml = '';
-  if (s.wr_with != null && s.baselineWR != null) {
-    var bWR = parseFloat(s.baselineWR);
-    var projLabel = isGood ? '▲ up to ' : '▲ approx ';
-    projHtml = '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;">'
-      + '<span style="color:var(--muted)">Projected WR impact:</span>'
-      + '<span style="color:var(--muted)">Current <strong style="color:var(--text)">' + bWR.toFixed(1) + '%</strong></span>'
-      + '<span style="color:var(--muted)">→</span>'
-      + '<span><strong style="color:' + liftCol + '">'
-      + projLabel + s.wr_with.toFixed(1) + '%</strong>'
-      + ' <span style="color:var(--muted);font-size:11px">(WR of picks WITH this signal)</span></span>'
-      + '</div>';
+  // Reduce changes table
+  if (sugs.reduce.length) {
+    h += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--red);margin-bottom:6px">&#9660; Reduce weight — performance drag</div>';
+    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;">';
+    h += '<thead><tr style="border-bottom:1px solid var(--border)">';
+    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Signal</th>';
+    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Component</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR Lift</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR with</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">N</th>';
+    if (totalChanges > 0) h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Weight change</th>';
+    h += '</tr></thead><tbody>';
+    sugs.reduce.forEach(function(s) {
+      h += '<tr style="border-bottom:1px solid var(--border)22">';
+      h += '<td style="padding:6px 8px;font-weight:600">' + s.factor + '</td>';
+      h += '<td style="padding:6px 8px;color:var(--muted);font-size:11px">' + s.component + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--red);font-weight:700">' + s.lift.toFixed(1) + '%</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--red)">' + (s.wr_with ? s.wr_with.toFixed(1) + '%' : '—') + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--muted)">' + s.n + '</td>';
+      if (s.patch) h += '<td style="padding:6px 8px;text-align:right"><span style="color:var(--muted)">' + s.curPts + 'pts</span> &rarr; <strong style="color:var(--red)">' + s.proposedPts + 'pts</strong></td>';
+      else         h += '<td style="padding:6px 8px;text-align:right;color:var(--muted);font-size:11px">observation only</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
   }
 
-  // Accept button (only if we have a patchable param)
-  // Use data-* attributes to avoid any quote-escaping inside onclick
-  var acceptHtml = '';
-  if (s.patch) {
-    var btnLabel = isGood ? '&#8593; Accept: raise to ' : '&#8595; Accept: reduce to ';
-    acceptHtml = '<div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
-      + '<button class="btn btn-approve" style="padding:6px 16px;font-size:12px;"'
-      + ' data-card="' + cardId + '" data-param="' + s.param + '" data-pts="' + s.proposedPts + '" data-dir="' + (isGood ? 'boost' : 'reduce') + '"'
-      + ' onclick="acceptSuggestion(this)">'
-      + btnLabel + s.proposedPts + 'pts</button>'
-      + '<span style="font-size:11px;color:var(--muted)">Queues a change to live_scanner.py &middot; run <code>python ai_optimizer.py --apply</code> on VM to apply</span>'
-      + '</div>';
+  // Single Accept button for all patchable changes
+  if (patchable.length > 0) {
+    // Encode patches as JSON in data attribute
+    var patches = patchable.map(function(s){ return {param: s.param, pts: s.proposedPts, factor: s.factor}; });
+    h += '<div id="consolidated-action" style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap;">';
+    h += '<button class="btn btn-approve" data-patches=\'' + JSON.stringify(patches) + '\' onclick="acceptAllSuggestions(this)">';
+    h += '&#10003; Accept all ' + patchable.length + ' change' + (patchable.length > 1 ? 's' : '') + '</button>';
+    h += '<span style="font-size:11px;color:var(--muted)">Queues changes to live_scanner.py &middot; run <code>python ai_optimizer.py --apply</code> on VM then restart scanner</span>';
+    h += '</div>';
   }
 
-  var h = '<div class="suggestion-item" style="border-color:' + borderCol + '" id="' + cardId + '">';
-  h += '<div class="sug-top">';
-  h += '<div class="sug-factor"><div class="sug-factor-name">' + s.factor + '</div>';
-  h += '<div class="sug-factor-comp">' + s.component + '</div></div>';
-  h += '<div class="sug-pills">';
-  if (s.wr_with  != null) h += '<span class="dpill ' + (isGood?'g':'r') + '">WR with: ' + s.wr_with.toFixed(1) + '%</span>';
-  if (s.wr_wout  != null) h += '<span class="dpill">WR without: ' + s.wr_wout.toFixed(1) + '%</span>';
-  h += '<span class="dpill ' + (isGood?'g':'r') + '">Lift: ' + liftSign + s.lift.toFixed(1) + '%</span>';
-  if (s.avg_with != null) h += '<span class="dpill ' + (s.avg_with>=0?'g':'r') + '">Avg ret: ' + (s.avg_with>=0?'+':'') + s.avg_with.toFixed(2) + '%</span>';
-  h += '<span class="dpill">N: ' + s.n + '</span>';
-  h += '</div></div>';
-  h += '<div class="sug-advice" style="color:' + liftCol + '">' + advice + '</div>';
-  h += projHtml;
-  h += acceptHtml;
   h += '</div>';
   return h;
 }
 
-async function acceptSuggestion(btn) {
-  var cardId      = btn.dataset.card;
-  var param       = btn.dataset.param;
-  var proposedPts = parseInt(btn.dataset.pts);
-  var direction   = btn.dataset.dir;
-  var factor      = param; // use param as label if factor not stored separately
-  btn.disabled = true; btn.textContent = 'Queuing...';
-  try {
-    var resp = await fetch('/api/optimizer-suggestions/approve', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        param:        param,
-        proposed_pts: proposedPts,
-        factor:       factor,
-        direction:    direction,
-        label:        'Statistical suggestion: ' + factor + ' → ' + proposedPts + 'pts'
-      })
-    });
-    var data = await resp.json();
-    if (data.ok) {
-      var bar = document.querySelector('#' + cardId + ' div:last-child');
-      if (bar) bar.innerHTML = '<span class="badge badge-approved" style="margin-right:8px">&#10003; Queued</span>'
-        + '<span style="font-size:11px;color:var(--muted)">Run <code>python ai_optimizer.py --apply</code> on the VM then restart the scanner.</span>';
-    } else {
-      if (btn) { btn.disabled = false; btn.textContent = 'Error — retry'; }
-      alert('Error: ' + (data.error || 'Unknown'));
-    }
-  } catch(e) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Error — retry'; }
-    alert('Network error: ' + e.message);
+async function acceptAllSuggestions(btn) {
+  var patches = JSON.parse(btn.dataset.patches || '[]');
+  if (!patches.length) return;
+  btn.disabled = true; btn.textContent = 'Queuing ' + patches.length + ' changes...';
+  var errors = [];
+  for (var i = 0; i < patches.length; i++) {
+    var p = patches[i];
+    try {
+      var resp = await fetch('/api/optimizer-suggestions/approve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({param: p.param, proposed_pts: p.pts, factor: p.factor, direction: 'stat', label: p.factor + ' to ' + p.pts + 'pts'})
+      });
+      var data = await resp.json();
+      if (!data.ok) errors.push(p.factor + ': ' + (data.error || 'unknown'));
+    } catch(e) { errors.push(p.factor + ': ' + e.message); }
+  }
+  var bar = document.getElementById('consolidated-action');
+  if (errors.length) {
+    bar.innerHTML = '<span style="color:var(--red)">&#9888; Some errors: ' + errors.join(', ') + '</span>';
+  } else {
+    bar.innerHTML = '<span class="badge badge-approved" style="margin-right:8px">&#10003; ' + patches.length + ' change' + (patches.length > 1 ? 's' : '') + ' queued</span>'
+      + '<span style="font-size:11px;color:var(--muted)">Run <code>python ai_optimizer.py --apply</code> on the VM then restart the scanner.</span>';
   }
 }
 
@@ -4115,29 +4118,15 @@ function renderPage() {
       h += '</tbody></table></div>';
     }
 
-    // Data-backed suggestions with concrete weight changes + Accept button
+    // One consolidated suggestion card (all signals combined, one Accept button)
     var baselineWR = parseFloat(stats.win_rate) || null;
     var sugs = deriveOptSuggestions(factors, baselineWR);
     var totalSugs = sugs.reinforce.length + sugs.reduce.length;
+    h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:24px 0 10px;">&#128200; Scoring Recommendation — based on '+(stats.total_picks||'N')+' picks</div>';
     if (totalSugs > 0) {
-      h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 4px;">Scoring Suggestions — based on '+(stats.total_picks||'N')+" picks</div>";
-      h += '<div style="font-size:11px;color:var(--muted);margin-bottom:14px;">Backed by actual win-rate data. Accepting queues a change to live_scanner.py (requires <code>--apply</code> on VM to take effect).</div>';
-
-      var cardIdx = 0;
-      if (sugs.reinforce.length) {
-        h += '<div class="sug-section-hdr" style="color:var(--green)">&#9650; Reinforce — strong predictors · boost weight</div>';
-        h += '<div class="suggestions">';
-        sugs.reinforce.forEach(function(s){ h += buildSugCard(s, cardIdx++); });
-        h += '</div>';
-      }
-      if (sugs.reduce.length) {
-        h += '<div class="sug-section-hdr" style="color:var(--red)">&#9660; Review — signals that drag performance · reduce weight</div>';
-        h += '<div class="suggestions">';
-        sugs.reduce.forEach(function(s){ h += buildSugCard(s, cardIdx++); });
-        h += '</div>';
-      }
+      h += buildConsolidatedSug(sugs, baselineWR);
     } else {
-      h += '<div style="margin-top:20px;padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions yet — need factors with &gt;5% win-rate lift and at least 10 picks. Run more backtest history for stronger signals.</div>';
+      h += '<div style="padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions yet — need factors with &gt;5% win-rate lift and at least 10 picks. Run more backtest history for stronger signals.</div>';
     }
   }
   h += '</div></div>'; // section-body + section
