@@ -162,9 +162,12 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
                     log.info(f"Resuming from batch {resume_from+1}/{len(batches)} "
                              f"({len(result)} tickers already cached)")
             else:
-                log.info(f"Cache key mismatch — starting fresh download")
+                stored_key = cached.get("key", "?")
+                log.info(f"Cache key mismatch (stored={stored_key}, want={cache_key}) — starting fresh")
         except Exception as e:
-            log.warning(f"Cache load failed: {e} — starting fresh download")
+            log.warning(f"Cache load failed ({e}) — deleting corrupt cache and starting fresh")
+            try: PRICE_CACHE_PATH.unlink()
+            except Exception: pass
             result = {}
             resume_from = 0
 
@@ -214,18 +217,24 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
             if len(raw) >= 30:
                 result[batch[0]] = raw
 
-        # ── Incremental save after every batch ────────────────────────────────
+        # ── Incremental save after every batch (atomic write) ────────────────
+        # Write to .tmp then rename — rename is atomic on Linux so a kill
+        # mid-write never corrupts the cache file.
         is_last = (i == len(batches) - 1)
+        tmp_path = PRICE_CACHE_PATH.with_suffix(".tmp")
         try:
-            with open(PRICE_CACHE_PATH, "wb") as f:
+            with open(tmp_path, "wb") as f:
                 pickle.dump({
                     "key":          cache_key,
                     "complete":     is_last,
                     "batches_done": i + 1,
                     "data":         result,
                 }, f)
+            tmp_path.replace(PRICE_CACHE_PATH)   # atomic
         except Exception as e:
             log.warning(f"  Incremental cache save failed: {e}")
+            try: tmp_path.unlink()
+            except Exception: pass
 
         time.sleep(1)
 
