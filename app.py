@@ -3988,15 +3988,16 @@ function buildSugCard(s, idx) {
   }
 
   // Accept button (only if we have a patchable param)
+  // Use data-* attributes to avoid any quote-escaping inside onclick
   var acceptHtml = '';
   if (s.patch) {
-    var dirStr   = isGood ? 'boost' : 'reduce';
     var btnLabel = isGood ? '&#8593; Accept: raise to ' : '&#8595; Accept: reduce to ';
     acceptHtml = '<div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
-      + '<button class="btn btn-approve" style="padding:6px 16px;font-size:12px;" '
-      + 'onclick="acceptSuggestion(\'' + cardId + '\',\'' + s.param + '\',' + s.proposedPts + ',\'' + s.factor + '\',\'' + dirStr + '\')">'
+      + '<button class="btn btn-approve" style="padding:6px 16px;font-size:12px;"'
+      + ' data-card="' + cardId + '" data-param="' + s.param + '" data-pts="' + s.proposedPts + '" data-dir="' + (isGood ? 'boost' : 'reduce') + '"'
+      + ' onclick="acceptSuggestion(this)">'
       + btnLabel + s.proposedPts + 'pts</button>'
-      + '<span style="font-size:11px;color:var(--muted)">Queues a change to live_scanner.py · run <code>python ai_optimizer.py --apply</code> on VM to apply</span>'
+      + '<span style="font-size:11px;color:var(--muted)">Queues a change to live_scanner.py &middot; run <code>python ai_optimizer.py --apply</code> on VM to apply</span>'
       + '</div>';
   }
 
@@ -4018,9 +4019,13 @@ function buildSugCard(s, idx) {
   return h;
 }
 
-async function acceptSuggestion(cardId, param, proposedPts, factor, direction) {
-  var btn = document.querySelector('#' + cardId + ' .btn-approve');
-  if (btn) { btn.disabled = true; btn.textContent = 'Queuing...'; }
+async function acceptSuggestion(btn) {
+  var cardId      = btn.dataset.card;
+  var param       = btn.dataset.param;
+  var proposedPts = parseInt(btn.dataset.pts);
+  var direction   = btn.dataset.dir;
+  var factor      = param; // use param as label if factor not stored separately
+  btn.disabled = true; btn.textContent = 'Queuing...';
   try {
     var resp = await fetch('/api/optimizer-suggestions/approve', {
       method: 'POST',
