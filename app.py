@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.0.0"
+VERSION = "v4.0.1"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -727,8 +727,9 @@ fdb.ref("/scanner").on("value", function(snap) {{
     var nr = [];
     Object.keys(d.stocks).forEach(function(t) {{
       var s = d.stocks[t];
-      if (s.status==="READY" && (!prevData[t]||prevData[t].status!=="READY") && !seen[t+"-r"]) {{ nr.push(t); seen[t+"-r"]=true; }}
-      if (s.status!=="READY") delete seen[t+"-r"];
+      var bn=computeBuyNow(s); var vs=bn>=65?'READY':bn>=40?'WATCH':'BUILDING';
+      if (vs==="READY" && (!prevData[t]||computeBuyNow(prevData[t])<65) && !seen[t+"-r"]) {{ nr.push(t); seen[t+"-r"]=true; }}
+      if (vs!=="READY") delete seen[t+"-r"];
     }});
     if (nr.length) {{
       var ab=document.getElementById("alertbox");
@@ -831,6 +832,7 @@ function render() {{
     s._qualityScore  = computeQualityScore(s);
     s._setupScore    = computeSetupScore(s);
     s._buyNowScore   = computeBuyNow(s);
+    s._v4Status = s._buyNowScore>=65?'READY':s._buyNowScore>=40?'WATCH':'BUILDING';
   }});
   var fns = {{
     score:    function(a,b){{ return (b._unified||0)-(a._unified||0); }},
@@ -904,7 +906,7 @@ function makeCard(s, rank) {{
   var upside = s.analyst_upside;
   var upsidePct = upside!=null?parseFloat(upside):null;
   var rc    = rsiC(rsi);
-  var color = sc(s.status||'BUILDING');
+  var color = sc(s._v4Status||'BUILDING');
   var isTop = rank<=3;
   var dist  = s.dist_to_level||0;
   var pc    = dist<=1?'#27ae60':dist<=3?'#e67e22':'#e74c3c';
@@ -1002,7 +1004,7 @@ function makeCard(s, rank) {{
   else if (daysOnList !== null) {{ daysLabel=daysOnList+' days on the list'; daysColor='var(--green)'; }}
 
   var h='';
-  h += '<div class="card '+(s.status==='READY'?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
+  h += '<div class="card '+(s._v4Status==='READY'?'pre':s._v4Status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
 
   // ── Click-to-fold header ──────────────────────────────────────────────────
   var tgtCol2=upsidePct!=null&&upsidePct>5?'var(--green)':upsidePct!=null&&upsidePct<-5?'var(--red)':'var(--muted)';
@@ -1033,7 +1035,7 @@ function makeCard(s, rank) {{
   h += '<div style="font-size:32px;font-weight:700;color:'+buyNowColor+';line-height:1">'+buyNowScore+'</div>';
   h += '<div style="font-size:9px;font-weight:700;letter-spacing:.8px;color:'+buyNowColor+';margin-top:2px;text-align:center">SCORE</div>';
   h += '</div>';
-  h += '<div style="font-size:10px;font-weight:600;letter-spacing:.5px;color:var(--muted);margin-top:5px;text-align:right">'+s.status+'</div>';
+  h += '<div style="font-size:10px;font-weight:600;letter-spacing:.5px;color:var(--muted);margin-top:5px;text-align:right">'+s._v4Status+'</div>';
   h += '</div>';
   h += '</div>';
   // Performance row — directly under title, no 1D (already shown in price line)
@@ -2123,7 +2125,7 @@ function getFiltered() {
   var search   = (document.getElementById('ticker-search').value || '').trim().toUpperCase();
 
   return allPicks.filter(function(p) {
-    if (status !== 'all' && p.status !== status) return false;
+    if (status !== 'all' && p._v4Status !== status) return false;
     if (aBlendScore(p) < minScore) return false;
     if (minTech > 0) {
       var t = p.score_technical != null ? p.score_technical : aEstimateTech(p);

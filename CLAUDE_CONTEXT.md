@@ -9,10 +9,10 @@ Last updated: 2026-05-16 — v4.0.0
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| `app.py` (Flask app) | **v4.0.0** | Three-score system, ATR-derived stops |
+| `app.py` (Flask app) | **v4.0.1** | Status badge now driven by BuyNow score |
 | `backtest.py` | **v4_quality_setup** | `SCORING_VERSION` constant |
 | `smart_money.py` | — | No version constant; track via git |
-| Last updated | **2026-05-16** | — |
+| Last updated | **2026-05-17** | — |
 
 ### Version bump rules
 - **Patch** (v4.0.**x**): bug fix, UI tweak, copy change
@@ -354,7 +354,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 |-------|--------|
 | Congressional trading data | No free API. Shows warning in UI. |
 | RS percentile in backtest | Proxied from momentum, not true cross-stock rank |
-| Status (BUILDING/WATCH/READY) | Uses old blended score thresholds, not Buy Now |
+| Status (BUILDING/WATCH/READY) | ✅ Fixed v4.0.1 — now driven by BuyNow score (≥65=READY, ≥40=WATCH) |
 | Insider scraper DNS failures | Transient GCP VM network issue. ~300 filing cap helps. |
 | Fundamentals in backtest | Always 0 (no per-date yfinance fundamental data) |
 | AI Analysis | Requires Anthropic credits before it can run |
