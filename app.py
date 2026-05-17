@@ -3842,13 +3842,13 @@ var FACTOR_V4_MAP = {
   'Status = WATCH':      {component:'Buy Now 40–64',        score:'meta',    maxPts:null, desc:'Stock scored WATCH threshold'}
 };
 
-var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null;
+var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null, optSuggestions = {};
 var PENDING_PATCHES = {}; // keyed by id, holds patch arrays for Accept buttons
 
 // Load all data sources in parallel
-var loaded = {opt: false, ai: false, flag: false};
+var loaded = {opt: false, ai: false, flag: false, sug: false};
 function checkReady() {
-  if (loaded.opt && loaded.ai && loaded.flag) renderPage();
+  if (loaded.opt && loaded.ai && loaded.flag && loaded.sug) renderPage();
 }
 
 fdb.ref('/scanner/optimization_reports').on('value', function(snap) {
@@ -3869,7 +3869,13 @@ fdb.ref('/scanner/run_ai_requested').on('value', function(snap) {
   aiFlag = snap.val();
   loaded.flag = true;
   // Re-render just the button area if already loaded
-  if (loaded.opt && loaded.ai) renderPage();
+  if (loaded.opt && loaded.ai && loaded.sug) renderPage();
+});
+
+fdb.ref('/scanner/optimizer_suggestions').on('value', function(snap) {
+  optSuggestions = snap.val() || {};
+  loaded.sug = true;
+  if (loaded.opt && loaded.ai && loaded.flag) renderPage();
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -4017,14 +4023,34 @@ function buildConsolidatedSug(sugs, baselineWR) {
   }
 
   // Single Accept button for all patchable changes
-  // Store patches in global PENDING_PATCHES (avoids JSON in HTML attributes)
+  // Check Firebase optSuggestions to see if these params are already queued or applied
   if (patchable.length > 0) {
-    var patchKey = 'opt_' + Date.now();
-    PENDING_PATCHES[patchKey] = patchable.map(function(s){ return {param: s.param, pts: s.proposedPts, factor: s.factor}; });
-    var nLabel = patchable.length + ' change' + (patchable.length > 1 ? 's' : '');
     h += '<div id="consolidated-action" style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap;">';
-    h += '<button class="btn btn-approve" data-key="' + patchKey + '" onclick="acceptAllSuggestions(this)">&#10003; Accept all ' + nLabel + '</button>';
-    h += '<span style="font-size:11px;color:var(--muted)">Queues changes to live_scanner.py &middot; run <code>python ai_optimizer.py --apply</code> on VM then restart scanner</span>';
+
+    // Scan existing suggestions in Firebase for matching params
+    var sugVals = Object.values(optSuggestions);
+    var pendingParams = sugVals.filter(function(s){ return s && s.applied === false; }).map(function(s){ return s.param; });
+    var appliedParams = sugVals.filter(function(s){ return s && s.applied === true; }).map(function(s){ return s.param; });
+    var myParams = patchable.map(function(s){ return s.param; });
+    var anyQueued  = myParams.some(function(p){ return pendingParams.indexOf(p) >= 0; });
+    var allApplied = myParams.every(function(p){ return appliedParams.indexOf(p) >= 0; });
+
+    if (allApplied) {
+      // All changes have been applied by the cron already
+      h += '<span class="badge badge-applied">&#10003; Applied to live_scanner.py</span>';
+      h += '<span style="font-size:11px;color:var(--muted)">Scanner was restarted with updated weights. Re-run optimizer to generate fresh suggestions.</span>';
+    } else if (anyQueued) {
+      // At least one change is already queued waiting for cron
+      h += '<span class="badge badge-pending">&#9711; Queued — cron will apply within 5 min</span>';
+      h += '<span style="font-size:11px;color:var(--muted)">Changes accepted. The VM cron (<code>ai_optimizer.py --check-and-run</code>) will patch live_scanner.py and restart the scanner automatically.</span>';
+    } else {
+      // Nothing queued yet — show the Accept button
+      var patchKey = 'opt_' + Date.now();
+      PENDING_PATCHES[patchKey] = patchable.map(function(s){ return {param: s.param, pts: s.proposedPts, factor: s.factor}; });
+      var nLabel = patchable.length + ' change' + (patchable.length > 1 ? 's' : '');
+      h += '<button class="btn btn-approve" data-key="' + patchKey + '" onclick="acceptAllSuggestions(this)">&#10003; Accept all ' + nLabel + '</button>';
+      h += '<span style="font-size:11px;color:var(--muted)">Queues changes to live_scanner.py &middot; cron applies automatically within 5 min</span>';
+    }
     h += '</div>';
   }
 
@@ -4053,8 +4079,8 @@ async function acceptAllSuggestions(btn) {
   if (errors.length) {
     bar.innerHTML = '<span style="color:var(--red)">&#9888; Some errors: ' + errors.join(', ') + '</span>';
   } else {
-    bar.innerHTML = '<span class="badge badge-approved" style="margin-right:8px">&#10003; ' + patches.length + ' change' + (patches.length > 1 ? 's' : '') + ' queued</span>'
-      + '<span style="font-size:11px;color:var(--muted)">Run <code>python ai_optimizer.py --apply</code> on the VM then restart the scanner.</span>';
+    bar.innerHTML = '<span class="badge badge-pending" style="margin-right:8px">&#9711; Queued — cron will apply within 5 min</span>'
+      + '<span style="font-size:11px;color:var(--muted)">The VM cron (<code>ai_optimizer.py --check-and-run</code>) will patch live_scanner.py and restart the scanner automatically.</span>';
   }
 }
 
