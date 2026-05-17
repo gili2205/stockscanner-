@@ -3619,13 +3619,18 @@ def approve_optimizer_suggestion():
             'applied':      False
         }
         # Save to optimizer_suggestions list
-        requests.put(
+        if not db_url:
+            return jsonify({'ok': False, 'error': 'Firebase URL not configured (FLASK_ENV=' + str(FLASK_ENV) + ')'}), 500
+        put_resp = requests.put(
             f"{db_url}/scanner/optimizer_suggestions/{rec_id}.json",
             json=record, timeout=10
         )
-        return jsonify({'ok': True, 'message': 'Queued. Run python ai_optimizer.py --apply on the VM to patch live_scanner.py.'})
+        if put_resp.status_code not in (200, 201):
+            return jsonify({'ok': False, 'error': f'Firebase write failed: HTTP {put_resp.status_code}: {put_resp.text[:200]}'}), 500
+        return jsonify({'ok': True, 'message': 'Queued.'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'ok': False, 'error': str(e), 'trace': traceback.format_exc()[-500:]}), 500
 
 @app.route('/api/run-ai-analysis', methods=['POST'])
 def run_ai_analysis():
@@ -4075,8 +4080,13 @@ async function acceptAllSuggestions(btn) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({param: p.param, proposed_pts: p.pts, factor: p.factor, direction: 'stat', label: p.factor + ' to ' + p.pts + 'pts'})
       });
-      var data = await resp.json();
-      if (!data.ok) errors.push(p.factor + ': ' + (data.error || 'unknown'));
+      var txt = await resp.text();
+      var data = {};
+      try { data = JSON.parse(txt); } catch(_){}
+      if (!data.ok) {
+        var errMsg = typeof data.error === 'string' ? data.error : (data.error ? JSON.stringify(data.error) : ('HTTP ' + resp.status + ': ' + txt.slice(0,120)));
+        errors.push(p.factor + ': ' + errMsg);
+      }
     } catch(e) { errors.push(p.factor + ': ' + e.message); }
   }
   var bar = document.getElementById('consolidated-action');
