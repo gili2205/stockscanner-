@@ -110,10 +110,11 @@ def get_universe():
 
 # ── Price download ─────────────────────────────────────────────────────────────
 def _download_one_batch(batch, start_str, end_str):
-    """Run yf.download for one batch — called inside a thread so we can time it out."""
+    """Run yf.download for one batch — called inside a thread so we can time it out.
+    threads=False avoids yfinance spawning internal threads that can't be cleaned up."""
     return yf.download(
         batch, start=start_str, end=end_str,
-        auto_adjust=True, progress=False, threads=True
+        auto_adjust=True, progress=False, threads=False
     )
 
 
@@ -138,7 +139,7 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
     iso_year, iso_week, _ = date.today().isocalendar()
     cache_key = f"{len(tickers)}_{start_str}_w{iso_year}w{iso_week:02d}"
 
-    batch_size = 50
+    batch_size = 25
     batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
     # end_str only needed for yfinance calls
     end_str = str(end + timedelta(days=5))
@@ -180,14 +181,21 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
         log.info(f"  Batch {i+1}/{len(batches)} ({len(batch)} tickers)...")
         raw = None
         for attempt in range(1, 4):
+            # NOTE: Do NOT use "with ThreadPoolExecutor() as ex" here.
+            # The context manager calls shutdown(wait=True) on exit, which blocks
+            # until the hung yfinance thread finishes — defeating the timeout.
+            # Instead, we shut down with wait=False to abandon hung threads.
+            ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                    future = ex.submit(_download_one_batch, batch, start_str, end_str)
-                    raw = future.result(timeout=180)   # 180s per smaller batch
+                future = ex.submit(_download_one_batch, batch, start_str, end_str)
+                raw = future.result(timeout=90)   # 90s per batch (25 tickers)
+                ex.shutdown(wait=False)
                 break
             except concurrent.futures.TimeoutError:
+                ex.shutdown(wait=False)   # abandon hung thread, don't block
                 log.warning(f"  Batch {i+1} attempt {attempt} timed out, retrying…")
             except Exception as e:
+                ex.shutdown(wait=False)
                 log.warning(f"  Batch {i+1} attempt {attempt} error: {e}, retrying…")
             time.sleep(5)
 
