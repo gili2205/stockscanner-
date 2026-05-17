@@ -9,7 +9,7 @@ Last updated: 2026-05-16 — v4.0.0
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| `app.py` (Flask app) | **v4.0.1** | Status badge now driven by BuyNow score |
+| `app.py` (Flask app) | **v4.0.2** | Collapsible filter panel, removed duplicate sort chips |
 | `backtest.py` | **v4_quality_setup** | `SCORING_VERSION` constant |
 | `smart_money.py` | — | No version constant; track via git |
 | Last updated | **2026-05-17** | — |

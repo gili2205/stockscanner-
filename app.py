@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.0.1"
+VERSION = "v4.0.2"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -62,7 +62,12 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .lookup-panel input:focus{{border-color:var(--blue);}}.lookup-btn{{background:var(--blue);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;}}.lookup-btn:hover{{background:#2980b9;}}
 .lookup-hint{{font-size:12px;color:var(--muted);}}.lookup-hint strong{{color:var(--text);}}
 .lookup-result{{padding:14px 24px 0;}}
-.filterpanel{{background:var(--bg2);border-bottom:2px solid var(--border);padding:12px 24px;}}
+.filterpanel{{background:var(--bg2);border-bottom:2px solid var(--border);}}
+.filter-toggle{{display:flex;align-items:center;gap:8px;padding:8px 24px;cursor:pointer;user-select:none;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.5px;}}
+.filter-toggle:hover{{color:var(--text);}}.filter-toggle .ftarrow{{font-size:10px;transition:transform .2s;}}.filter-toggle.open .ftarrow{{transform:rotate(180deg);}}
+.filter-active-badge{{background:var(--amber);color:#000;font-size:10px;font-weight:700;border-radius:10px;padding:1px 6px;display:none;}}
+.filter-body{{display:none;padding:10px 24px 12px;}}
+.filter-body.open{{display:block;}}
 .filterrow{{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px;}}.filterrow:last-child{{margin-bottom:0;}}
 .fgroup{{display:flex;flex-direction:column;gap:5px;}}.fgrouplabel{{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;font-weight:600;}}
 .fchips{{display:flex;gap:4px;flex-wrap:wrap;}}
@@ -129,7 +134,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .perf-item:last-child{{border-right:none;}}
 .perf-lbl{{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}}
 .perf-val{{font-size:13px;font-weight:600;}}
-@media(max-width:700px){{.grid{{padding:10px;gap:8px;}}.fold-metrics{{display:none;}}.filterpanel{{padding:10px 14px;}}}}
+@media(max-width:700px){{.grid{{padding:10px;gap:8px;}}.fold-metrics{{display:none;}}.filter-toggle{{padding:8px 14px;}}.filter-body{{padding:8px 14px 10px;}}}}
 </style>
 </head>
 <body>
@@ -175,6 +180,12 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 
 <!-- __ Multi-select filter panel __ -->
 <div class="filterpanel">
+  <div class="filter-toggle" id="filter-toggle" onclick="toggleFilterPanel()">
+    &#9881; Filters <span class="ftarrow">&#9660;</span>
+    <span class="filter-active-badge" id="filter-active-badge">0</span>
+    <span id="filter-desc" style="font-weight:400;margin-left:8px;font-size:11px"></span>
+  </div>
+  <div class="filter-body" id="filter-body">
 
   <div class="filterrow">
     <!-- Size -->
@@ -261,16 +272,6 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
       </div>
     </div>
 
-    <!-- Score focus / sort -->
-    <div class="fgroup">
-      <div class="fgrouplabel">&#127919; Sort by score</div>
-      <div class="fchips">
-        <div class="fchip amber on" id="preset-full"     onclick="setScoreSort('buy_now')"><span class="fcheck"></span>&#127919; Score (buy now)</div>
-        <div class="fchip blue"     id="preset-quality"  onclick="setScoreSort('quality')"><span class="fcheck"></span>&#128202; Quality</div>
-        <div class="fchip green"    id="preset-setup"    onclick="setScoreSort('setup')"><span class="fcheck"></span>&#127807; Setup</div>
-      </div>
-    </div>
-
     <!-- Quick presets -->
     <div class="fgroup">
       <div class="fgrouplabel">&#9889; Quick Presets</div>
@@ -302,6 +303,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <span class="activedesc" id="activedesc">Showing all stocks &mdash; select filters above to narrow down</span>
     <span class="cnt" id="cnt"></span>
   </div>
+  </div><!-- /filter-body -->
 </div>
 
 
@@ -475,6 +477,28 @@ function blendScore(s) {{
 // Empty set = no filter for that group (show all)
 var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[], signal:[] }};
 
+function toggleFilterPanel() {{
+  var toggle = document.getElementById('filter-toggle');
+  var body   = document.getElementById('filter-body');
+  var isOpen = body.classList.contains('open');
+  if (isOpen) {{
+    body.classList.remove('open');
+    toggle.classList.remove('open');
+  }} else {{
+    body.classList.add('open');
+    toggle.classList.add('open');
+  }}
+}}
+
+function updateFilterBadge() {{
+  var total = 0;
+  Object.values(activeFilters).forEach(function(v){{ total += v.length; }});
+  var badge = document.getElementById('filter-active-badge');
+  var desc  = document.getElementById('filter-desc');
+  if (badge) {{ badge.style.display = total>0?'inline':'none'; badge.textContent=total; }}
+  if (desc)  {{ desc.textContent = total>0?'('+total+' active)':''; }}
+}}
+
 function toggleChip(el) {{
   var group = el.dataset.group;
   var val   = el.dataset.val;
@@ -486,6 +510,7 @@ function toggleChip(el) {{
   }} else {{
     activeFilters[group] = activeFilters[group].filter(function(v){{return v!==val;}});
   }}
+  updateFilterBadge();
   render();
 }}
 
@@ -506,6 +531,7 @@ function setChip(group, val, on) {{
 function resetAll() {{
   document.querySelectorAll(".fchip[data-group]").forEach(function(c){{c.classList.remove("on");}});
   activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[], signal:[] }};
+  updateFilterBadge();
   render();
 }}
 
