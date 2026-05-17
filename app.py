@@ -3976,15 +3976,13 @@ function buildSugCard(s, idx) {
   var projHtml = '';
   if (s.wr_with != null && s.baselineWR != null) {
     var bWR = parseFloat(s.baselineWR);
-    var projWR = isGood
-      ? Math.min(s.wr_with, bWR + s.lift * 0.4)   // conservative estimate
-      : Math.max(s.wr_with, bWR + s.lift * 0.4);
+    var projLabel = isGood ? '▲ up to ' : '▲ approx ';
     projHtml = '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;">'
       + '<span style="color:var(--muted)">Projected WR impact:</span>'
       + '<span style="color:var(--muted)">Current <strong style="color:var(--text)">' + bWR.toFixed(1) + '%</strong></span>'
       + '<span style="color:var(--muted)">→</span>'
       + '<span><strong style="color:' + liftCol + '">'
-      + (isGood ? '▲ up to ' : '▲ approx ') + s.wr_with.toFixed(1) + '%</strong>'
+      + projLabel + s.wr_with.toFixed(1) + '%</strong>'
       + ' <span style="color:var(--muted);font-size:11px">(WR of picks WITH this signal)</span></span>'
       + '</div>';
   }
