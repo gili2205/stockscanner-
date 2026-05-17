@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.0.6"
+VERSION = "v4.0.7"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -1841,8 +1841,8 @@ var fdb = firebase.database();
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--muted);">Layer:</span>
         <button class="sort-btn active" id="sig-all"  onclick="setSigLayer('all')">All picks</button>
-        <button class="sort-btn"        id="sig-tech" onclick="setSigLayer('tech')">&#128202; Technical leaders</button>
-        <button class="sort-btn"        id="sig-cat"  onclick="setSigLayer('cat')">&#9889; Catalyst leaders</button>
+        <button class="sort-btn"        id="sig-tech" onclick="setSigLayer('tech')">&#128202; Quality leaders</button>
+        <button class="sort-btn"        id="sig-cat"  onclick="setSigLayer('cat')">&#127807; Setup leaders</button>
       </div>
       <div class="signal-grid" id="signal-grid"></div>
       <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin:16px 0 10px;">&#128279; Top Signal Combinations</div>
@@ -2325,12 +2325,12 @@ function avgLossForWindow(w) {
 
 function renderSignals(tf) {
   var ps = filtered.filter(function(p){return p.returns&&p.returns[tf]!=null;});
-  // Filter by layer
+  // Filter by layer — 'tech' = Quality leaders (Q≥S), 'cat' = Setup leaders (S>Q)
   if (sigLayer === 'tech') ps = ps.filter(function(p) {
-    var q = computeQualityScore(p); var s = computeSetupScore(p); return q >= s;
+    return computeQualityScore(p) >= computeSetupScore(p);
   });
   if (sigLayer === 'cat') ps = ps.filter(function(p) {
-    var q = computeQualityScore(p); var s = computeSetupScore(p); return s > q;
+    return computeSetupScore(p) > computeQualityScore(p);
   });
   if (!ps.length) { document.getElementById('signal-grid').innerHTML='<div style="color:var(--muted)">Not enough data yet</div>'; return; }
 
@@ -2351,7 +2351,8 @@ function renderSignals(tf) {
     {name:'Analyst upside > 10%',   with_fn: function(p){return (p.analyst_upside||0)>10;}},
   ];
 
-  var html = '';
+  // Compute stats for all signals, split into winning vs losing
+  var winning = [], losing = [];
   for (var i=0; i<signals.length; i++) {
     var sig = signals[i];
     var with_sig = ps.filter(sig.with_fn);
@@ -2360,13 +2361,36 @@ function renderSignals(tf) {
     var wr_with = Math.round(with_sig.filter(function(p){return p.returns[tf]>0;}).length/with_sig.length*100);
     var wr_wout = without.length ? Math.round(without.filter(function(p){return p.returns[tf]>0;}).length/without.length*100) : 0;
     var diff = wr_with - wr_wout;
-    var diffStr = (diff>=0?'+':'')+diff+'%';
-    var diffCol = diff>=5?'var(--green)':diff<=-5?'var(--red)':'var(--muted)';
-    html += '<div class="signal-card">';
-    html += '<div class="signal-name">'+sig.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+with_sig.length+' picks)</span></div>';
-    html += signalBar('With signal', wr_with, 'var(--green)');
-    html += signalBar('Without', wr_wout, 'var(--muted)');
-    html += '<div class="signal-diff">Difference: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
+    var entry = {name:sig.name, cnt:with_sig.length, wr_with:wr_with, wr_wout:wr_wout, diff:diff};
+    if (diff >= 0) winning.push(entry); else losing.push(entry);
+  }
+  winning.sort(function(a,b){return b.diff-a.diff;});
+  losing.sort(function(a,b){return a.diff-b.diff;});
+
+  function buildCard(s) {
+    var diffStr = (s.diff>=0?'+':'')+s.diff+'%';
+    var diffCol = s.diff>=5?'var(--green)':s.diff<=-5?'var(--red)':'var(--muted)';
+    var h = '<div class="signal-card">';
+    h += '<div class="signal-name">'+s.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+s.cnt+' picks)</span></div>';
+    h += signalBar('With signal', s.wr_with, s.diff>=0?'var(--green)':'var(--red)');
+    h += signalBar('Without', s.wr_wout, 'var(--muted)');
+    h += '<div class="signal-diff">Difference: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
+    h += '</div>';
+    return h;
+  }
+
+  var sectionLabel = '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin:0 0 8px;padding:4px 0;border-bottom:1px solid var(--border)">';
+  var html = '';
+  if (winning.length) {
+    html += sectionLabel+'<span style="color:var(--green)">&#9650; Winning signals</span></div>';
+    html += '<div class="signal-grid" style="margin-bottom:16px">';
+    winning.forEach(function(s){html+=buildCard(s);});
+    html += '</div>';
+  }
+  if (losing.length) {
+    html += sectionLabel+'<span style="color:var(--red)">&#9660; Signals to avoid</span></div>';
+    html += '<div class="signal-grid">';
+    losing.forEach(function(s){html+=buildCard(s);});
     html += '</div>';
   }
   document.getElementById('signal-grid').innerHTML = html || '<div style="color:var(--muted)">Not enough picks yet</div>';
