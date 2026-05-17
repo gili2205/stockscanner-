@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.0.2"
+VERSION = "v4.0.3"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -1829,12 +1829,15 @@ var fdb = firebase.database();
         </span>
       </h2>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:var(--muted);">Layer:</span>
-        <button class="sort-btn active" id="sig-all"  onclick="setSigLayer('all')">All picks</button>
-        <button class="sort-btn"        id="sig-tech" onclick="setSigLayer('tech')">&#128202; Technical leaders</button>
-        <button class="sort-btn"        id="sig-cat"  onclick="setSigLayer('cat')">&#9889; Catalyst leaders</button>
+        <span style="font-size:11px;color:var(--muted);">Filter:</span>
+        <button class="sort-btn active" id="sig-all"     onclick="setSigLayer('all')">All picks</button>
+        <button class="sort-btn"        id="sig-quality" onclick="setSigLayer('quality')">&#128202; High Quality (Q&#8805;65)</button>
+        <button class="sort-btn"        id="sig-setup"   onclick="setSigLayer('setup')">&#127807; High Setup (S&#8805;65)</button>
+        <button class="sort-btn"        id="sig-ready"   onclick="setSigLayer('ready')">&#127919; READY (Score&#8805;65)</button>
       </div>
-      <div class="signal-grid" id="signal-grid"></div>
+      <div id="signal-grid-individual" style="margin-bottom:20px"></div>
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">&#128279; Top Signal Combinations</div>
+      <div id="signal-grid-combos"></div>
     </div>
 
     <!-- Per-pick detail table -->
@@ -1849,14 +1852,14 @@ var fdb = firebase.database();
       <!-- Table sort + search -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Sort:</span>
-        <button class="sort-btn active" id="sort-btn-buy_now" onclick="setSort('buy_now')" style="background:#1a3d2b;border-color:#27ae60;color:#27ae60;font-weight:700">🎯 Score</button>
-        <button class="sort-btn"        id="sort-btn-quality" onclick="setSort('quality')">💎 Quality</button>
-        <button class="sort-btn"        id="sort-btn-setup"   onclick="setSort('setup')">🎣 Setup</button>
-        <button class="sort-btn"        id="sort-btn-date"    onclick="setSort('scan_date')">📅 Date</button>
-        <button class="sort-btn"        id="sort-btn-abc"     onclick="setSort('ticker_asc')">🔤 A–Z</button>
-        <button class="sort-btn"        id="sort-btn-ret1w" onclick="setSort('ret_1w')">1W Return</button>
-        <button class="sort-btn"        id="sort-btn-ret1m" onclick="setSort('ret_1m')">1M Return</button>
-        <button class="sort-btn"        id="sort-btn-ret3m" onclick="setSort('ret_3m')">3M Return</button>
+        <button class="sort-btn active" id="sort-btn-buy_now"  onclick="setSort('buy_now')" style="background:#1a3d2b;border-color:#27ae60;color:#27ae60;font-weight:700">🎯 Score</button>
+        <button class="sort-btn"        id="sort-btn-date"     onclick="setSort('scan_date')">📅 Date</button>
+        <button class="sort-btn"        id="sort-btn-abc"      onclick="setSort('ticker_asc')">🔤 A–Z</button>
+        <button class="sort-btn"        id="sort-btn-ret1w"    onclick="setSort('ret_1w')">1W</button>
+        <button class="sort-btn"        id="sort-btn-ret1m"    onclick="setSort('ret_1m')">1M</button>
+        <button class="sort-btn"        id="sort-btn-ret3m"    onclick="setSort('ret_3m')">3M</button>
+        <button class="sort-btn"        id="sort-btn-ret6m"    onclick="setSort('ret_6m')">6M</button>
+        <button class="sort-btn"        id="sort-btn-ret1y"    onclick="setSort('ret_1y')">1Y</button>
         <div style="margin-left:auto;">
           <input type="text" id="ticker-search" placeholder="🔍 Search ticker…" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;outline:none;width:150px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();page=0;render()">
         </div>
@@ -1864,21 +1867,18 @@ var fdb = firebase.database();
       <table class="picks-table">
         <thead>
           <tr>
-            <th onclick="sortBy('scan_date')">First Flagged ↕</th>
+            <th onclick="sortBy('scan_date')">Flagged ↕</th>
             <th onclick="sortBy('ticker')">Ticker ↕</th>
-            <th onclick="sortBy('price_at_scan')">Entry $</th>
-            <th onclick="setSort('buy_now')" style="color:#27ae60;cursor:pointer" title="Geometric mean of Quality × Setup">Score ↕</th>
-            <th onclick="setSort('quality')" style="color:#5b8dd9;cursor:pointer" title="RS · Trend · Momentum · Fundamentals">Quality ↕</th>
-            <th onclick="setSort('setup')"   style="color:#e67e22;cursor:pointer" title="Coil · Vol · Level · RSI · EMA">Setup ↕</th>
+            <th onclick="setSort('buy_now')" style="color:#27ae60;cursor:pointer" title="BuyNow = √(Quality × Setup)">Score ↕</th>
             <th>Status</th>
-            <th onclick="sortBy('rs_percentile')">RS %ile</th>
-            <th onclick="sortBy('vol_contraction')">Vol dry</th>
-            <th onclick="sortBy('atr')">ATR</th>
-            <th>Level</th>
-            <th onclick="sortBy('days_on_list')">Days on list ↕</th>
+            <th title="Smart Money signals">&#127968; SM</th>
+            <th title="News sentiment">&#128293; Sent</th>
+            <th onclick="sortBy('days_on_list')">Days ↕</th>
             <th onclick="sortBy('ret_1w')">1W</th>
             <th onclick="sortBy('ret_1m')">1M</th>
             <th onclick="sortBy('ret_3m')">3M</th>
+            <th onclick="sortBy('ret_6m')">6M</th>
+            <th onclick="sortBy('ret_1y')">1Y</th>
           </tr>
         </thead>
         <tbody id="picks-body"></tbody>
@@ -1900,8 +1900,10 @@ var sortCol   = 'scan_date';
 var sortAsc   = false;
 var page      = 0;
 var pageSize  = 50;
-var layerFocus = 'all';   // 'all' | 'tech' | 'cat'
-var sigLayer   = 'all';   // 'all' | 'tech' | 'cat'
+var layerFocus = 'all';
+var sigLayer   = 'all';   // 'all' | 'quality' | 'setup' | 'ready'
+var analyticsSMData   = {};  // ticker → {insider, institution, ark}
+var analyticsSentData = {};  // ticker → {overall_sentiment, buzz_score}
 
 // ── Layer score helpers (mirror dashboard logic) ──────────────────────────────
 function aEstimateTech(p) {
@@ -2010,8 +2012,8 @@ function setHistorySort(col) {
 
 function setSigLayer(f) {
   sigLayer = f;
-  ['all','tech','cat'].forEach(function(x) {
-    document.getElementById('sig-'+x).classList.toggle('active', x === f);
+  ['all','quality','setup','ready'].forEach(function(x) {
+    var el = document.getElementById('sig-'+x); if(el) el.classList.toggle('active', x === f);
   });
   renderSignals(document.getElementById('tf-select').value);
 }
@@ -2171,9 +2173,9 @@ function getFiltered() {
 function setSort(col) {
   sortCol = col;
   sortAsc = (col === 'ticker_asc');
-  var btns = ['buy_now','quality','setup','date','abc'];
-  var map  = {buy_now:'buy_now', quality:'quality', setup:'setup',
-              scan_date:'date', ticker_asc:'abc'};
+  var btns = ['buy_now','date','abc','ret1w','ret1m','ret3m','ret6m','ret1y'];
+  var map  = {buy_now:'buy_now', scan_date:'date', ticker_asc:'abc',
+              ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m', ret_6m:'ret6m', ret_1y:'ret1y'};
   btns.forEach(function(b) { var el=document.getElementById('sort-btn-'+b); if(el) el.classList.remove('active'); });
   var active = map[col];
   if (active) { var el=document.getElementById('sort-btn-'+active); if(el) el.classList.add('active'); }
@@ -2316,50 +2318,92 @@ function avgLossForWindow(w) {
 
 function renderSignals(tf) {
   var ps = filtered.filter(function(p){return p.returns&&p.returns[tf]!=null;});
-  // Filter by dominant layer if toggled
-  if (sigLayer !== 'all') {
-    ps = ps.filter(function(p) {
-      var t = p.score_technical != null ? p.score_technical : aEstimateTech(p);
-      var c = p.score_catalyst  != null ? p.score_catalyst  : aEstimateCat(p);
-      return sigLayer === 'tech' ? t >= c : c > t;
-    });
+  // Filter by score focus
+  if (sigLayer === 'quality') ps = ps.filter(function(p){return computeQualityScore(p)>=65;});
+  if (sigLayer === 'setup')   ps = ps.filter(function(p){return computeSetupScore(p)>=65;});
+  if (sigLayer === 'ready')   ps = ps.filter(function(p){return computeBuyNow(p)>=65;});
+
+  var noDataEl = '<div style="color:var(--muted)">Not enough data yet for this window</div>';
+  if (!ps.length) {
+    document.getElementById('signal-grid-individual').innerHTML = noDataEl;
+    document.getElementById('signal-grid-combos').innerHTML = '';
+    return;
   }
-  if (!ps.length) { document.getElementById('signal-grid').innerHTML='<div style="color:var(--muted)">Not enough data yet</div>'; return; }
 
   var signals = [
-    {name:'RS percentile > 80', with_fn: function(p){return (p.rs_percentile||0)>=80;}},
-    {name:'Vol contraction ≤ 70%', with_fn: function(p){return (p.vol_contraction||1)<=0.7;}},
-    {name:'Level = ATH/multi-year', with_fn: function(p){return (p.level||'').indexOf('ATH')>=0||(p.level||'').indexOf('multi')>=0;}},
+    {name:'Score (Buy Now) ≥65', with_fn: function(p){return computeBuyNow(p)>=65;}},
+    {name:'Quality ≥65', with_fn: function(p){return computeQualityScore(p)>=65;}},
+    {name:'Setup ≥65', with_fn: function(p){return computeSetupScore(p)>=65;}},
     {name:'EMA stack = full', with_fn: function(p){return p.ema_stack==='full';}},
+    {name:'RS percentile ≥80', with_fn: function(p){return (p.rs_percentile||0)>=80;}},
+    {name:'Vol contraction ≤70%', with_fn: function(p){return (p.vol_contraction||1)<=0.7;}},
+    {name:'ATR ≤0.25 (tight coil)', with_fn: function(p){return (p.atr||1)<=0.25;}},
+    {name:'RSI ≤55', with_fn: function(p){return (p.rsi||50)<=55;}},
+    {name:'Momentum 1M ≥10%', with_fn: function(p){return (p.momentum_1m||p.change_pct||0)>=10;}},
+    {name:'HH/HL ≥0.85', with_fn: function(p){return (p.hh_hl||0)>=0.85;}},
     {name:'Pre-breakout', with_fn: function(p){return !!p.pre_breakout;}},
     {name:'Bull flag', with_fn: function(p){return !!p.bull_flag;}},
-    {name:'Score ≥ 50', with_fn: function(p){return (p.score||0)>=50;}},
+    {name:'Level = ATH/multi-year', with_fn: function(p){return (p.level||'').indexOf('ATH')>=0||(p.level||'').indexOf('multi')>=0;}},
     {name:'Analyst upside > 10%', with_fn: function(p){return (p.analyst_upside||0)>10;}},
-    {name:'Analyst buy ≥ 70%', with_fn: function(p){return (p.analyst_buy_pct||0)>=70;}},
-    {name:'Earnings in ≤ 14d', with_fn: function(p){return p.days_to_earnings!=null&&p.days_to_earnings>=0&&p.days_to_earnings<=14;}},
   ];
 
-  var html = '';
+  // ── Individual signals ────────────────────────────────────────────────────
+  // Sort by win-rate diff descending
+  var sigStats = [];
   for (var i=0; i<signals.length; i++) {
     var sig = signals[i];
     var with_sig = ps.filter(sig.with_fn);
-    var without  = ps.filter(function(p){return !sig.with_fn(p);});
+    var without  = ps.filter(function(idx){return function(p){return !signals[idx].with_fn(p);};}(i));
     if (with_sig.length < 3) continue;
+    var wr_with = Math.round(with_sig.filter(function(p){return p.returns[tf]>0;}).length/with_sig.length*100);
+    var wr_wout = without.length ? Math.round(without.filter(function(p){return p.returns[tf]>0;}).length/without.length*100) : 0;
+    sigStats.push({name:sig.name, cnt:with_sig.length, wr_with:wr_with, wr_wout:wr_wout, diff:wr_with-wr_wout});
+  }
+  sigStats.sort(function(a,b){return b.diff-a.diff;});
 
-    var wr_with = with_sig.length ? Math.round(with_sig.filter(function(p){return p.returns[tf]>0;}).length/with_sig.length*100) : 0;
-    var wr_wout = without.length  ? Math.round(without.filter(function(p){return p.returns[tf]>0;}).length/without.length*100)  : 0;
-    var diff = wr_with - wr_wout;
-    var diffStr = (diff>=0?'+':'')+diff+'%';
-    var diffCol = diff>=5?'var(--green)':diff<=-5?'var(--red)':'var(--muted)';
-
+  var html = '';
+  for (var j=0; j<sigStats.length; j++) {
+    var s = sigStats[j];
+    var diffStr = (s.diff>=0?'+':'')+s.diff+'%';
+    var diffCol = s.diff>=5?'var(--green)':s.diff<=-5?'var(--red)':'var(--muted)';
     html += '<div class="signal-card">';
-    html += '<div class="signal-name">'+sig.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+with_sig.length+' picks)</span></div>';
-    html += signalBar('With signal', wr_with, 'var(--green)');
-    html += signalBar('Without', wr_wout, 'var(--muted)');
-    html += '<div class="signal-diff">Difference: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
+    html += '<div class="signal-name">'+s.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+s.cnt+' picks)</span></div>';
+    html += signalBar('With signal', s.wr_with, 'var(--green)');
+    html += signalBar('Without', s.wr_wout, 'var(--muted)');
+    html += '<div class="signal-diff">Lift: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
     html += '</div>';
   }
-  document.getElementById('signal-grid').innerHTML = html || '<div style="color:var(--muted)">Not enough picks yet</div>';
+  document.getElementById('signal-grid-individual').innerHTML = html || noDataEl;
+
+  // ── Signal combinations (top pairs) ──────────────────────────────────────
+  var combos = [];
+  for (var a=0; a<signals.length; a++) {
+    for (var b=a+1; b<signals.length; b++) {
+      var both = ps.filter(function(aa,bb){return function(p){return signals[aa].with_fn(p)&&signals[bb].with_fn(p);};}(a,b));
+      if (both.length < 5) continue;
+      var wr_both = Math.round(both.filter(function(p){return p.returns[tf]>0;}).length/both.length*100);
+      var base_wr = ps.length ? Math.round(ps.filter(function(p){return p.returns[tf]>0;}).length/ps.length*100) : 0;
+      combos.push({name:signals[a].name+' + '+signals[b].name, cnt:both.length, wr:wr_both, base:base_wr, diff:wr_both-base_wr});
+    }
+  }
+  combos.sort(function(a,b){return b.wr-a.wr;});
+  var topCombos = combos.slice(0,6);
+
+  var chtml = '';
+  var base_wr2 = ps.length ? Math.round(ps.filter(function(p){return p.returns[tf]>0;}).length/ps.length*100) : 0;
+  for (var k=0; k<topCombos.length; k++) {
+    var c = topCombos[k];
+    var cdiff = c.wr - base_wr2;
+    var cdiffStr = (cdiff>=0?'+':'')+cdiff+'%';
+    var cdiffCol = cdiff>=10?'var(--green)':cdiff>=5?'var(--amber)':cdiff<0?'var(--red)':'var(--muted)';
+    chtml += '<div class="signal-card">';
+    chtml += '<div class="signal-name" style="font-size:11px">'+c.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+c.cnt+' picks)</span></div>';
+    chtml += signalBar('Combo win rate', c.wr, 'var(--blue)');
+    chtml += signalBar('Baseline', base_wr2, 'var(--muted)');
+    chtml += '<div class="signal-diff">vs baseline: <strong style="color:'+cdiffCol+'">'+cdiffStr+'</strong></div>';
+    chtml += '</div>';
+  }
+  document.getElementById('signal-grid-combos').innerHTML = chtml || '<div style="color:var(--muted);font-size:12px">Need more data for combinations</div>';
 }
 
 function signalBar(label, pct, color) {
@@ -2377,31 +2421,52 @@ function renderPicks(tf) {
   var html = '';
   for (var i=0; i<rows.length; i++) {
     var p = rows[i];
-    var ret1w = p.returns&&p.returns['1w']!=null ? p.returns['1w'] : null;
-    var ret1m = p.returns&&p.returns['1m']!=null ? p.returns['1m'] : null;
-    var ret3m = p.returns&&p.returns['3m']!=null ? p.returns['3m'] : null;
+    var r = p.returns || {};
+    var ret1w = r['1w']!=null ? r['1w'] : null;
+    var ret1m = r['1m']!=null ? r['1m'] : null;
+    var ret3m = r['3m']!=null ? r['3m'] : null;
+    var ret6m = r['6m']!=null ? r['6m'] : null;
+    var ret1y = r['1y']!=null ? r['1y'] : null;
     var dol   = p.days_on_list || 1;
     var dolColor = dol >= 5 ? 'var(--green)' : dol >= 3 ? 'var(--amber)' : 'var(--muted)';
-    var bns   = p.score_buy_now  != null ? p.score_buy_now  : computeBuyNow(p);
-    var qs    = p.score_quality  != null ? p.score_quality  : computeQualityScore(p);
-    var ss    = p.score_setup    != null ? p.score_setup    : computeSetupScore(p);
+    var bns   = p.score_buy_now != null ? p.score_buy_now : computeBuyNow(p);
     var bnsColor = bns>=65?'var(--green)':bns>=40?'var(--amber)':'var(--red)';
+    var v4status = bns>=65?'READY':bns>=40?'WATCH':'BUILDING';
+
+    // Smart money badge
+    var sm = analyticsSMData[p.ticker];
+    var smBadge = '';
+    if (sm) {
+      var tips = [];
+      if (sm.insider)     tips.push('Insider buy');
+      if (sm.institution) tips.push('Hedge fund');
+      if (sm.ark)         tips.push('ARK');
+      smBadge = '<span title="'+tips.join(' · ')+'" style="font-size:13px" title="Smart money">'+
+        (sm.insider&&sm.institution?'&#127968;&#128024;':sm.insider?'&#128024;':sm.institution?'&#127968;':sm.ark?'&#128640;':'&#127968;')+'</span>';
+    }
+
+    // Sentiment badge
+    var sd = analyticsSentData[p.ticker];
+    var sentBadge = '—';
+    if (sd) {
+      var sent = sd.overall_sentiment || 'neutral';
+      var buzz = sd.buzz_score || 0;
+      var sentIcon = sent==='bullish'?'&#128293;':sent==='bearish'?'&#128308;':'&#8212;';
+      var buzzStr = buzz>=50?'<span style="font-size:9px;color:var(--amber)"> '+Math.round(buzz)+'</span>':'';
+      sentBadge = '<span title="'+sent+(buzz?' · Buzz:'+Math.round(buzz):'')+'" style="font-size:12px">'+sentIcon+'</span>'+buzzStr;
+    }
+
+    function retCell(v) { return '<td class="'+(v==null?'ret-na':v>=0?'ret-pos':'ret-neg')+'">'+(v==null?'—':fmtRet(v))+'</td>'; }
+
     html += '<tr>'
-      +'<td>'+p.scan_date+'</td>'
+      +'<td style="color:var(--muted);font-size:11px">'+p.scan_date+'</td>'
       +'<td><strong>'+p.ticker+'</strong></td>'
-      +'<td>$'+(p.price_at_scan?p.price_at_scan.toFixed(2):'—')+'</td>'
-      +'<td style="color:'+bnsColor+';font-weight:700">'+bns+'</td>'
-      +'<td style="color:#5b8dd9">'+qs+'</td>'
-      +'<td style="color:#e67e22">'+ss+'</td>'
-      +'<td><span class="badge '+(p.status||'')+'">'+p.status+'</span></td>'
-      +'<td>'+(p.rs_percentile!=null?p.rs_percentile+'th':'—')+'</td>'
-      +'<td>'+(p.vol_contraction!=null?Math.round(p.vol_contraction*100)+'%':'—')+'</td>'
-      +'<td>'+(p.atr!=null?p.atr.toFixed(2):'—')+'</td>'
-      +'<td>'+(p.level||'—')+'</td>'
+      +'<td style="color:'+bnsColor+';font-weight:700;font-size:15px">'+bns+'</td>'
+      +'<td><span class="badge '+v4status+'">'+v4status+'</span></td>'
+      +'<td style="text-align:center">'+(smBadge||'—')+'</td>'
+      +'<td style="text-align:center">'+sentBadge+'</td>'
       +'<td style="color:'+dolColor+';font-weight:600">'+dol+'d</td>'
-      +'<td class="'+(ret1w==null?'ret-na':ret1w>=0?'ret-pos':'ret-neg')+'">'+(ret1w==null?'—':fmtRet(ret1w))+'</td>'
-      +'<td class="'+(ret1m==null?'ret-na':ret1m>=0?'ret-pos':'ret-neg')+'">'+(ret1m==null?'—':fmtRet(ret1m))+'</td>'
-      +'<td class="'+(ret3m==null?'ret-na':ret3m>=0?'ret-pos':'ret-neg')+'">'+(ret3m==null?'—':fmtRet(ret3m))+'</td>'
+      +retCell(ret1w)+retCell(ret1m)+retCell(ret3m)+retCell(ret6m)+retCell(ret1y)
       +'</tr>';
   }
   document.getElementById('picks-body').innerHTML = html;
@@ -2418,6 +2483,34 @@ function fmtRet(v) { return (v>=0?'+':'')+v.toFixed(1)+'%'; }
 function round1(v) { return Math.round(v*10)/10; }
 
 loadData();
+
+// Load Smart Money data for badge display
+fdb.ref('/scanner/smart_money').once('value', function(snap) {
+  var d = snap.val();
+  if (!d) return;
+  analyticsSMData = {};
+  if (d.insider_buys) {
+    Object.keys(d.insider_buys).forEach(function(t) { analyticsSMData[t] = analyticsSMData[t]||{}; analyticsSMData[t].insider=true; });
+  }
+  if (d.institutional) {
+    Object.keys(d.institutional).forEach(function(t) { analyticsSMData[t] = analyticsSMData[t]||{}; analyticsSMData[t].institution=true; });
+  }
+  if (d.ark_holdings) {
+    Object.keys(d.ark_holdings).forEach(function(t) { analyticsSMData[t] = analyticsSMData[t]||{}; analyticsSMData[t].ark=true; });
+  }
+  if (filtered.length) render();
+});
+
+// Load Sentiment data for badge display
+fdb.ref('/scanner/sentiment').once('value', function(snap) {
+  var d = snap.val();
+  if (!d) return;
+  analyticsSentData = {};
+  Object.keys(d).forEach(function(t) {
+    if (t !== '_updated' && d[t]) analyticsSentData[t] = d[t];
+  });
+  if (filtered.length) render();
+});
 </script>
 </body>
 </html>"""
