@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.0.3"
+VERSION = "v4.0.4"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -160,8 +160,8 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 <div class="metrics">
   <div class="metric"><div class="mlabel">Total scanned</div><div class="mval" id="m-total">&#8212;</div><div class="msub">full universe</div></div>
   <div class="metric"><div class="mlabel">Pre-breakout</div><div class="mval" style="color:var(--green)" id="m-pre">&#8212;</div><div class="msub">coiled &amp; near trigger</div></div>
-  <div class="metric"><div class="mlabel">Ready (72+)</div><div class="mval" style="color:var(--green)" id="m-ready">&#8212;</div><div class="msub">breakout imminent</div></div>
-  <div class="metric"><div class="mlabel">Watch (55-71)</div><div class="mval" style="color:var(--amber)" id="m-watch">&#8212;</div><div class="msub">almost ready</div></div>
+  <div class="metric"><div class="mlabel">Ready (&#8805;65)</div><div class="mval" style="color:var(--green)" id="m-ready">&#8212;</div><div class="msub">breakout imminent</div></div>
+  <div class="metric"><div class="mlabel">Watch (40&#8211;64)</div><div class="mval" style="color:var(--amber)" id="m-watch">&#8212;</div><div class="msub">almost ready</div></div>
   <div class="metric"><div class="mlabel">Bull flags</div><div class="mval" style="color:var(--blue)" id="m-flags">&#8212;</div><div class="msub">pole+flag detected</div></div>
   <div class="metric"><div class="mlabel">Last scan</div><div class="mval" style="font-size:13px" id="m-time">&#8212;</div><div class="msub" id="m-sess">&#8212;</div></div>
 </div>
@@ -730,9 +730,19 @@ fdb.ref("/scanner").on("value", function(snap) {{
 
   document.getElementById("m-total").textContent = scanned.toLocaleString();
   document.getElementById("m-pre").textContent    = d.pre_breakout_count||0;
-  document.getElementById("m-ready").textContent  = d.ready_count||0;
-  document.getElementById("m-watch").textContent  = d.watch_count||0;
   document.getElementById("m-flags").textContent  = d.bull_flag_count||0;
+  // Compute READY/WATCH from v4 BuyNow score across all stocks
+  var _stocks = d.all_stocks || d.stocks || {{}};
+  var _tickers = Object.keys(_stocks);
+  if (_tickers.length > 0) {{
+    var _nReady = 0, _nWatch = 0;
+    _tickers.forEach(function(t) {{ var bn=computeBuyNow(_stocks[t]); if(bn>=65)_nReady++; else if(bn>=40)_nWatch++; }});
+    document.getElementById("m-ready").textContent = _nReady;
+    document.getElementById("m-watch").textContent = _nWatch;
+  }} else {{
+    document.getElementById("m-ready").textContent = d.ready_count||0;
+    document.getElementById("m-watch").textContent = d.watch_count||0;
+  }}
   if (d.last_updated) {{
     var t = new Date(d.last_updated);
     document.getElementById("m-time").textContent = t.toLocaleTimeString([],{{hour:"2-digit",minute:"2-digit"}});
