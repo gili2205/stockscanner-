@@ -4023,32 +4023,35 @@ function buildConsolidatedSug(sugs, baselineWR) {
   }
 
   // Single Accept button for all patchable changes
-  // Check Firebase optSuggestions to see if these params are already queued or applied
   if (patchable.length > 0) {
     h += '<div id="consolidated-action" style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap;">';
 
-    // Scan existing suggestions in Firebase for matching params
-    var sugVals = Object.values(optSuggestions);
-    var pendingParams = sugVals.filter(function(s){ return s && s.applied === false; }).map(function(s){ return s.param; });
-    var appliedParams = sugVals.filter(function(s){ return s && s.applied === true; }).map(function(s){ return s.param; });
     var myParams = patchable.map(function(s){ return s.param; });
-    var anyQueued  = myParams.some(function(p){ return pendingParams.indexOf(p) >= 0; });
-    var allApplied = myParams.every(function(p){ return appliedParams.indexOf(p) >= 0; });
+    var myParamsKey = myParams.slice().sort().join(',');
+
+    // Check if cron already applied these changes (Firebase source of truth for "done")
+    var sugVals = Object.values(optSuggestions);
+    var appliedParams = sugVals.filter(function(s){ return s && s.applied === true; }).map(function(s){ return s.param; });
+    var allApplied = myParams.length > 0 && myParams.every(function(p){ return appliedParams.indexOf(p) >= 0; });
+
+    // Check localStorage for "queued but not yet applied" state (reliable across page refreshes)
+    var lsKey = 'optimizer_queued_' + myParamsKey;
+    var isQueued = !allApplied && !!localStorage.getItem(lsKey);
 
     if (allApplied) {
-      // All changes have been applied by the cron already
+      // Cron has applied — clear localStorage and show done state
+      localStorage.removeItem(lsKey);
       h += '<span class="badge badge-applied">&#10003; Applied to live_scanner.py</span>';
-      h += '<span style="font-size:11px;color:var(--muted)">Scanner was restarted with updated weights. Re-run optimizer to generate fresh suggestions.</span>';
-    } else if (anyQueued) {
-      // At least one change is already queued waiting for cron
+      h += '<span style="font-size:11px;color:var(--muted)">Scanner restarted with updated weights. Re-run the optimizer for fresh suggestions.</span>';
+    } else if (isQueued) {
       h += '<span class="badge badge-pending">&#9711; Queued — cron will apply within 5 min</span>';
-      h += '<span style="font-size:11px;color:var(--muted)">Changes accepted. The VM cron (<code>ai_optimizer.py --check-and-run</code>) will patch live_scanner.py and restart the scanner automatically.</span>';
+      h += '<span style="font-size:11px;color:var(--muted)">The VM cron will patch live_scanner.py and restart the scanner automatically.</span>';
     } else {
-      // Nothing queued yet — show the Accept button
+      // Show Accept button — store lsKey on it so the handler can save state
       var patchKey = 'opt_' + Date.now();
       PENDING_PATCHES[patchKey] = patchable.map(function(s){ return {param: s.param, pts: s.proposedPts, factor: s.factor}; });
       var nLabel = patchable.length + ' change' + (patchable.length > 1 ? 's' : '');
-      h += '<button class="btn btn-approve" data-key="' + patchKey + '" onclick="acceptAllSuggestions(this)">&#10003; Accept all ' + nLabel + '</button>';
+      h += '<button class="btn btn-approve" data-key="' + patchKey + '" data-lskey="' + lsKey + '" onclick="acceptAllSuggestions(this)">&#10003; Accept all ' + nLabel + '</button>';
       h += '<span style="font-size:11px;color:var(--muted)">Queues changes to live_scanner.py &middot; cron applies automatically within 5 min</span>';
     }
     h += '</div>';
@@ -4060,6 +4063,7 @@ function buildConsolidatedSug(sugs, baselineWR) {
 
 async function acceptAllSuggestions(btn) {
   var patches = PENDING_PATCHES[btn.dataset.key] || [];
+  var lsKey   = btn.dataset.lskey || '';
   if (!patches.length) return;
   btn.disabled = true; btn.textContent = 'Queuing ' + patches.length + ' changes...';
   var errors = [];
@@ -4079,8 +4083,10 @@ async function acceptAllSuggestions(btn) {
   if (errors.length) {
     bar.innerHTML = '<span style="color:var(--red)">&#9888; Some errors: ' + errors.join(', ') + '</span>';
   } else {
+    // Mark as queued in localStorage so revisiting the page shows "Queued" state
+    if (lsKey) localStorage.setItem(lsKey, '1');
     bar.innerHTML = '<span class="badge badge-pending" style="margin-right:8px">&#9711; Queued — cron will apply within 5 min</span>'
-      + '<span style="font-size:11px;color:var(--muted)">The VM cron (<code>ai_optimizer.py --check-and-run</code>) will patch live_scanner.py and restart the scanner automatically.</span>';
+      + '<span style="font-size:11px;color:var(--muted)">The VM cron will patch live_scanner.py and restart the scanner automatically.</span>';
   }
 }
 
