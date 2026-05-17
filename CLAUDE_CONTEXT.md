@@ -9,7 +9,7 @@ Last updated: 2026-05-16 — v4.0.0
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| `app.py` (Flask app) | **v4.0.7** | Analytics: winning/losing signal split; layer labels → Quality/Setup leaders |
+| `app.py` (Flask app) | **v4.0.8** | Fix signal sections stacking vertically (winning above / losing below) |
 | `backtest.py` | **v4_quality_setup** | `SCORING_VERSION` constant |
 | `smart_money.py` | — | No version constant; track via git |
 | Last updated | **2026-05-17** | — |

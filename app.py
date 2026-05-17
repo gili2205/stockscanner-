@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.0.7"
+VERSION = "v4.0.8"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -1844,7 +1844,7 @@ var fdb = firebase.database();
         <button class="sort-btn"        id="sig-tech" onclick="setSigLayer('tech')">&#128202; Quality leaders</button>
         <button class="sort-btn"        id="sig-cat"  onclick="setSigLayer('cat')">&#127807; Setup leaders</button>
       </div>
-      <div class="signal-grid" id="signal-grid"></div>
+      <div id="signal-grid"></div>
       <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin:16px 0 10px;">&#128279; Top Signal Combinations</div>
       <div class="signal-grid" id="signal-grid-combos"></div>
     </div>
@@ -2379,20 +2379,18 @@ function renderSignals(tf) {
     return h;
   }
 
-  var sectionLabel = '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin:0 0 8px;padding:4px 0;border-bottom:1px solid var(--border)">';
+  function sectionHtml(label, color, cards) {
+    var h = '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;';
+    h += 'margin-bottom:8px;padding:4px 0;border-bottom:1px solid var(--border);color:'+color+'">'+label+'</div>';
+    h += '<div class="signal-grid" style="margin-bottom:20px">';
+    cards.forEach(function(s){h+=buildCard(s);});
+    h += '</div>';
+    return h;
+  }
+
   var html = '';
-  if (winning.length) {
-    html += sectionLabel+'<span style="color:var(--green)">&#9650; Winning signals</span></div>';
-    html += '<div class="signal-grid" style="margin-bottom:16px">';
-    winning.forEach(function(s){html+=buildCard(s);});
-    html += '</div>';
-  }
-  if (losing.length) {
-    html += sectionLabel+'<span style="color:var(--red)">&#9660; Signals to avoid</span></div>';
-    html += '<div class="signal-grid">';
-    losing.forEach(function(s){html+=buildCard(s);});
-    html += '</div>';
-  }
+  if (winning.length) html += sectionHtml('&#9650; Winning signals', 'var(--green)', winning);
+  if (losing.length)  html += sectionHtml('&#9660; Signals to avoid', 'var(--red)', losing);
   document.getElementById('signal-grid').innerHTML = html || '<div style="color:var(--muted)">Not enough picks yet</div>';
 
   // ── Combinations ──────────────────────────────────────────────────────────
