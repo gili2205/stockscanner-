@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.0.4"
+VERSION = "v4.0.6"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -1839,15 +1839,14 @@ var fdb = firebase.database();
         </span>
       </h2>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:var(--muted);">Filter:</span>
-        <button class="sort-btn active" id="sig-all"     onclick="setSigLayer('all')">All picks</button>
-        <button class="sort-btn"        id="sig-quality" onclick="setSigLayer('quality')">&#128202; High Quality (Q&#8805;65)</button>
-        <button class="sort-btn"        id="sig-setup"   onclick="setSigLayer('setup')">&#127807; High Setup (S&#8805;65)</button>
-        <button class="sort-btn"        id="sig-ready"   onclick="setSigLayer('ready')">&#127919; READY (Score&#8805;65)</button>
+        <span style="font-size:11px;color:var(--muted);">Layer:</span>
+        <button class="sort-btn active" id="sig-all"  onclick="setSigLayer('all')">All picks</button>
+        <button class="sort-btn"        id="sig-tech" onclick="setSigLayer('tech')">&#128202; Technical leaders</button>
+        <button class="sort-btn"        id="sig-cat"  onclick="setSigLayer('cat')">&#9889; Catalyst leaders</button>
       </div>
-      <div id="signal-grid-individual" style="margin-bottom:20px"></div>
-      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">&#128279; Top Signal Combinations</div>
-      <div id="signal-grid-combos"></div>
+      <div class="signal-grid" id="signal-grid"></div>
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin:16px 0 10px;">&#128279; Top Signal Combinations</div>
+      <div class="signal-grid" id="signal-grid-combos"></div>
     </div>
 
     <!-- Per-pick detail table -->
@@ -1881,8 +1880,6 @@ var fdb = firebase.database();
             <th onclick="sortBy('ticker')">Ticker ↕</th>
             <th onclick="setSort('buy_now')" style="color:#27ae60;cursor:pointer" title="BuyNow = √(Quality × Setup)">Score ↕</th>
             <th>Status</th>
-            <th title="Smart Money signals">&#127968; SM</th>
-            <th title="News sentiment">&#128293; Sent</th>
             <th onclick="sortBy('days_on_list')">Days ↕</th>
             <th onclick="sortBy('ret_1w')">1W</th>
             <th onclick="sortBy('ret_1m')">1M</th>
@@ -2022,7 +2019,7 @@ function setHistorySort(col) {
 
 function setSigLayer(f) {
   sigLayer = f;
-  ['all','quality','setup','ready'].forEach(function(x) {
+  ['all','tech','cat'].forEach(function(x) {
     var el = document.getElementById('sig-'+x); if(el) el.classList.toggle('active', x === f);
   });
   renderSignals(document.getElementById('tf-select').value);
@@ -2328,38 +2325,33 @@ function avgLossForWindow(w) {
 
 function renderSignals(tf) {
   var ps = filtered.filter(function(p){return p.returns&&p.returns[tf]!=null;});
-  // Filter by score focus
-  if (sigLayer === 'quality') ps = ps.filter(function(p){return computeQualityScore(p)>=65;});
-  if (sigLayer === 'setup')   ps = ps.filter(function(p){return computeSetupScore(p)>=65;});
-  if (sigLayer === 'ready')   ps = ps.filter(function(p){return computeBuyNow(p)>=65;});
-
-  var noDataEl = '<div style="color:var(--muted)">Not enough data yet for this window</div>';
-  if (!ps.length) {
-    document.getElementById('signal-grid-individual').innerHTML = noDataEl;
-    document.getElementById('signal-grid-combos').innerHTML = '';
-    return;
-  }
+  // Filter by layer
+  if (sigLayer === 'tech') ps = ps.filter(function(p) {
+    var q = computeQualityScore(p); var s = computeSetupScore(p); return q >= s;
+  });
+  if (sigLayer === 'cat') ps = ps.filter(function(p) {
+    var q = computeQualityScore(p); var s = computeSetupScore(p); return s > q;
+  });
+  if (!ps.length) { document.getElementById('signal-grid').innerHTML='<div style="color:var(--muted)">Not enough data yet</div>'; return; }
 
   var signals = [
-    {name:'Score (Buy Now) ≥65', with_fn: function(p){return computeBuyNow(p)>=65;}},
-    {name:'Quality ≥65', with_fn: function(p){return computeQualityScore(p)>=65;}},
-    {name:'Setup ≥65', with_fn: function(p){return computeSetupScore(p)>=65;}},
-    {name:'EMA stack = full', with_fn: function(p){return p.ema_stack==='full';}},
-    {name:'RS percentile ≥80', with_fn: function(p){return (p.rs_percentile||0)>=80;}},
-    {name:'Vol contraction ≤70%', with_fn: function(p){return (p.vol_contraction||1)<=0.7;}},
-    {name:'ATR ≤0.25 (tight coil)', with_fn: function(p){return (p.atr||1)<=0.25;}},
-    {name:'RSI ≤55', with_fn: function(p){return (p.rsi||50)<=55;}},
-    {name:'Momentum 1M ≥10%', with_fn: function(p){return (p.momentum_1m||p.change_pct||0)>=10;}},
-    {name:'HH/HL ≥0.85', with_fn: function(p){return (p.hh_hl||0)>=0.85;}},
-    {name:'Pre-breakout', with_fn: function(p){return !!p.pre_breakout;}},
-    {name:'Bull flag', with_fn: function(p){return !!p.bull_flag;}},
-    {name:'Level = ATH/multi-year', with_fn: function(p){return (p.level||'').indexOf('ATH')>=0||(p.level||'').indexOf('multi')>=0;}},
-    {name:'Analyst upside > 10%', with_fn: function(p){return (p.analyst_upside||0)>10;}},
+    {name:'Score (Buy Now) ≥ 65',   with_fn: function(p){return computeBuyNow(p)>=65;}},
+    {name:'Quality ≥ 65',           with_fn: function(p){return computeQualityScore(p)>=65;}},
+    {name:'Setup ≥ 65',             with_fn: function(p){return computeSetupScore(p)>=65;}},
+    {name:'RS percentile ≥ 80',     with_fn: function(p){return (p.rs_percentile||0)>=80;}},
+    {name:'EMA stack = full',        with_fn: function(p){return p.ema_stack==='full';}},
+    {name:'Vol contraction ≤ 70%',  with_fn: function(p){return (p.vol_contraction||1)<=0.7;}},
+    {name:'ATR ≤ 0.25 (tight coil)',with_fn: function(p){return (p.atr||1)<=0.25;}},
+    {name:'RSI ≤ 55',               with_fn: function(p){return (p.rsi||50)<=55;}},
+    {name:'Momentum 1M ≥ 10%',      with_fn: function(p){return (p.momentum_1m||p.change_pct||0)>=10;}},
+    {name:'HH/HL ≥ 0.85',           with_fn: function(p){return (p.hh_hl||0)>=0.85;}},
+    {name:'Pre-breakout',            with_fn: function(p){return !!p.pre_breakout;}},
+    {name:'Bull flag',               with_fn: function(p){return !!p.bull_flag;}},
+    {name:'Level = ATH/multi-year',  with_fn: function(p){return (p.level||'').indexOf('ATH')>=0||(p.level||'').indexOf('multi')>=0;}},
+    {name:'Analyst upside > 10%',   with_fn: function(p){return (p.analyst_upside||0)>10;}},
   ];
 
-  // ── Individual signals ────────────────────────────────────────────────────
-  // Sort by win-rate diff descending
-  var sigStats = [];
+  var html = '';
   for (var i=0; i<signals.length; i++) {
     var sig = signals[i];
     var with_sig = ps.filter(sig.with_fn);
@@ -2367,52 +2359,41 @@ function renderSignals(tf) {
     if (with_sig.length < 3) continue;
     var wr_with = Math.round(with_sig.filter(function(p){return p.returns[tf]>0;}).length/with_sig.length*100);
     var wr_wout = without.length ? Math.round(without.filter(function(p){return p.returns[tf]>0;}).length/without.length*100) : 0;
-    sigStats.push({name:sig.name, cnt:with_sig.length, wr_with:wr_with, wr_wout:wr_wout, diff:wr_with-wr_wout});
-  }
-  sigStats.sort(function(a,b){return b.diff-a.diff;});
-
-  var html = '';
-  for (var j=0; j<sigStats.length; j++) {
-    var s = sigStats[j];
-    var diffStr = (s.diff>=0?'+':'')+s.diff+'%';
-    var diffCol = s.diff>=5?'var(--green)':s.diff<=-5?'var(--red)':'var(--muted)';
+    var diff = wr_with - wr_wout;
+    var diffStr = (diff>=0?'+':'')+diff+'%';
+    var diffCol = diff>=5?'var(--green)':diff<=-5?'var(--red)':'var(--muted)';
     html += '<div class="signal-card">';
-    html += '<div class="signal-name">'+s.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+s.cnt+' picks)</span></div>';
-    html += signalBar('With signal', s.wr_with, 'var(--green)');
-    html += signalBar('Without', s.wr_wout, 'var(--muted)');
-    html += '<div class="signal-diff">Lift: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
+    html += '<div class="signal-name">'+sig.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+with_sig.length+' picks)</span></div>';
+    html += signalBar('With signal', wr_with, 'var(--green)');
+    html += signalBar('Without', wr_wout, 'var(--muted)');
+    html += '<div class="signal-diff">Difference: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
     html += '</div>';
   }
-  document.getElementById('signal-grid-individual').innerHTML = html || noDataEl;
+  document.getElementById('signal-grid').innerHTML = html || '<div style="color:var(--muted)">Not enough picks yet</div>';
 
-  // ── Signal combinations (top pairs) ──────────────────────────────────────
+  // ── Combinations ──────────────────────────────────────────────────────────
+  var base_wr = ps.length ? Math.round(ps.filter(function(p){return p.returns[tf]>0;}).length/ps.length*100) : 0;
   var combos = [];
   for (var a=0; a<signals.length; a++) {
     for (var b=a+1; b<signals.length; b++) {
       var both = ps.filter(function(aa,bb){return function(p){return signals[aa].with_fn(p)&&signals[bb].with_fn(p);};}(a,b));
       if (both.length < 5) continue;
       var wr_both = Math.round(both.filter(function(p){return p.returns[tf]>0;}).length/both.length*100);
-      var base_wr = ps.length ? Math.round(ps.filter(function(p){return p.returns[tf]>0;}).length/ps.length*100) : 0;
-      combos.push({name:signals[a].name+' + '+signals[b].name, cnt:both.length, wr:wr_both, base:base_wr, diff:wr_both-base_wr});
+      combos.push({name:signals[a].name+' + '+signals[b].name, cnt:both.length, wr:wr_both, diff:wr_both-base_wr});
     }
   }
   combos.sort(function(a,b){return b.wr-a.wr;});
-  var topCombos = combos.slice(0,6);
-
   var chtml = '';
-  var base_wr2 = ps.length ? Math.round(ps.filter(function(p){return p.returns[tf]>0;}).length/ps.length*100) : 0;
-  for (var k=0; k<topCombos.length; k++) {
-    var c = topCombos[k];
-    var cdiff = c.wr - base_wr2;
-    var cdiffStr = (cdiff>=0?'+':'')+cdiff+'%';
-    var cdiffCol = cdiff>=10?'var(--green)':cdiff>=5?'var(--amber)':cdiff<0?'var(--red)':'var(--muted)';
+  combos.slice(0,6).forEach(function(c) {
+    var diffStr = (c.diff>=0?'+':'')+c.diff+'%';
+    var diffCol = c.diff>=10?'var(--green)':c.diff>=5?'var(--amber)':c.diff<0?'var(--red)':'var(--muted)';
     chtml += '<div class="signal-card">';
     chtml += '<div class="signal-name" style="font-size:11px">'+c.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+c.cnt+' picks)</span></div>';
-    chtml += signalBar('Combo win rate', c.wr, 'var(--blue)');
-    chtml += signalBar('Baseline', base_wr2, 'var(--muted)');
-    chtml += '<div class="signal-diff">vs baseline: <strong style="color:'+cdiffCol+'">'+cdiffStr+'</strong></div>';
+    chtml += signalBar('Combo', c.wr, 'var(--blue)');
+    chtml += signalBar('Baseline', base_wr, 'var(--muted)');
+    chtml += '<div class="signal-diff">Difference: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
     chtml += '</div>';
-  }
+  });
   document.getElementById('signal-grid-combos').innerHTML = chtml || '<div style="color:var(--muted);font-size:12px">Need more data for combinations</div>';
 }
 
@@ -2443,38 +2424,33 @@ function renderPicks(tf) {
     var bnsColor = bns>=65?'var(--green)':bns>=40?'var(--amber)':'var(--red)';
     var v4status = bns>=65?'READY':bns>=40?'WATCH':'BUILDING';
 
-    // Smart money badge
+    // Smart money icons (next to ticker)
     var sm = analyticsSMData[p.ticker];
-    var smBadge = '';
+    var smIcons = '';
     if (sm) {
       var tips = [];
-      if (sm.insider)     tips.push('Insider buy');
-      if (sm.institution) tips.push('Hedge fund');
-      if (sm.ark)         tips.push('ARK');
-      smBadge = '<span title="'+tips.join(' · ')+'" style="font-size:13px" title="Smart money">'+
-        (sm.insider&&sm.institution?'&#127968;&#128024;':sm.insider?'&#128024;':sm.institution?'&#127968;':sm.ark?'&#128640;':'&#127968;')+'</span>';
+      if (sm.insider)     { tips.push('Insider buy');  smIcons += '<span title="Insider buy" style="font-size:12px;margin-left:3px">&#128024;</span>'; }
+      if (sm.institution) { tips.push('Hedge fund');   smIcons += '<span title="Hedge fund holding" style="font-size:12px;margin-left:3px">&#127968;</span>'; }
+      if (sm.ark)         { tips.push('ARK holding');  smIcons += '<span title="ARK holding" style="font-size:12px;margin-left:3px">&#128640;</span>'; }
     }
 
-    // Sentiment badge
+    // Sentiment icon (next to ticker)
     var sd = analyticsSentData[p.ticker];
-    var sentBadge = '—';
+    var sentIcon = '';
     if (sd) {
       var sent = sd.overall_sentiment || 'neutral';
       var buzz = sd.buzz_score || 0;
-      var sentIcon = sent==='bullish'?'&#128293;':sent==='bearish'?'&#128308;':'&#8212;';
-      var buzzStr = buzz>=50?'<span style="font-size:9px;color:var(--amber)"> '+Math.round(buzz)+'</span>':'';
-      sentBadge = '<span title="'+sent+(buzz?' · Buzz:'+Math.round(buzz):'')+'" style="font-size:12px">'+sentIcon+'</span>'+buzzStr;
+      if (sent === 'bullish')  sentIcon = '<span title="Bullish · Buzz:'+Math.round(buzz)+'" style="font-size:12px;margin-left:3px">&#128293;</span>';
+      else if (sent === 'bearish') sentIcon = '<span title="Bearish · Buzz:'+Math.round(buzz)+'" style="font-size:12px;margin-left:3px">&#128308;</span>';
     }
 
     function retCell(v) { return '<td class="'+(v==null?'ret-na':v>=0?'ret-pos':'ret-neg')+'">'+(v==null?'—':fmtRet(v))+'</td>'; }
 
     html += '<tr>'
       +'<td style="color:var(--muted);font-size:11px">'+p.scan_date+'</td>'
-      +'<td><strong>'+p.ticker+'</strong></td>'
+      +'<td><strong>'+p.ticker+'</strong>'+smIcons+sentIcon+'</td>'
       +'<td style="color:'+bnsColor+';font-weight:700;font-size:15px">'+bns+'</td>'
       +'<td><span class="badge '+v4status+'">'+v4status+'</span></td>'
-      +'<td style="text-align:center">'+(smBadge||'—')+'</td>'
-      +'<td style="text-align:center">'+sentBadge+'</td>'
       +'<td style="color:'+dolColor+';font-weight:600">'+dol+'d</td>'
       +retCell(ret1w)+retCell(ret1m)+retCell(ret3m)+retCell(ret6m)+retCell(ret1y)
       +'</tr>';

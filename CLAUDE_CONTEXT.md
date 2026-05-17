@@ -9,7 +9,7 @@ Last updated: 2026-05-16 — v4.0.0
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| `app.py` (Flask app) | **v4.0.4** | Stats bar: v4 Ready/Watch counts computed from BuyNow, labels updated |
+| `app.py` (Flask app) | **v4.0.6** | Analytics: v4 signals + combos in compact prod-style UI; SM/sent as ticker icons |
 | `backtest.py` | **v4_quality_setup** | `SCORING_VERSION` constant |
 | `smart_money.py` | — | No version constant; track via git |
 | Last updated | **2026-05-17** | — |
