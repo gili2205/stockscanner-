@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.0.8"
+VERSION = "v4.0.9"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -1858,34 +1858,23 @@ var fdb = firebase.database();
         Each stock shown once — from the <strong style="color:var(--text)">first time the scanner flagged it</strong>.
         Returns measured from that entry date.
       </p>
-      <!-- Table sort + search -->
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Sort:</span>
-        <button class="sort-btn active" id="sort-btn-buy_now"  onclick="setSort('buy_now')" style="background:#1a3d2b;border-color:#27ae60;color:#27ae60;font-weight:700">🎯 Score</button>
-        <button class="sort-btn"        id="sort-btn-date"     onclick="setSort('scan_date')">📅 Date</button>
-        <button class="sort-btn"        id="sort-btn-abc"      onclick="setSort('ticker_asc')">🔤 A–Z</button>
-        <button class="sort-btn"        id="sort-btn-ret1w"    onclick="setSort('ret_1w')">1W</button>
-        <button class="sort-btn"        id="sort-btn-ret1m"    onclick="setSort('ret_1m')">1M</button>
-        <button class="sort-btn"        id="sort-btn-ret3m"    onclick="setSort('ret_3m')">3M</button>
-        <button class="sort-btn"        id="sort-btn-ret6m"    onclick="setSort('ret_6m')">6M</button>
-        <button class="sort-btn"        id="sort-btn-ret1y"    onclick="setSort('ret_1y')">1Y</button>
-        <div style="margin-left:auto;">
-          <input type="text" id="ticker-search" placeholder="🔍 Search ticker…" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;outline:none;width:150px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();page=0;render()">
-        </div>
+      <!-- Search -->
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+        <input type="text" id="ticker-search" placeholder="🔍 Search ticker…" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;outline:none;width:160px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();page=0;render()">
       </div>
       <table class="picks-table">
         <thead>
           <tr>
-            <th onclick="sortBy('scan_date')">Flagged ↕</th>
-            <th onclick="sortBy('ticker')">Ticker ↕</th>
-            <th onclick="setSort('buy_now')" style="color:#27ae60;cursor:pointer" title="BuyNow = √(Quality × Setup)">Score ↕</th>
+            <th onclick="colSort('scan_date')" id="th-scan_date">Flagged</th>
+            <th onclick="colSort('ticker')"    id="th-ticker">Ticker</th>
+            <th onclick="colSort('buy_now')"   id="th-buy_now" style="color:#27ae60" title="BuyNow = √(Quality × Setup)">Score</th>
             <th>Status</th>
-            <th onclick="sortBy('days_on_list')">Days ↕</th>
-            <th onclick="sortBy('ret_1w')">1W</th>
-            <th onclick="sortBy('ret_1m')">1M</th>
-            <th onclick="sortBy('ret_3m')">3M</th>
-            <th onclick="sortBy('ret_6m')">6M</th>
-            <th onclick="sortBy('ret_1y')">1Y</th>
+            <th onclick="colSort('days_on_list')" id="th-days_on_list">Days</th>
+            <th onclick="colSort('ret_1w')"  id="th-ret_1w">1W</th>
+            <th onclick="colSort('ret_1m')"  id="th-ret_1m">1M</th>
+            <th onclick="colSort('ret_3m')"  id="th-ret_3m">3M</th>
+            <th onclick="colSort('ret_6m')"  id="th-ret_6m">6M</th>
+            <th onclick="colSort('ret_1y')"  id="th-ret_1y">1Y</th>
           </tr>
         </thead>
         <tbody id="picks-body"></tbody>
@@ -2180,57 +2169,65 @@ function getFiltered() {
 function setSort(col) {
   sortCol = col;
   sortAsc = (col === 'ticker_asc');
-  var btns = ['buy_now','date','abc','ret1w','ret1m','ret3m','ret6m','ret1y'];
-  var map  = {buy_now:'buy_now', scan_date:'date', ticker_asc:'abc',
-              ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m', ret_6m:'ret6m', ret_1y:'ret1y'};
-  btns.forEach(function(b) { var el=document.getElementById('sort-btn-'+b); if(el) el.classList.remove('active'); });
-  var active = map[col];
-  if (active) { var el=document.getElementById('sort-btn-'+active); if(el) el.classList.add('active'); }
   page = 0;
   render();
+}
+
+// Column header click — toggles asc/desc on repeated click
+var colSortAsc = {};
+function colSort(col) {
+  if (sortCol === col) {
+    sortAsc = !sortAsc;
+    colSortAsc[col] = sortAsc;
+  } else {
+    sortCol = col;
+    // Default direction: asc for ticker/date, desc for everything else
+    sortAsc = (col === 'ticker' || col === 'scan_date') ? true : false;
+    colSortAsc[col] = sortAsc;
+  }
+  page = 0;
+  updateColHeaders();
+  render();
+}
+
+function updateColHeaders() {
+  var cols = ['scan_date','ticker','buy_now','days_on_list','ret_1w','ret_1m','ret_3m','ret_6m','ret_1y'];
+  cols.forEach(function(c) {
+    var el = document.getElementById('th-'+c);
+    if (!el) return;
+    // Strip old arrow
+    el.textContent = el.textContent.replace(/ [▲▼]$/,'');
+    if (c === sortCol) el.textContent += (sortAsc ? ' ▲' : ' ▼');
+  });
 }
 
 function render() {
   var tf = document.getElementById('tf-select').value;
   filtered = getFiltered();
+  var dir = sortAsc ? 1 : -1;
   filtered.sort(function(a,b) {
-    if (sortCol === 'ticker_asc') {
-      return a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0;
+    if (sortCol === 'ticker' || sortCol === 'ticker_asc') {
+      return dir * (a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0);
     }
     if (sortCol.startsWith('ret_')) {
       var key = sortCol.replace('ret_','');
       var va = a.returns && a.returns[key] != null ? a.returns[key] : -Infinity;
       var vb = b.returns && b.returns[key] != null ? b.returns[key] : -Infinity;
-      return vb - va;
+      return dir * (vb - va);
     }
-    if (sortCol === 'buy_now') {
-      return computeBuyNow(b) - computeBuyNow(a);
+    if (sortCol === 'buy_now')  return dir * (computeBuyNow(b) - computeBuyNow(a));
+    if (sortCol === 'quality')  return dir * (computeQualityScore(b) - computeQualityScore(a));
+    if (sortCol === 'setup')    return dir * (computeSetupScore(b) - computeSetupScore(a));
+    if (sortCol === 'scan_date') {
+      var sa = a.scan_date||'', sb = b.scan_date||'';
+      return dir * (sa < sb ? 1 : sa > sb ? -1 : 0);
     }
-    if (sortCol === 'quality') {
-      return computeQualityScore(b) - computeQualityScore(a);
-    }
-    if (sortCol === 'setup') {
-      return computeSetupScore(b) - computeSetupScore(a);
-    }
-    if (sortCol === 'score') {
-      return aBlendScore(b) - aBlendScore(a);
-    }
-    if (sortCol === 'score_technical') {
-      var ta = a.score_technical != null ? a.score_technical : aEstimateTech(a);
-      var tb = b.score_technical != null ? b.score_technical : aEstimateTech(b);
-      return tb - ta;
-    }
-    if (sortCol === 'score_catalyst') {
-      var ca = a.score_catalyst != null ? a.score_catalyst : aEstimateCat(a);
-      var cb = b.score_catalyst != null ? b.score_catalyst : aEstimateCat(b);
-      return cb - ca;
-    }
-    var va = a[sortCol] != null ? a[sortCol] : -Infinity;
-    var vb = b[sortCol] != null ? b[sortCol] : -Infinity;
-    if (sortCol === 'scan_date') return va < vb ? 1 : va > vb ? -1 : 0;
-    return vb - va;
+    var va2 = a[sortCol] != null ? a[sortCol] : -Infinity;
+    var vb2 = b[sortCol] != null ? b[sortCol] : -Infinity;
+    return dir * (vb2 - va2);
   });
 
+  updateColHeaders();
   renderKPIs(tf);
   renderTFTable();
   renderSignals(tf);
