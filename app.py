@@ -3843,6 +3843,7 @@ var FACTOR_V4_MAP = {
 };
 
 var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null;
+var PENDING_PATCHES = {}; // keyed by id, holds patch arrays for Accept buttons
 
 // Load all data sources in parallel
 var loaded = {opt: false, ai: false, flag: false};
@@ -4016,12 +4017,13 @@ function buildConsolidatedSug(sugs, baselineWR) {
   }
 
   // Single Accept button for all patchable changes
+  // Store patches in global PENDING_PATCHES (avoids JSON in HTML attributes)
   if (patchable.length > 0) {
-    // Encode patches as JSON in data attribute
-    var patches = patchable.map(function(s){ return {param: s.param, pts: s.proposedPts, factor: s.factor}; });
+    var patchKey = 'opt_' + Date.now();
+    PENDING_PATCHES[patchKey] = patchable.map(function(s){ return {param: s.param, pts: s.proposedPts, factor: s.factor}; });
+    var nLabel = patchable.length + ' change' + (patchable.length > 1 ? 's' : '');
     h += '<div id="consolidated-action" style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap;">';
-    h += '<button class="btn btn-approve" data-patches=\'' + JSON.stringify(patches) + '\' onclick="acceptAllSuggestions(this)">';
-    h += '&#10003; Accept all ' + patchable.length + ' change' + (patchable.length > 1 ? 's' : '') + '</button>';
+    h += '<button class="btn btn-approve" data-key="' + patchKey + '" onclick="acceptAllSuggestions(this)">&#10003; Accept all ' + nLabel + '</button>';
     h += '<span style="font-size:11px;color:var(--muted)">Queues changes to live_scanner.py &middot; run <code>python ai_optimizer.py --apply</code> on VM then restart scanner</span>';
     h += '</div>';
   }
@@ -4031,7 +4033,7 @@ function buildConsolidatedSug(sugs, baselineWR) {
 }
 
 async function acceptAllSuggestions(btn) {
-  var patches = JSON.parse(btn.dataset.patches || '[]');
+  var patches = PENDING_PATCHES[btn.dataset.key] || [];
   if (!patches.length) return;
   btn.disabled = true; btn.textContent = 'Queuing ' + patches.length + ' changes...';
   var errors = [];
