@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v3.2.0"
+VERSION = "v4.3.1"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -62,7 +62,12 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .lookup-panel input:focus{{border-color:var(--blue);}}.lookup-btn{{background:var(--blue);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;}}.lookup-btn:hover{{background:#2980b9;}}
 .lookup-hint{{font-size:12px;color:var(--muted);}}.lookup-hint strong{{color:var(--text);}}
 .lookup-result{{padding:14px 24px 0;}}
-.filterpanel{{background:var(--bg2);border-bottom:2px solid var(--border);padding:12px 24px;}}
+.filterpanel{{background:var(--bg2);border-bottom:2px solid var(--border);}}
+.filter-toggle{{display:flex;align-items:center;gap:8px;padding:8px 24px;cursor:pointer;user-select:none;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.5px;}}
+.filter-toggle:hover{{color:var(--text);}}.filter-toggle .ftarrow{{font-size:10px;transition:transform .2s;}}.filter-toggle.open .ftarrow{{transform:rotate(180deg);}}
+.filter-active-badge{{background:var(--amber);color:#000;font-size:10px;font-weight:700;border-radius:10px;padding:1px 6px;display:none;}}
+.filter-body{{display:none;padding:10px 24px 12px;}}
+.filter-body.open{{display:block;}}
 .filterrow{{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px;}}.filterrow:last-child{{margin-bottom:0;}}
 .fgroup{{display:flex;flex-direction:column;gap:5px;}}.fgrouplabel{{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;font-weight:600;}}
 .fchips{{display:flex;gap:4px;flex-wrap:wrap;}}
@@ -129,7 +134,7 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 .perf-item:last-child{{border-right:none;}}
 .perf-lbl{{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}}
 .perf-val{{font-size:13px;font-weight:600;}}
-@media(max-width:700px){{.grid{{padding:10px;gap:8px;}}.fold-metrics{{display:none;}}.filterpanel{{padding:10px 14px;}}}}
+@media(max-width:700px){{.grid{{padding:10px;gap:8px;}}.fold-metrics{{display:none;}}.filter-toggle{{padding:8px 14px;}}.filter-body{{padding:8px 14px 10px;}}}}
 </style>
 </head>
 <body>
@@ -155,8 +160,8 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 <div class="metrics">
   <div class="metric"><div class="mlabel">Total scanned</div><div class="mval" id="m-total">&#8212;</div><div class="msub">full universe</div></div>
   <div class="metric"><div class="mlabel">Pre-breakout</div><div class="mval" style="color:var(--green)" id="m-pre">&#8212;</div><div class="msub">coiled &amp; near trigger</div></div>
-  <div class="metric"><div class="mlabel">Ready (72+)</div><div class="mval" style="color:var(--green)" id="m-ready">&#8212;</div><div class="msub">breakout imminent</div></div>
-  <div class="metric"><div class="mlabel">Watch (55-71)</div><div class="mval" style="color:var(--amber)" id="m-watch">&#8212;</div><div class="msub">almost ready</div></div>
+  <div class="metric"><div class="mlabel">Ready (&#8805;65)</div><div class="mval" style="color:var(--green)" id="m-ready">&#8212;</div><div class="msub">breakout imminent</div></div>
+  <div class="metric"><div class="mlabel">Watch (40&#8211;64)</div><div class="mval" style="color:var(--amber)" id="m-watch">&#8212;</div><div class="msub">almost ready</div></div>
   <div class="metric"><div class="mlabel">Bull flags</div><div class="mval" style="color:var(--blue)" id="m-flags">&#8212;</div><div class="msub">pole+flag detected</div></div>
   <div class="metric"><div class="mlabel">Last scan</div><div class="mval" style="font-size:13px" id="m-time">&#8212;</div><div class="msub" id="m-sess">&#8212;</div></div>
 </div>
@@ -175,6 +180,12 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
 
 <!-- __ Multi-select filter panel __ -->
 <div class="filterpanel">
+  <div class="filter-toggle" id="filter-toggle" onclick="toggleFilterPanel()">
+    &#9881; Filters <span class="ftarrow">&#9660;</span>
+    <span class="filter-active-badge" id="filter-active-badge">0</span>
+    <span id="filter-desc" style="font-weight:400;margin-left:8px;font-size:11px"></span>
+  </div>
+  <div class="filter-body" id="filter-body">
 
   <div class="filterrow">
     <!-- Size -->
@@ -261,16 +272,6 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
       </div>
     </div>
 
-    <!-- Score focus -->
-    <div class="fgroup">
-      <div class="fgrouplabel">&#127919; Score focus</div>
-      <div class="fchips">
-        <div class="fchip blue"  id="preset-breakout" onclick="setPreset('breakout')"><span class="fcheck"></span>&#128202; Technical</div>
-        <div class="fchip green" id="preset-quality"  onclick="setPreset('quality')"><span class="fcheck"></span>&#127807; Tech + Fundamental</div>
-        <div class="fchip amber on" id="preset-full"  onclick="setPreset('full')"><span class="fcheck"></span>&#127919; All signals</div>
-      </div>
-    </div>
-
     <!-- Quick presets -->
     <div class="fgroup">
       <div class="fgrouplabel">&#9889; Quick Presets</div>
@@ -287,10 +288,12 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <div class="fgroup">
       <div class="fgrouplabel">&#128279; Cross-tab Signals</div>
       <div class="fchips">
-        <div class="fchip amber" data-group="signal" data-val="buzz"      onclick="toggleChip(this)"><span class="fcheck"></span>&#128293; High Buzz</div>
-        <div class="fchip green" data-group="signal" data-val="bullish"   onclick="toggleChip(this)"><span class="fcheck"></span>&#129412; Bullish news</div>
-        <div class="fchip blue"  data-group="signal" data-val="insider"   onclick="toggleChip(this)"><span class="fcheck"></span>&#128024; Insider buy</div>
-        <div class="fchip blue"  data-group="signal" data-val="hedge"     onclick="toggleChip(this)"><span class="fcheck"></span>&#127974; Hedge fund</div>
+        <div class="fchip amber"  data-group="signal" data-val="buzz"      onclick="toggleChip(this)"><span class="fcheck"></span>&#128293; High Buzz</div>
+        <div class="fchip green"  data-group="signal" data-val="bullish"   onclick="toggleChip(this)"><span class="fcheck"></span>&#129412; Bullish news</div>
+        <div class="fchip blue"   data-group="signal" data-val="insider"   onclick="toggleChip(this)"><span class="fcheck"></span>&#128024; Insider buy</div>
+        <div class="fchip blue"   data-group="signal" data-val="hedge"     onclick="toggleChip(this)"><span class="fcheck"></span>&#127974; Hedge fund</div>
+        <div class="fchip teal"   data-group="signal" data-val="ark"       onclick="toggleChip(this)"><span class="fcheck"></span>&#128640; ARK Hold</div>
+        <div class="fchip purple" data-group="signal" data-val="congress"  onclick="toggleChip(this)"><span class="fcheck"></span>&#127963; Congress Buy</div>
         <div class="fchip" style="border-color:#f1c40f" data-group="signal" data-val="watchlist" onclick="toggleChip(this)"><span class="fcheck"></span>&#11088; Watchlist</div>
       </div>
     </div>
@@ -300,12 +303,15 @@ body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacS
     <span class="activedesc" id="activedesc">Showing all stocks &mdash; select filters above to narrow down</span>
     <span class="cnt" id="cnt"></span>
   </div>
+  </div><!-- /filter-body -->
 </div>
 
 
 <div class="sortrow">
   <select id="ssort" onchange="render()">
-    <option value="score">Sort: score</option>
+    <option value="buy_now">Sort: Score (buy now)</option>
+    <option value="quality">Sort: Quality</option>
+    <option value="setup">Sort: Setup</option>
     <option value="dist">Sort: nearest trigger</option>
     <option value="atr">Sort: tightest coil</option>
     <option value="vol">Sort: driest volume</option>
@@ -333,18 +339,24 @@ var watchlistTickers  = {{}};  // ticker → true (user-starred from Sentiment/S
 var layerWeights = {{ tech: 50, fund: 30, cat: 20 }};
 
 function setPreset(name) {{
-  var presets = {{
-    breakout: {{ tech:100, fund:0,  cat:0  }},
-    quality:  {{ tech:50,  fund:50, cat:0  }},
-    full:     {{ tech:50,  fund:30, cat:20 }},
-  }};
-  if (!presets[name]) return;
-  layerWeights = Object.assign({{}}, presets[name]);
-  // Highlight active chip, clear others
-  ['breakout','quality','full'].forEach(function(p) {{
+  // Legacy — kept for backward compat; maps to setScoreSort
+  var map = {{ breakout:'setup', quality:'quality', full:'buy_now' }};
+  setScoreSort(map[name] || 'buy_now');
+}}
+
+function setScoreSort(sortKey) {{
+  // Update the ssort dropdown and re-render
+  var sel = document.getElementById('ssort');
+  if (sel) sel.value = sortKey;
+  sortBy = sortKey;
+  // Highlight active chip
+  ['full','quality','setup'].forEach(function(p) {{
     var el = document.getElementById('preset-'+p);
-    if (el) el.classList.toggle('on', p === name);
+    if (el) el.classList.remove('on');
   }});
+  var chipMap = {{ buy_now:'full', quality:'quality', setup:'setup' }};
+  var active = chipMap[sortKey];
+  if (active) {{ var el = document.getElementById('preset-'+active); if(el) el.classList.add('on'); }}
   render();
 }}
 
@@ -367,6 +379,75 @@ function estimateTech(s) {{
   if (d>15) t=Math.max(0,t-12);
   if ((s.momentum_1m||0)<-5) t=Math.max(0,t-10);
   return Math.min(100,t);
+}}
+
+// ── Three-score system ────────────────────────────────────────────────────────
+// Quality  : How strong/healthy is this stock? (RS, trend, momentum, fundamentals)
+// Setup    : Is the entry timing good right now? (ATR coil, vol contraction, distance, RSI)
+// Buy Now  : Geometric mean — requires BOTH quality AND setup to score high
+function computeQualityScore(s) {{
+  var q = 0;
+  // RS Percentile (0–30): relative strength vs the whole market
+  var rs = s.rs_percentile||0;
+  if (rs>=90) q+=30; else if (rs>=80) q+=22; else if (rs>=70) q+=14; else if (rs>=60) q+=7;
+  // EMA Stack (0–12): trend quality (also in Setup; smaller weight here = stock health)
+  var es = s.ema_stack||'';
+  if (es==='full') q+=12; else if (es==='partial') q+=7; else if (es==='weak') q+=2;
+  // Momentum 1M (0–13): recent leadership
+  var m1 = s.momentum_1m||s.change_pct||0;
+  if (m1>=20) q+=13; else if (m1>=10) q+=10; else if (m1>=5) q+=6; else if (m1>=0) q+=2;
+  // Momentum 3M (0–13): sustained strength (1M pop could be noise; 3M confirms trend)
+  var m3 = s.momentum_3m||0;
+  if (m3>=40) q+=13; else if (m3>=20) q+=9; else if (m3>=8) q+=5; else if (m3>=0) q+=1;
+  // HH/HL structure (0–10): consistent higher highs + higher lows = sustained institutional buying
+  var hh = s.hh_hl||0;
+  if (hh>=0.85) q+=10; else if (hh>=0.70) q+=7; else if (hh>=0.55) q+=4;
+  // Fundamentals (0–12): stored fundamental score (PE, margins, growth, analyst ratings)
+  var fund = s.score_fundamental||0;
+  q+=Math.round(fund*0.12);
+  // Liquidity (0–10): must be tradeable — large avg daily dollar volume
+  var adv = s.avg_dollar_vol||0;
+  if (adv>=200e6) q+=10; else if (adv>=50e6) q+=7; else if (adv>=20e6) q+=4; else q+=2;
+  return Math.min(100, q);
+}}
+
+function computeSetupScore(s) {{
+  var t = 0;
+  // EMA Stack (0–20): trend must be aligned for a valid entry — full stack = all EMAs rising
+  var es = s.ema_stack||'';
+  if (es==='full') t+=20; else if (es==='partial') t+=10; else if (es==='weak') t+=2;
+  // ATR Coil (0–20): tight daily range = compression = energy building for breakout
+  var atr = s.atr||1;
+  if (atr<=0.15) t+=20; else if (atr<=0.25) t+=15; else if (atr<=0.35) t+=10; else if (atr<=0.50) t+=3;
+  // Volume Contraction (0–18): dry volume = sellers exhausted, institutional accumulation complete
+  var vc = s.vol_contraction||1;
+  if (vc<=0.50) t+=18; else if (vc<=0.65) t+=12; else if (vc<=0.80) t+=6;
+  // Distance to Level (0–14): close to ATH/key level = clear trigger point, minimal overhead
+  var d = s.dist_to_level||99;
+  if (d<=1) t+=14; else if (d<=2) t+=10; else if (d<=3.5) t+=6; else if (d<=6) t+=2;
+  // HH/HL into base (0–8): stock making higher highs + lows = healthy consolidation, not breakdown
+  var hh = s.hh_hl||0;
+  if (hh>=0.85) t+=8; else if (hh>=0.70) t+=5; else if (hh>=0.55) t+=2;
+  // RSI (0–8): not overbought — room to run without immediate mean reversion pressure
+  var rsi = s.rsi||50;
+  if (rsi<=55) t+=8; else if (rsi<=65) t+=6; else if (rsi<=75) t+=3;
+  // Vol ratio (0–7): recent accumulation volume — institutions loading before the move
+  var vr = s.vol_ratio||1;
+  if (vr>=3) t+=7; else if (vr>=2) t+=4; else if (vr>=1.5) t+=2;
+  // Pattern bonus (0–5): confirmed pre-breakout or bull flag structure
+  if (s.pre_breakout) t+=5; else if (s.bull_flag) t+=4;
+  // Earnings penalty: binary event risk — tight setup into earnings = gambling, not trading
+  var earn = s.days_to_earnings;
+  if (earn!=null && earn>=0 && earn<=7)  t-=20;  // earnings this week — avoid
+  else if (earn!=null && earn>=0 && earn<=14) t-=10;  // earnings next 2 weeks — caution
+  return Math.min(100, Math.max(0, t));
+}}
+
+function computeBuyNow(s) {{
+  var q = computeQualityScore(s);
+  var st = computeSetupScore(s);
+  // Geometric mean: both must be strong — great stock + bad setup = don't buy yet
+  return Math.round(Math.sqrt(q * st));
 }}
 
 function estimateCat(s) {{
@@ -396,6 +477,28 @@ function blendScore(s) {{
 // Empty set = no filter for that group (show all)
 var activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[], signal:[] }};
 
+function toggleFilterPanel() {{
+  var toggle = document.getElementById('filter-toggle');
+  var body   = document.getElementById('filter-body');
+  var isOpen = body.classList.contains('open');
+  if (isOpen) {{
+    body.classList.remove('open');
+    toggle.classList.remove('open');
+  }} else {{
+    body.classList.add('open');
+    toggle.classList.add('open');
+  }}
+}}
+
+function updateFilterBadge() {{
+  var total = 0;
+  Object.values(activeFilters).forEach(function(v){{ total += v.length; }});
+  var badge = document.getElementById('filter-active-badge');
+  var desc  = document.getElementById('filter-desc');
+  if (badge) {{ badge.style.display = total>0?'inline':'none'; badge.textContent=total; }}
+  if (desc)  {{ desc.textContent = total>0?'('+total+' active)':''; }}
+}}
+
 function toggleChip(el) {{
   var group = el.dataset.group;
   var val   = el.dataset.val;
@@ -407,6 +510,7 @@ function toggleChip(el) {{
   }} else {{
     activeFilters[group] = activeFilters[group].filter(function(v){{return v!==val;}});
   }}
+  updateFilterBadge();
   render();
 }}
 
@@ -427,6 +531,7 @@ function setChip(group, val, on) {{
 function resetAll() {{
   document.querySelectorAll(".fchip[data-group]").forEach(function(c){{c.classList.remove("on");}});
   activeFilters = {{ size:[], risk:[], setup:[], momentum:[], sector:[], streak:[], timeframe:[], signal:[] }};
+  updateFilterBadge();
   render();
 }}
 
@@ -549,6 +654,8 @@ function passesFilters(s) {{
     if (activeFilters.signal.includes("bullish")   && _sd && _sd.overall_sentiment === "bullish") sigOk = true;
     if (activeFilters.signal.includes("insider")   && _sm && _sm.insider)    sigOk = true;
     if (activeFilters.signal.includes("hedge")     && _sm && _sm.institution) sigOk = true;
+    if (activeFilters.signal.includes("ark")       && _sm && _sm.ark)        sigOk = true;
+    if (activeFilters.signal.includes("congress")  && _sm && _sm.congress)   sigOk = true;
     if (activeFilters.signal.includes("watchlist") && watchlistTickers[s.ticker]) sigOk = true;
     if (!sigOk) return false;
   }}
@@ -565,7 +672,7 @@ function getActiveDesc() {{
   if (activeFilters.setup.length)    parts.push(activeFilters.setup.map(function(v){{return {{breakout:"Breakout",catalyst:"Catalyst",bullflag:"Bull Flag",prebreak:"Pre-breakout",earnings:"Earnings soon"}}[v]||v;}}).join(" or "));
   if (activeFilters.timeframe && activeFilters.timeframe.length) parts.push(activeFilters.timeframe.map(function(v){{return {{short:"Short (1-2w)",mid:"Mid (1-3m)",long:"Long (3m+)"}}[v]||v;}}).join(" or "));
   if (activeFilters.momentum.length) parts.push({{hot:"Hot +30%",strong:"Strong +15%",pos:"Positive",neg:"Pullback"}}[activeFilters.momentum[0]]||activeFilters.momentum[0]);
-  if (activeFilters.signal && activeFilters.signal.length) parts.push(activeFilters.signal.map(function(v){{return {{buzz:"High Buzz",bullish:"Bullish news",insider:"Insider buy",hedge:"Hedge fund",watchlist:"\u2b50 Watchlist"}}[v]||v;}}).join(" or "));
+  if (activeFilters.signal && activeFilters.signal.length) parts.push(activeFilters.signal.map(function(v){{return {{buzz:"High Buzz",bullish:"Bullish news",insider:"Insider buy",hedge:"Hedge fund",ark:"ARK Hold",congress:"Congress Buy",watchlist:"Watchlist"}}[v]||v;}}).join(" or "));
   if (!parts.length) return "Showing all stocks \u2014 select filters above to narrow down";
   return "Filters: " + parts.join(" \u00b7 ");
 }}
@@ -623,9 +730,19 @@ fdb.ref("/scanner").on("value", function(snap) {{
 
   document.getElementById("m-total").textContent = scanned.toLocaleString();
   document.getElementById("m-pre").textContent    = d.pre_breakout_count||0;
-  document.getElementById("m-ready").textContent  = d.ready_count||0;
-  document.getElementById("m-watch").textContent  = d.watch_count||0;
   document.getElementById("m-flags").textContent  = d.bull_flag_count||0;
+  // Compute READY/WATCH from v4 BuyNow score across all stocks
+  var _stocks = d.all_stocks || d.stocks || {{}};
+  var _tickers = Object.keys(_stocks);
+  if (_tickers.length > 0) {{
+    var _nReady = 0, _nWatch = 0;
+    _tickers.forEach(function(t) {{ var bn=computeBuyNow(_stocks[t]); if(bn>=65)_nReady++; else if(bn>=40)_nWatch++; }});
+    document.getElementById("m-ready").textContent = _nReady;
+    document.getElementById("m-watch").textContent = _nWatch;
+  }} else {{
+    document.getElementById("m-ready").textContent = d.ready_count||0;
+    document.getElementById("m-watch").textContent = d.watch_count||0;
+  }}
   if (d.last_updated) {{
     var t = new Date(d.last_updated);
     document.getElementById("m-time").textContent = t.toLocaleTimeString([],{{hour:"2-digit",minute:"2-digit"}});
@@ -646,8 +763,9 @@ fdb.ref("/scanner").on("value", function(snap) {{
     var nr = [];
     Object.keys(d.stocks).forEach(function(t) {{
       var s = d.stocks[t];
-      if (s.status==="READY" && (!prevData[t]||prevData[t].status!=="READY") && !seen[t+"-r"]) {{ nr.push(t); seen[t+"-r"]=true; }}
-      if (s.status!=="READY") delete seen[t+"-r"];
+      var bn=computeBuyNow(s); var vs=bn>=65?'READY':bn>=40?'WATCH':'BUILDING';
+      if (vs==="READY" && (!prevData[t]||computeBuyNow(prevData[t])<65) && !seen[t+"-r"]) {{ nr.push(t); seen[t+"-r"]=true; }}
+      if (vs!=="READY") delete seen[t+"-r"];
     }});
     if (nr.length) {{
       var ab=document.getElementById("alertbox");
@@ -689,6 +807,18 @@ fbCached('/scanner/smart_money', BADGE_CACHE_TTL, function(d) {{
   (d.insiders || []).forEach(function(b) {{ if(b.ticker) {{ smartMoneyTickers[b.ticker] = smartMoneyTickers[b.ticker] || {{}}; smartMoneyTickers[b.ticker].insider = true; }} }});
   (d.institutions || []).forEach(function(fund) {{
     (fund.holdings || []).forEach(function(h) {{ if(h.ticker) {{ smartMoneyTickers[h.ticker] = smartMoneyTickers[h.ticker] || {{}}; smartMoneyTickers[h.ticker].institution = true; }} }});
+  }});
+  // ARK holdings (keyed by ticker)
+  Object.keys(d.ark_holdings || {{}}).forEach(function(t) {{
+    smartMoneyTickers[t] = smartMoneyTickers[t] || {{}};
+    smartMoneyTickers[t].ark = true;
+  }});
+  // Congressional buys
+  (d.congress || []).forEach(function(t) {{
+    if (t.ticker && t.type === 'buy') {{
+      smartMoneyTickers[t.ticker] = smartMoneyTickers[t.ticker] || {{}};
+      smartMoneyTickers[t.ticker].congress = true;
+    }}
   }});
 }});
 
@@ -735,9 +865,16 @@ function render() {{
     var ab=bp>=80?10:bp>=65?7:bp>=50?4:bp>0?1:0;
     var ac=na>=10?8:na>=5?5:na>=2?2:0;
     s._unified=blendScore(s);
+    s._qualityScore  = computeQualityScore(s);
+    s._setupScore    = computeSetupScore(s);
+    s._buyNowScore   = computeBuyNow(s);
+    s._v4Status = s._buyNowScore>=65?'READY':s._buyNowScore>=40?'WATCH':'BUILDING';
   }});
   var fns = {{
     score:    function(a,b){{ return (b._unified||0)-(a._unified||0); }},
+    buy_now:  function(a,b){{ return (b._buyNowScore||0)-(a._buyNowScore||0); }},
+    quality:  function(a,b){{ return (b._qualityScore||0)-(a._qualityScore||0); }},
+    setup:    function(a,b){{ return (b._setupScore||0)-(a._setupScore||0); }},
     dist:     function(a,b){{ return (a.dist_to_level||99)-(b.dist_to_level||99); }},
     atr:      function(a,b){{ return (a.atr||1)-(b.atr||1); }},
     vol:      function(a,b){{ return (a.vol_contraction||1)-(b.vol_contraction||1); }},
@@ -805,7 +942,7 @@ function makeCard(s, rank) {{
   var upside = s.analyst_upside;
   var upsidePct = upside!=null?parseFloat(upside):null;
   var rc    = rsiC(rsi);
-  var color = sc(s.status||'BUILDING');
+  var color = sc(s._v4Status||'BUILDING');
   var isTop = rank<=3;
   var dist  = s.dist_to_level||0;
   var pc    = dist<=1?'#27ae60':dist<=3?'#e67e22':'#e74c3c';
@@ -819,25 +956,33 @@ function makeCard(s, rank) {{
   var fundScore     = s.score_fundamental != null ? s.score_fundamental : 0;
   var catalystScore = s.score_catalyst    != null ? s.score_catalyst    : s.catalyst_score || 0;
   var unifiedScore  = blendScore(s);
+  var qualityScore  = s._qualityScore  != null ? s._qualityScore  : computeQualityScore(s);
+  var setupScore    = s._setupScore    != null ? s._setupScore    : computeSetupScore(s);
+  var buyNowScore   = s._buyNowScore   != null ? s._buyNowScore   : computeBuyNow(s);
+  var buyNowColor   = buyNowScore>=65?'#27ae60':buyNowScore>=40?'#e67e22':'#e74c3c';
 
   // Stop/entry
   var base=price>=300?0.018:price>=80?0.024:price>=20?0.032:0.045;
   var dailyAtrPct=Math.min(0.12,Math.max(0.01,base*(s.atr||1)));
   var entryNum=price*1.0025;
-  var atrStop=Math.min(0.12,Math.max(0.02,dailyAtrPct*1.5));
-  var minStop=atrStop<=0.05?0.05:atrStop<=0.08?0.07:0.08;
-  var stopDist=Math.max(atrStop,minStop);
-  var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
-
-  // Risk/Reward
+  // Risk category from ATR bucket (same scale as filter chips)
   var sig_rs  = (s.rs_percentile||0)>=80;
   var sig_vol = (s.vol_contraction||1)<=0.7;
   var sig_lvl = (s.level||'').indexOf('ATH')>=0||(s.level||'').indexOf('multi')>=0;
   var sig_ema = (s.ema_stack||'')==='full';
   var rp = (sig_rs?1:0)+(sig_vol?1:0)+(sig_lvl?1:0)+(sig_ema?1:0);
-  var riskCat=stopDist<=0.05?'Low':stopDist<=0.08?'Medium':'High';
+  var atrRisk = riskBucket(s.atr||0.3);   // 'low' | 'med' | 'high'
+  var riskCat = atrRisk==='low'?'Low':atrRisk==='med'?'Medium':'High';
   var riskColor=riskCat==='Low'?'#27ae60':riskCat==='Medium'?'#e67e22':'#e74c3c';
   var riskBg=riskCat==='Low'?'#1a3d2b':riskCat==='Medium'?'#3d2e10':'#3d1a1a';
+
+  // Stop distance derived continuously from ATR (inverse relationship):
+  //   Low ATR  (stable)   → wide stop  up to 9%  (high conviction, give it room)
+  //   High ATR (volatile) → tight stop down to 3% (uncertain, cut losses fast)
+  //   Formula: 0.02 / ATR, clamped to [3%, 9%]
+  //   Examples: ATR=0.25 → 8%, ATR=0.40 → 5%, ATR=0.67 → 3%
+  var stopDist=Math.min(0.09,Math.max(0.03,0.02/(s.atr||0.3)));
+  var stopNum=entryNum*(1-stopDist),stpPct=(stopDist*100).toFixed(1);
   var rewardCat=rp>=3?'High':rp>=2?'Medium':'Low';
   var rewardColor=rp>=3?'#27ae60':rp>=2?'#e67e22':'#e74c3c';
   var rewardBg=rp>=3?'#1a3d2b':rp>=2?'#3d2e10':'#3d1a1a';
@@ -857,10 +1002,10 @@ function makeCard(s, rank) {{
   var rr=riskCat+'/'+rewardCat,setupCat,setupColor,setupBg,setupIcon;
   if     (rr==='Low/High')    {{ setupCat='Best setup';  setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#11088;'; }}
   else if(rr==='Low/Medium')  {{ setupCat='Good setup';  setupColor='#27ae60';setupBg='#1a3d2b';setupIcon='&#9989;'; }}
-  else if(rr==='Medium/High') {{ setupCat='High upside'; setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127919;'; }}
-  else if(rr==='Medium/Medium'){{ setupCat='Balanced';   setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#128202;'; }}
-  else if(rr==='High/High')   {{ setupCat='Aggressive';  setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127922;'; }}
-  else if(rr==='Low/Low')     {{ setupCat='Weak upside'; setupColor='#8892a4';setupBg='#22263a';setupIcon='&#128201;'; }}
+  else if(rr==='Medium/High') {{ setupCat='Strong reward'; setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127919;'; }}
+  else if(rr==='Medium/Medium'){{ setupCat='Balanced';    setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#128202;'; }}
+  else if(rr==='High/High')   {{ setupCat='Aggressive';   setupColor='#e67e22';setupBg='#3d2e10';setupIcon='&#127922;'; }}
+  else if(rr==='Low/Low')     {{ setupCat='Weak reward';  setupColor='#8892a4';setupBg='#22263a';setupIcon='&#128201;'; }}
   else                        {{ setupCat='Skip';        setupColor='#e74c3c';setupBg='#3d1a1a';setupIcon='&#9888;'; }}
 
   // Signal chips
@@ -895,7 +1040,7 @@ function makeCard(s, rank) {{
   else if (daysOnList !== null) {{ daysLabel=daysOnList+' days on the list'; daysColor='var(--green)'; }}
 
   var h='';
-  h += '<div class="card '+(s.status==='READY'?'pre':s.status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
+  h += '<div class="card '+(s._v4Status==='READY'?'pre':s._v4Status==='WATCH'?'watch':'')+'" id="card-'+s.ticker+'">';
 
   // ── Click-to-fold header ──────────────────────────────────────────────────
   var tgtCol2=upsidePct!=null&&upsidePct>5?'var(--green)':upsidePct!=null&&upsidePct<-5?'var(--red)':'var(--muted)';
@@ -922,8 +1067,11 @@ function makeCard(s, rank) {{
   h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
-  h += '<div id="'+scoreId+'" style="font-size:32px;font-weight:700;color:'+color+';cursor:pointer;line-height:1" onclick="event.stopPropagation();showBreakdown(this)">'+unifiedScore+'</div>';
-  h += '<div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:'+color+';margin-top:3px">'+s.status+'</div>';
+  h += '<div id="'+scoreId+'" style="cursor:pointer" onclick="event.stopPropagation();showBreakdown(this)">';
+  h += '<div style="font-size:32px;font-weight:700;color:'+buyNowColor+';line-height:1">'+buyNowScore+'</div>';
+  h += '<div style="font-size:9px;font-weight:700;letter-spacing:.8px;color:'+buyNowColor+';margin-top:2px;text-align:center">SCORE</div>';
+  h += '</div>';
+  h += '<div style="font-size:10px;font-weight:600;letter-spacing:.5px;color:var(--muted);margin-top:5px;text-align:right">'+s._v4Status+'</div>';
   h += '</div>';
   h += '</div>';
   // Performance row — directly under title, no 1D (already shown in price line)
@@ -981,6 +1129,23 @@ function makeCard(s, rank) {{
   h += '<div class="fbox"><div class="flbl">EMA stack</div><div class="fval '+('full'===(s.ema_stack||'')?'fg':'partial'===(s.ema_stack||'')?'fa':'fr')+'">'+(s.ema_stack||'&mdash;')+'</div><div class="fsub">'+('full'===(s.ema_stack||'')?'Strong trend':'partial'===(s.ema_stack||'')?'Partial':'Weak')+'</div></div>';
   h += '<div class="fbox"><div class="flbl">Level</div><div class="fval" style="color:'+(lc(s.level))+'">'+(s.level||'&mdash;')+'</div><div class="fsub">'+((s.level||'').indexOf('ATH')>=0?'No resistance':(s.level||'').indexOf('multi')>=0?'Multi-year':'Prior level')+'</div></div>';
   h += '<div class="fbox"><div class="flbl">Distance</div><div class="fval" style="color:'+pc+'">'+Math.abs(dist).toFixed(1)+'%</div><div class="fsub">'+(dist<=0?'Broke out':dist<=1?'Very close':'Away')+'</div></div>';
+  h += '</div>';
+
+  // Score breakdown row
+  var qBar=Math.round(qualityScore); var sBar=Math.round(setupScore);
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">';
+  h += '<div style="background:var(--bg3);border-radius:8px;padding:8px 12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">';
+  h += '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Quality</span>';
+  h += '<span style="font-size:14px;font-weight:700;color:#5b8dd9">'+qBar+'</span></div>';
+  h += '<div style="height:4px;background:var(--bg2);border-radius:2px"><div style="height:100%;width:'+qBar+'%;background:#5b8dd9;border-radius:2px"></div></div>';
+  h += '<div style="font-size:9px;color:var(--muted);margin-top:3px">RS · Trend · Momentum · Fundamentals</div></div>';
+  h += '<div style="background:var(--bg3);border-radius:8px;padding:8px 12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">';
+  h += '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Setup</span>';
+  h += '<span style="font-size:14px;font-weight:700;color:#e67e22">'+sBar+'</span></div>';
+  h += '<div style="height:4px;background:var(--bg2);border-radius:2px"><div style="height:100%;width:'+sBar+'%;background:#e67e22;border-radius:2px"></div></div>';
+  h += '<div style="font-size:9px;color:var(--muted);margin-top:3px">Coil · Vol dry · Level · RSI</div></div>';
   h += '</div>';
 
   // Risk/Reward
@@ -1111,13 +1276,19 @@ function applyCardData(ticker) {{
   setPct('p6m-'+ticker, d.change_6m);
 }}
 
-async function fetchCardData(ticker) {{
+async function fetchCardData(ticker, attempt) {{
+  attempt = attempt || 1;
   if (_cardData[ticker]) {{ applyCardData(ticker); return; }}
   if (_cardCache[ticker]) return;
   _cardCache[ticker] = true;
   try {{
     var resp = await fetch('/api/card-data/' + ticker);
-    if (!resp.ok) {{ _cardCache[ticker] = false; return; }}
+    if (!resp.ok) {{
+      _cardCache[ticker] = false;
+      // Retry once after 4s on rate-limit or server error
+      if (attempt < 3) setTimeout(function() {{ fetchCardData(ticker, attempt+1); }}, 4000 * attempt);
+      return;
+    }}
     var d = await resp.json();
     if (d.error) {{ _cardCache[ticker] = false; return; }}
     _cardData[ticker] = d;
@@ -1382,12 +1553,21 @@ def api_card_data(ticker):
     if not ticker or len(ticker) > 6:
         return jsonify({'error': 'Invalid ticker'}), 400
     try:
+        import time as _time
         tk   = yf.Ticker(ticker)
         hist = tk.history(period='1y', interval='1d')
         if hist.empty:
+            # Retry once — Yahoo Finance occasionally rate-limits the first call
+            _time.sleep(1.0)
+            hist = tk.history(period='3mo', interval='1d')
+        if hist.empty:
             return jsonify({'error': 'No data'}), 404
 
-        closes = hist['Close'].tolist()
+        import math as _math
+        # Strip NaN — yfinance returns NaN for today's unsettled bar
+        closes = [c for c in hist['Close'].tolist() if c is not None and not _math.isnan(c)]
+        if len(closes) < 2:
+            return jsonify({'error': 'No data'}), 404
         price  = closes[-1]
 
         # ── Performance (uses full 1y history) ───────────────────────────────
@@ -1423,7 +1603,9 @@ def api_card_data(ticker):
         info   = tk.info or {}
         pe     = info.get('trailingPE') or info.get('forwardPE')
         target = info.get('targetMeanPrice')
-        upside = round((target - price) / price * 100, 1) if target and price else None
+        # Use real-time price for upside so intraday moves don't skew the %
+        current_price = info.get('currentPrice') or getattr(fi, 'last_price', None) or price
+        upside = round((target - current_price) / current_price * 100, 1) if target and current_price else None
 
         return jsonify({
             'market_cap':      mc_str,
@@ -1624,12 +1806,12 @@ var fdb = firebase.database();
       <span id="data-info" style="font-size:11px;color:var(--muted)"></span>
     </div>
 
-    <!-- Score focus chips -->
+    <!-- Score focus chips (history) -->
     <div style="display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap;">
-      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Score focus:</span>
-      <button class="sort-btn active" id="focus-all"  onclick="setLayerFocus('all')">&#127919; All signals</button>
-      <button class="sort-btn"        id="focus-tech" onclick="setLayerFocus('tech')">&#128202; Technical only</button>
-      <button class="sort-btn"        id="focus-cat"  onclick="setLayerFocus('cat')">&#9889; Catalyst only</button>
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Sort score:</span>
+      <button class="sort-btn active" id="focus-all"     onclick="setHistorySort('buy_now')">&#127919; Score (buy now)</button>
+      <button class="sort-btn"        id="focus-quality" onclick="setHistorySort('quality')">&#128202; Quality</button>
+      <button class="sort-btn"        id="focus-setup"   onclick="setHistorySort('setup')">&#127807; Setup</button>
     </div>
 
     <!-- KPI row -->
@@ -1656,13 +1838,9 @@ var fdb = firebase.database();
           (win = positive return in selected window)
         </span>
       </h2>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:var(--muted);">Layer:</span>
-        <button class="sort-btn active" id="sig-all"  onclick="setSigLayer('all')">All picks</button>
-        <button class="sort-btn"        id="sig-tech" onclick="setSigLayer('tech')">&#128202; Technical leaders</button>
-        <button class="sort-btn"        id="sig-cat"  onclick="setSigLayer('cat')">&#9889; Catalyst leaders</button>
-      </div>
-      <div class="signal-grid" id="signal-grid"></div>
+      <div id="signal-grid"></div>
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin:16px 0 10px;">&#128279; Top Signal Combinations</div>
+      <div class="signal-grid" id="signal-grid-combos"></div>
     </div>
 
     <!-- Per-pick detail table -->
@@ -1674,40 +1852,23 @@ var fdb = firebase.database();
         Each stock shown once — from the <strong style="color:var(--text)">first time the scanner flagged it</strong>.
         Returns measured from that entry date.
       </p>
-      <!-- Table sort + search -->
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Sort:</span>
-        <button class="sort-btn active" id="sort-btn-date"  onclick="setSort('scan_date')">📅 Date</button>
-        <button class="sort-btn"        id="sort-btn-abc"   onclick="setSort('ticker_asc')">🔤 A–Z</button>
-        <button class="sort-btn"        id="sort-btn-score" onclick="setSort('score')">⭐ Score</button>
-        <button class="sort-btn"        id="sort-btn-tech"  onclick="setSort('score_technical')">📊 Tech</button>
-        <button class="sort-btn"        id="sort-btn-cat"   onclick="setSort('score_catalyst')">⚡ Catalyst</button>
-        <button class="sort-btn"        id="sort-btn-ret1w" onclick="setSort('ret_1w')">1W Return</button>
-        <button class="sort-btn"        id="sort-btn-ret1m" onclick="setSort('ret_1m')">1M Return</button>
-        <button class="sort-btn"        id="sort-btn-ret3m" onclick="setSort('ret_3m')">3M Return</button>
-        <div style="margin-left:auto;">
-          <input type="text" id="ticker-search" placeholder="🔍 Search ticker…" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;outline:none;width:150px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();page=0;render()">
-        </div>
+      <!-- Search -->
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+        <input type="text" id="ticker-search" placeholder="🔍 Search ticker…" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;outline:none;width:160px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase();page=0;render()">
       </div>
       <table class="picks-table">
         <thead>
           <tr>
-            <th onclick="sortBy('scan_date')">First Flagged ↕</th>
-            <th onclick="sortBy('ticker')">Ticker ↕</th>
-            <th onclick="sortBy('price_at_scan')">Entry $</th>
-            <th onclick="sortBy('score')">Score ↕</th>
-            <th onclick="sortBy('score_technical')" style="color:var(--blue)">Tech ↕</th>
-            <th onclick="sortBy('score_catalyst')" style="color:var(--amber)">Cat ↕</th>
+            <th onclick="colSort('scan_date')" id="th-scan_date">Flagged</th>
+            <th onclick="colSort('ticker')"    id="th-ticker">Ticker</th>
+            <th onclick="colSort('buy_now')"   id="th-buy_now" style="color:#27ae60" title="BuyNow = √(Quality × Setup)">Score</th>
             <th>Status</th>
-            <th>Setup</th>
-            <th onclick="sortBy('rs_percentile')">RS %ile</th>
-            <th onclick="sortBy('vol_contraction')">Vol dry</th>
-            <th onclick="sortBy('atr')">ATR</th>
-            <th>Level</th>
-            <th onclick="sortBy('days_on_list')">Days on list ↕</th>
-            <th onclick="sortBy('ret_1w')">1W</th>
-            <th onclick="sortBy('ret_1m')">1M</th>
-            <th onclick="sortBy('ret_3m')">3M</th>
+            <th onclick="colSort('days_on_list')" id="th-days_on_list">Days</th>
+            <th onclick="colSort('ret_1w')"  id="th-ret_1w">1W</th>
+            <th onclick="colSort('ret_1m')"  id="th-ret_1m">1M</th>
+            <th onclick="colSort('ret_3m')"  id="th-ret_3m">3M</th>
+            <th onclick="colSort('ret_6m')"  id="th-ret_6m">6M</th>
+            <th onclick="colSort('ret_1y')"  id="th-ret_1y">1Y</th>
           </tr>
         </thead>
         <tbody id="picks-body"></tbody>
@@ -1729,8 +1890,10 @@ var sortCol   = 'scan_date';
 var sortAsc   = false;
 var page      = 0;
 var pageSize  = 50;
-var layerFocus = 'all';   // 'all' | 'tech' | 'cat'
-var sigLayer   = 'all';   // 'all' | 'tech' | 'cat'
+var layerFocus = 'all';
+var sigLayer   = 'all';   // 'all' | 'quality' | 'setup' | 'ready'
+var analyticsSMData   = {};  // ticker → {insider, institution, ark}
+var analyticsSentData = {};  // ticker → {overall_sentiment, buzz_score}
 
 // ── Layer score helpers (mirror dashboard logic) ──────────────────────────────
 function aEstimateTech(p) {
@@ -1772,11 +1935,67 @@ function aBlendScore(p) {
   return Math.min(100, Math.round((50*tech + 30*fund + 20*cat) / total));
 }
 
+// ── Three-score system (mirrored from dashboard) ──────────────────────────────
+function computeQualityScore(p) {
+  var q = 0;
+  var rs = p.rs_percentile||0;
+  if (rs>=90) q+=30; else if (rs>=80) q+=22; else if (rs>=70) q+=14; else if (rs>=60) q+=7;
+  var es = p.ema_stack||'';
+  if (es==='full') q+=12; else if (es==='partial') q+=7; else if (es==='weak') q+=2;
+  var m1 = p.momentum_1m||p.change_pct||0;
+  if (m1>=20) q+=13; else if (m1>=10) q+=10; else if (m1>=5) q+=6; else if (m1>=0) q+=2;
+  var m3 = p.momentum_3m||0;
+  if (m3>=40) q+=13; else if (m3>=20) q+=9; else if (m3>=8) q+=5; else if (m3>=0) q+=1;
+  var hh = p.hh_hl||0;
+  if (hh>=0.85) q+=10; else if (hh>=0.70) q+=7; else if (hh>=0.55) q+=4;
+  var fund = p.score_fundamental||0;
+  q+=Math.round(fund*0.12);
+  var adv = p.avg_dollar_vol||0;
+  if (adv>=200e6) q+=10; else if (adv>=50e6) q+=7; else if (adv>=20e6) q+=4; else q+=2;
+  return Math.min(100, q);
+}
+
+function computeSetupScore(p) {
+  var t = 0;
+  var es = p.ema_stack||'';
+  if (es==='full') t+=20; else if (es==='partial') t+=10; else if (es==='weak') t+=2;
+  var atr = p.atr||1;
+  if (atr<=0.15) t+=20; else if (atr<=0.25) t+=15; else if (atr<=0.35) t+=10; else if (atr<=0.50) t+=3;
+  var vc = p.vol_contraction||1;
+  if (vc<=0.50) t+=18; else if (vc<=0.65) t+=12; else if (vc<=0.80) t+=6;
+  var d = p.dist_to_level||99;
+  if (d<=1) t+=14; else if (d<=2) t+=10; else if (d<=3.5) t+=6; else if (d<=6) t+=2;
+  var hh = p.hh_hl||0;
+  if (hh>=0.85) t+=8; else if (hh>=0.70) t+=5; else if (hh>=0.55) t+=2;
+  var rsi = p.rsi||50;
+  if (rsi<=55) t+=8; else if (rsi<=65) t+=6; else if (rsi<=75) t+=3;
+  var vr = p.vol_ratio||1;
+  if (vr>=3) t+=7; else if (vr>=2) t+=4; else if (vr>=1.5) t+=2;
+  if (p.pre_breakout) t+=5; else if (p.bull_flag) t+=4;
+  var earn = p.days_to_earnings;
+  if (earn!=null && earn>=0 && earn<=7)  t-=20;
+  else if (earn!=null && earn>=0 && earn<=14) t-=10;
+  return Math.min(100, Math.max(0, t));
+}
+
+function computeBuyNow(p) {
+  return Math.round(Math.sqrt(computeQualityScore(p) * computeSetupScore(p)));
+}
+
 function setLayerFocus(f) {
-  layerFocus = f;
-  ['all','tech','cat'].forEach(function(x) {
-    document.getElementById('focus-'+x).classList.toggle('active', x === f);
+  // Legacy wrapper — kept for backward compat
+  var map = { all:'buy_now', tech:'setup', cat:'quality' };
+  setHistorySort(map[f] || 'buy_now');
+}
+
+function setHistorySort(col) {
+  sortCol = col;
+  ['all','quality','setup'].forEach(function(x) {
+    var el = document.getElementById('focus-'+x); if(el) el.classList.remove('active');
   });
+  var chipMap = { buy_now:'all', quality:'quality', setup:'setup' };
+  var active = chipMap[col];
+  if (active) { var el = document.getElementById('focus-'+active); if(el) el.classList.add('active'); }
   page = 0;
   render();
 }
@@ -1784,7 +2003,7 @@ function setLayerFocus(f) {
 function setSigLayer(f) {
   sigLayer = f;
   ['all','tech','cat'].forEach(function(x) {
-    document.getElementById('sig-'+x).classList.toggle('active', x === f);
+    var el = document.getElementById('sig-'+x); if(el) el.classList.toggle('active', x === f);
   });
   renderSignals(document.getElementById('tf-select').value);
 }
@@ -1924,7 +2143,7 @@ function getFiltered() {
   var search   = (document.getElementById('ticker-search').value || '').trim().toUpperCase();
 
   return allPicks.filter(function(p) {
-    if (status !== 'all' && p.status !== status) return false;
+    if (status !== 'all' && p._v4Status !== status) return false;
     if (aBlendScore(p) < minScore) return false;
     if (minTech > 0) {
       var t = p.score_technical != null ? p.score_technical : aEstimateTech(p);
@@ -1944,49 +2163,65 @@ function getFiltered() {
 function setSort(col) {
   sortCol = col;
   sortAsc = (col === 'ticker_asc');
-  var btns = ['date','abc','score','tech','cat','ret1w','ret1m','ret3m'];
-  var map  = {scan_date:'date', ticker_asc:'abc', score:'score',
-              score_technical:'tech', score_catalyst:'cat',
-              ret_1w:'ret1w', ret_1m:'ret1m', ret_3m:'ret3m'};
-  btns.forEach(function(b) { document.getElementById('sort-btn-'+b).classList.remove('active'); });
-  var active = map[col];
-  if (active) document.getElementById('sort-btn-'+active).classList.add('active');
   page = 0;
   render();
+}
+
+// Column header click — toggles asc/desc on repeated click
+var colSortAsc = {};
+function colSort(col) {
+  if (sortCol === col) {
+    sortAsc = !sortAsc;
+    colSortAsc[col] = sortAsc;
+  } else {
+    sortCol = col;
+    // Default direction: asc for ticker/date, desc for everything else
+    sortAsc = (col === 'ticker' || col === 'scan_date') ? true : false;
+    colSortAsc[col] = sortAsc;
+  }
+  page = 0;
+  updateColHeaders();
+  render();
+}
+
+function updateColHeaders() {
+  var cols = ['scan_date','ticker','buy_now','days_on_list','ret_1w','ret_1m','ret_3m','ret_6m','ret_1y'];
+  cols.forEach(function(c) {
+    var el = document.getElementById('th-'+c);
+    if (!el) return;
+    // Strip old arrow
+    el.textContent = el.textContent.replace(/ [▲▼]$/,'');
+    if (c === sortCol) el.textContent += (sortAsc ? ' ▲' : ' ▼');
+  });
 }
 
 function render() {
   var tf = document.getElementById('tf-select').value;
   filtered = getFiltered();
+  var dir = sortAsc ? 1 : -1;
   filtered.sort(function(a,b) {
-    if (sortCol === 'ticker_asc') {
-      return a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0;
+    if (sortCol === 'ticker' || sortCol === 'ticker_asc') {
+      return dir * (a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0);
     }
     if (sortCol.startsWith('ret_')) {
       var key = sortCol.replace('ret_','');
       var va = a.returns && a.returns[key] != null ? a.returns[key] : -Infinity;
       var vb = b.returns && b.returns[key] != null ? b.returns[key] : -Infinity;
-      return vb - va;
+      return dir * (vb - va);
     }
-    if (sortCol === 'score') {
-      return aBlendScore(b) - aBlendScore(a);
+    if (sortCol === 'buy_now')  return dir * (computeBuyNow(b) - computeBuyNow(a));
+    if (sortCol === 'quality')  return dir * (computeQualityScore(b) - computeQualityScore(a));
+    if (sortCol === 'setup')    return dir * (computeSetupScore(b) - computeSetupScore(a));
+    if (sortCol === 'scan_date') {
+      var sa = a.scan_date||'', sb = b.scan_date||'';
+      return dir * (sa < sb ? 1 : sa > sb ? -1 : 0);
     }
-    if (sortCol === 'score_technical') {
-      var ta = a.score_technical != null ? a.score_technical : aEstimateTech(a);
-      var tb = b.score_technical != null ? b.score_technical : aEstimateTech(b);
-      return tb - ta;
-    }
-    if (sortCol === 'score_catalyst') {
-      var ca = a.score_catalyst != null ? a.score_catalyst : aEstimateCat(a);
-      var cb = b.score_catalyst != null ? b.score_catalyst : aEstimateCat(b);
-      return cb - ca;
-    }
-    var va = a[sortCol] != null ? a[sortCol] : -Infinity;
-    var vb = b[sortCol] != null ? b[sortCol] : -Infinity;
-    if (sortCol === 'scan_date') return va < vb ? 1 : va > vb ? -1 : 0;
-    return vb - va;
+    var va2 = a[sortCol] != null ? a[sortCol] : -Infinity;
+    var vb2 = b[sortCol] != null ? b[sortCol] : -Infinity;
+    return dir * (vb2 - va2);
   });
 
+  updateColHeaders();
   renderKPIs(tf);
   renderTFTable();
   renderSignals(tf);
@@ -2081,50 +2316,98 @@ function avgLossForWindow(w) {
 
 function renderSignals(tf) {
   var ps = filtered.filter(function(p){return p.returns&&p.returns[tf]!=null;});
-  // Filter by dominant layer if toggled
-  if (sigLayer !== 'all') {
-    ps = ps.filter(function(p) {
-      var t = p.score_technical != null ? p.score_technical : aEstimateTech(p);
-      var c = p.score_catalyst  != null ? p.score_catalyst  : aEstimateCat(p);
-      return sigLayer === 'tech' ? t >= c : c > t;
-    });
-  }
+  // Filter by layer — 'tech' = Quality leaders (Q≥S), 'cat' = Setup leaders (S>Q)
+  if (sigLayer === 'tech') ps = ps.filter(function(p) {
+    return computeQualityScore(p) >= computeSetupScore(p);
+  });
+  if (sigLayer === 'cat') ps = ps.filter(function(p) {
+    return computeSetupScore(p) > computeQualityScore(p);
+  });
   if (!ps.length) { document.getElementById('signal-grid').innerHTML='<div style="color:var(--muted)">Not enough data yet</div>'; return; }
 
   var signals = [
-    {name:'RS percentile > 80', with_fn: function(p){return (p.rs_percentile||0)>=80;}},
-    {name:'Vol contraction ≤ 70%', with_fn: function(p){return (p.vol_contraction||1)<=0.7;}},
-    {name:'Level = ATH/multi-year', with_fn: function(p){return (p.level||'').indexOf('ATH')>=0||(p.level||'').indexOf('multi')>=0;}},
-    {name:'EMA stack = full', with_fn: function(p){return p.ema_stack==='full';}},
-    {name:'Pre-breakout', with_fn: function(p){return !!p.pre_breakout;}},
-    {name:'Bull flag', with_fn: function(p){return !!p.bull_flag;}},
-    {name:'Score ≥ 50', with_fn: function(p){return (p.score||0)>=50;}},
-    {name:'Analyst upside > 10%', with_fn: function(p){return (p.analyst_upside||0)>10;}},
-    {name:'Analyst buy ≥ 70%', with_fn: function(p){return (p.analyst_buy_pct||0)>=70;}},
-    {name:'Earnings in ≤ 14d', with_fn: function(p){return p.days_to_earnings!=null&&p.days_to_earnings>=0&&p.days_to_earnings<=14;}},
+    {name:'Score (Buy Now) ≥ 65',   with_fn: function(p){return computeBuyNow(p)>=65;}},
+    {name:'Quality ≥ 65',           with_fn: function(p){return computeQualityScore(p)>=65;}},
+    {name:'Setup ≥ 65',             with_fn: function(p){return computeSetupScore(p)>=65;}},
+    {name:'RS percentile ≥ 80',     with_fn: function(p){return (p.rs_percentile||0)>=80;}},
+    {name:'EMA stack = full',        with_fn: function(p){return p.ema_stack==='full';}},
+    {name:'Vol contraction ≤ 70%',  with_fn: function(p){return (p.vol_contraction||1)<=0.7;}},
+    {name:'ATR ≤ 0.25 (tight coil)',with_fn: function(p){return (p.atr||1)<=0.25;}},
+    {name:'RSI ≤ 55',               with_fn: function(p){return (p.rsi||50)<=55;}},
+    {name:'Momentum 1M ≥ 10%',      with_fn: function(p){return (p.momentum_1m||p.change_pct||0)>=10;}},
+    {name:'HH/HL ≥ 0.85',           with_fn: function(p){return (p.hh_hl||0)>=0.85;}},
+    {name:'Pre-breakout',            with_fn: function(p){return !!p.pre_breakout;}},
+    {name:'Bull flag',               with_fn: function(p){return !!p.bull_flag;}},
+    {name:'Level = ATH/multi-year',  with_fn: function(p){return (p.level||'').indexOf('ATH')>=0||(p.level||'').indexOf('multi')>=0;}},
+    {name:'Analyst upside > 10%',   with_fn: function(p){return (p.analyst_upside||0)>10;}},
   ];
 
-  var html = '';
+  // Compute stats for all signals, split into winning vs losing
+  var winning = [], losing = [];
   for (var i=0; i<signals.length; i++) {
     var sig = signals[i];
     var with_sig = ps.filter(sig.with_fn);
-    var without  = ps.filter(function(p){return !sig.with_fn(p);});
+    var without  = ps.filter(function(idx){return function(p){return !signals[idx].with_fn(p);};}(i));
     if (with_sig.length < 3) continue;
-
-    var wr_with = with_sig.length ? Math.round(with_sig.filter(function(p){return p.returns[tf]>0;}).length/with_sig.length*100) : 0;
-    var wr_wout = without.length  ? Math.round(without.filter(function(p){return p.returns[tf]>0;}).length/without.length*100)  : 0;
+    var wr_with = Math.round(with_sig.filter(function(p){return p.returns[tf]>0;}).length/with_sig.length*100);
+    var wr_wout = without.length ? Math.round(without.filter(function(p){return p.returns[tf]>0;}).length/without.length*100) : 0;
     var diff = wr_with - wr_wout;
-    var diffStr = (diff>=0?'+':'')+diff+'%';
-    var diffCol = diff>=5?'var(--green)':diff<=-5?'var(--red)':'var(--muted)';
-
-    html += '<div class="signal-card">';
-    html += '<div class="signal-name">'+sig.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+with_sig.length+' picks)</span></div>';
-    html += signalBar('With signal', wr_with, 'var(--green)');
-    html += signalBar('Without', wr_wout, 'var(--muted)');
-    html += '<div class="signal-diff">Difference: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
-    html += '</div>';
+    var entry = {name:sig.name, cnt:with_sig.length, wr_with:wr_with, wr_wout:wr_wout, diff:diff};
+    if (diff >= 0) winning.push(entry); else losing.push(entry);
   }
+  winning.sort(function(a,b){return b.diff-a.diff;});
+  losing.sort(function(a,b){return a.diff-b.diff;});
+
+  function buildCard(s) {
+    var diffStr = (s.diff>=0?'+':'')+s.diff+'%';
+    var diffCol = s.diff>=5?'var(--green)':s.diff<=-5?'var(--red)':'var(--muted)';
+    var h = '<div class="signal-card">';
+    h += '<div class="signal-name">'+s.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+s.cnt+' picks)</span></div>';
+    h += signalBar('With signal', s.wr_with, s.diff>=0?'var(--green)':'var(--red)');
+    h += signalBar('Without', s.wr_wout, 'var(--muted)');
+    h += '<div class="signal-diff">Difference: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
+    h += '</div>';
+    return h;
+  }
+
+  function sectionHtml(label, color, cards) {
+    var h = '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;';
+    h += 'margin-bottom:8px;padding:4px 0;border-bottom:1px solid var(--border);color:'+color+'">'+label+'</div>';
+    h += '<div class="signal-grid" style="margin-bottom:20px">';
+    cards.forEach(function(s){h+=buildCard(s);});
+    h += '</div>';
+    return h;
+  }
+
+  var html = '';
+  if (winning.length) html += sectionHtml('&#9650; Winning signals', 'var(--green)', winning);
+  if (losing.length)  html += sectionHtml('&#9660; Signals to avoid', 'var(--red)', losing);
   document.getElementById('signal-grid').innerHTML = html || '<div style="color:var(--muted)">Not enough picks yet</div>';
+
+  // ── Combinations ──────────────────────────────────────────────────────────
+  var base_wr = ps.length ? Math.round(ps.filter(function(p){return p.returns[tf]>0;}).length/ps.length*100) : 0;
+  var combos = [];
+  for (var a=0; a<signals.length; a++) {
+    for (var b=a+1; b<signals.length; b++) {
+      var both = ps.filter(function(aa,bb){return function(p){return signals[aa].with_fn(p)&&signals[bb].with_fn(p);};}(a,b));
+      if (both.length < 5) continue;
+      var wr_both = Math.round(both.filter(function(p){return p.returns[tf]>0;}).length/both.length*100);
+      combos.push({name:signals[a].name+' + '+signals[b].name, cnt:both.length, wr:wr_both, diff:wr_both-base_wr});
+    }
+  }
+  combos.sort(function(a,b){return b.wr-a.wr;});
+  var chtml = '';
+  combos.slice(0,6).forEach(function(c) {
+    var diffStr = (c.diff>=0?'+':'')+c.diff+'%';
+    var diffCol = c.diff>=10?'var(--green)':c.diff>=5?'var(--amber)':c.diff<0?'var(--red)':'var(--muted)';
+    chtml += '<div class="signal-card">';
+    chtml += '<div class="signal-name" style="font-size:11px">'+c.name+' <span style="color:var(--muted);font-weight:400;font-size:10px">('+c.cnt+' picks)</span></div>';
+    chtml += signalBar('Combo', c.wr, 'var(--blue)');
+    chtml += signalBar('Baseline', base_wr, 'var(--muted)');
+    chtml += '<div class="signal-diff">Difference: <strong style="color:'+diffCol+'">'+diffStr+'</strong> win rate</div>';
+    chtml += '</div>';
+  });
+  document.getElementById('signal-grid-combos').innerHTML = chtml || '<div style="color:var(--muted);font-size:12px">Need more data for combinations</div>';
 }
 
 function signalBar(label, pct, color) {
@@ -2142,31 +2425,47 @@ function renderPicks(tf) {
   var html = '';
   for (var i=0; i<rows.length; i++) {
     var p = rows[i];
-    var ret1w = p.returns&&p.returns['1w']!=null ? p.returns['1w'] : null;
-    var ret1m = p.returns&&p.returns['1m']!=null ? p.returns['1m'] : null;
-    var ret3m = p.returns&&p.returns['3m']!=null ? p.returns['3m'] : null;
-    var setup = p.pre_breakout?'Pre-brkout':p.bull_flag?'Bull flag':'Breakout';
+    var r = p.returns || {};
+    var ret1w = r['1w']!=null ? r['1w'] : null;
+    var ret1m = r['1m']!=null ? r['1m'] : null;
+    var ret3m = r['3m']!=null ? r['3m'] : null;
+    var ret6m = r['6m']!=null ? r['6m'] : null;
+    var ret1y = r['1y']!=null ? r['1y'] : null;
     var dol   = p.days_on_list || 1;
     var dolColor = dol >= 5 ? 'var(--green)' : dol >= 3 ? 'var(--amber)' : 'var(--muted)';
-    var techScore = p.score_technical != null ? p.score_technical : aEstimateTech(p);
-    var catScore  = p.score_catalyst  != null ? p.score_catalyst  : aEstimateCat(p);
+    var bns   = p.score_buy_now != null ? p.score_buy_now : computeBuyNow(p);
+    var bnsColor = bns>=65?'var(--green)':bns>=40?'var(--amber)':'var(--red)';
+    var v4status = bns>=65?'READY':bns>=40?'WATCH':'BUILDING';
+
+    // Smart money icons (next to ticker)
+    var sm = analyticsSMData[p.ticker];
+    var smIcons = '';
+    if (sm) {
+      var tips = [];
+      if (sm.insider)     { tips.push('Insider buy');  smIcons += '<span title="Insider buy" style="font-size:12px;margin-left:3px">&#128024;</span>'; }
+      if (sm.institution) { tips.push('Hedge fund');   smIcons += '<span title="Hedge fund holding" style="font-size:12px;margin-left:3px">&#127968;</span>'; }
+      if (sm.ark)         { tips.push('ARK holding');  smIcons += '<span title="ARK holding" style="font-size:12px;margin-left:3px">&#128640;</span>'; }
+    }
+
+    // Sentiment icon (next to ticker)
+    var sd = analyticsSentData[p.ticker];
+    var sentIcon = '';
+    if (sd) {
+      var sent = sd.overall_sentiment || 'neutral';
+      var buzz = sd.buzz_score || 0;
+      if (sent === 'bullish')  sentIcon = '<span title="Bullish · Buzz:'+Math.round(buzz)+'" style="font-size:12px;margin-left:3px">&#128293;</span>';
+      else if (sent === 'bearish') sentIcon = '<span title="Bearish · Buzz:'+Math.round(buzz)+'" style="font-size:12px;margin-left:3px">&#128308;</span>';
+    }
+
+    function retCell(v) { return '<td class="'+(v==null?'ret-na':v>=0?'ret-pos':'ret-neg')+'">'+(v==null?'—':fmtRet(v))+'</td>'; }
+
     html += '<tr>'
-      +'<td>'+p.scan_date+'</td>'
-      +'<td><strong>'+p.ticker+'</strong></td>'
-      +'<td>$'+(p.price_at_scan?p.price_at_scan.toFixed(2):'—')+'</td>'
-      +'<td>'+aBlendScore(p)+'</td>'
-      +'<td style="color:var(--blue)">'+(techScore||'—')+'</td>'
-      +'<td style="color:var(--amber)">'+(catScore||'—')+'</td>'
-      +'<td><span class="badge '+(p.status||'')+'">'+p.status+'</span></td>'
-      +'<td>'+setup+'</td>'
-      +'<td>'+(p.rs_percentile!=null?p.rs_percentile+'th':'—')+'</td>'
-      +'<td>'+(p.vol_contraction!=null?Math.round(p.vol_contraction*100)+'%':'—')+'</td>'
-      +'<td>'+(p.atr!=null?p.atr.toFixed(2):'—')+'</td>'
-      +'<td>'+(p.level||'—')+'</td>'
+      +'<td style="color:var(--muted);font-size:11px">'+p.scan_date+'</td>'
+      +'<td><strong>'+p.ticker+'</strong>'+smIcons+sentIcon+'</td>'
+      +'<td style="color:'+bnsColor+';font-weight:700;font-size:15px">'+bns+'</td>'
+      +'<td><span class="badge '+v4status+'">'+v4status+'</span></td>'
       +'<td style="color:'+dolColor+';font-weight:600">'+dol+'d</td>'
-      +'<td class="'+(ret1w==null?'ret-na':ret1w>=0?'ret-pos':'ret-neg')+'">'+(ret1w==null?'—':fmtRet(ret1w))+'</td>'
-      +'<td class="'+(ret1m==null?'ret-na':ret1m>=0?'ret-pos':'ret-neg')+'">'+(ret1m==null?'—':fmtRet(ret1m))+'</td>'
-      +'<td class="'+(ret3m==null?'ret-na':ret3m>=0?'ret-pos':'ret-neg')+'">'+(ret3m==null?'—':fmtRet(ret3m))+'</td>'
+      +retCell(ret1w)+retCell(ret1m)+retCell(ret3m)+retCell(ret6m)+retCell(ret1y)
       +'</tr>';
   }
   document.getElementById('picks-body').innerHTML = html;
@@ -2183,6 +2482,34 @@ function fmtRet(v) { return (v>=0?'+':'')+v.toFixed(1)+'%'; }
 function round1(v) { return Math.round(v*10)/10; }
 
 loadData();
+
+// Load Smart Money data for badge display
+fdb.ref('/scanner/smart_money').once('value', function(snap) {
+  var d = snap.val();
+  if (!d) return;
+  analyticsSMData = {};
+  if (d.insider_buys) {
+    Object.keys(d.insider_buys).forEach(function(t) { analyticsSMData[t] = analyticsSMData[t]||{}; analyticsSMData[t].insider=true; });
+  }
+  if (d.institutional) {
+    Object.keys(d.institutional).forEach(function(t) { analyticsSMData[t] = analyticsSMData[t]||{}; analyticsSMData[t].institution=true; });
+  }
+  if (d.ark_holdings) {
+    Object.keys(d.ark_holdings).forEach(function(t) { analyticsSMData[t] = analyticsSMData[t]||{}; analyticsSMData[t].ark=true; });
+  }
+  if (filtered.length) render();
+});
+
+// Load Sentiment data for badge display
+fdb.ref('/scanner/sentiment').once('value', function(snap) {
+  var d = snap.val();
+  if (!d) return;
+  analyticsSentData = {};
+  Object.keys(d).forEach(function(t) {
+    if (t !== '_updated' && d[t]) analyticsSentData[t] = d[t];
+  });
+  if (filtered.length) render();
+});
 </script>
 </body>
 </html>"""
@@ -2266,6 +2593,45 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .star-btn{background:none;border:none;cursor:pointer;font-size:16px;padding:2px 4px;opacity:.35;transition:opacity .15s,transform .1s;}
 .star-btn:hover{opacity:.75;}
 .star-btn.starred{opacity:1;transform:scale(1.15);}
+/* ARK grid */
+.ark-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
+.ark-card{background:var(--bg3);border-radius:8px;padding:12px 14px;}
+.ark-ticker{font-size:15px;font-weight:700;}
+.ark-funds{font-size:10px;color:var(--blue);margin:2px 0 6px;}
+.ark-bar-wrap{height:4px;background:var(--border);border-radius:2px;margin-bottom:4px;}
+.ark-bar{height:4px;background:var(--blue);border-radius:2px;}
+.ark-weight{font-size:11px;font-weight:600;color:var(--text);}
+.ark-val{font-size:10px;color:var(--muted);}
+/* Congress table */
+.buy-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#1a3d2b;color:var(--green);}
+.sell-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#3d1a1a;color:var(--red);}
+.activist-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#2d1a3d;color:var(--purple);}
+.passive-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--bg3);color:var(--muted);}
+/* Stats bar */
+.stats-bar{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px;}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}
+.stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.stat-val{font-size:22px;font-weight:700;line-height:1;}
+.stat-sub{font-size:10px;color:var(--muted);margin-top:4px;}
+.stat-card.green .stat-val{color:var(--green);}
+.stat-card.blue .stat-val{color:var(--blue);}
+.stat-card.amber .stat-val{color:var(--amber);}
+.stat-card.purple .stat-val{color:var(--purple);}
+.stat-card.teal .stat-val{color:#1abc9c;}
+/* Conviction grid */
+.conviction-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;}
+.cv-card{background:var(--bg3);border-radius:8px;padding:12px 14px;border-left:3px solid var(--border);cursor:default;}
+.cv-card.cv-high{border-left-color:var(--green);}
+.cv-card.cv-mid{border-left-color:var(--amber);}
+.cv-ticker{font-size:16px;font-weight:700;margin-bottom:6px;}
+.cv-score{font-size:10px;color:var(--muted);margin-bottom:6px;}
+.cv-signals{display:flex;flex-wrap:wrap;gap:4px;}
+.cv-chip{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;}
+.cv-chip.insider{background:#1a2a3d;color:var(--blue);}
+.cv-chip.hedge{background:#2d3d1a;color:#7dbb45;}
+.cv-chip.ark{background:#1a3d3d;color:#1abc9c;}
+.cv-chip.congress{background:#3d2e10;color:var(--amber);}
+.cv-chip.activist{background:#2d1a3d;color:var(--purple);}
 </style>
 <!--FB_CONFIG-->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -2303,6 +2669,46 @@ var fdb = firebase.database();
 <div class="page">
   <div id="loading" class="loading">⏳ Loading smart money data...</div>
   <div id="content" style="display:none">
+
+    <!-- Stats Bar -->
+    <div class="stats-bar" id="stats-bar">
+      <div class="stat-card green">
+        <div class="stat-label">Insider Buy Volume</div>
+        <div class="stat-val" id="st-insider-vol">—</div>
+        <div class="stat-sub" id="st-insider-n">— transactions</div>
+      </div>
+      <div class="stat-card blue">
+        <div class="stat-label">Hedge Fund Picks</div>
+        <div class="stat-val" id="st-hf-n">—</div>
+        <div class="stat-sub" id="st-hf-funds">— funds tracked</div>
+      </div>
+      <div class="stat-card teal">
+        <div class="stat-label">ARK Holdings</div>
+        <div class="stat-val" id="st-ark-n">—</div>
+        <div class="stat-sub" id="st-ark-sub">unique tickers</div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-label">Congress Trades</div>
+        <div class="stat-val" id="st-cong-n">—</div>
+        <div class="stat-sub" id="st-cong-sub">— buys · — sells</div>
+      </div>
+      <div class="stat-card purple">
+        <div class="stat-label">Activist Filings</div>
+        <div class="stat-val" id="st-act-n">—</div>
+        <div class="stat-sub" id="st-act-sub">13D/13G filings</div>
+      </div>
+    </div>
+
+    <!-- Top Conviction -->
+    <div class="section">
+      <h2>🎖️ Top Conviction Tickers
+        <span style="font-size:11px;color:var(--muted);font-weight:400" id="cv-sub">— tickers appearing across multiple smart money sources</span>
+      </h2>
+      <p class="sub">The more sources agree on a ticker, the stronger the signal. Insider + Hedge Fund + ARK = rare alignment.</p>
+      <div class="conviction-grid" id="conviction-grid">
+        <div style="color:var(--muted);padding:20px">Computing...</div>
+      </div>
+    </div>
 
     <!-- Insider Buying -->
     <div class="section">
@@ -2343,12 +2749,63 @@ var fdb = firebase.database();
       <div id="fund-grid" class="fund-grid"></div>
     </div>
 
+    <!-- ARK Invest Holdings -->
+    <div class="section">
+      <h2>🚀 ARK Invest Holdings
+        <span id="ark-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
+      </h2>
+      <p class="sub">Cathie Wood's 6 ETFs — ARKK, ARKG, ARKW, ARKQ, ARKF, ARKX. Updated daily. Only positions ≥ 0.5% weight shown.</p>
+      <div class="toolbar">
+        <input type="text" class="search-box" id="ark-search" placeholder="🔍 Search ticker…"
+          oninput="this.value=this.value.toUpperCase();renderARK()">
+      </div>
+      <div id="ark-grid" class="ark-grid"></div>
+    </div>
+
+    <!-- Senate Trades -->
+    <div class="section">
+      <h2>🏛️ Congressional Trades
+        <span id="congress-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
+      </h2>
+      <p class="sub">Senate &amp; House STOCK Act disclosures. Trades must be reported within 45 days of execution. <span style="color:var(--amber)">⚠️ Congressional data requires a paid API — free sources are currently unavailable. Data will appear here once connected.</span></p>
+      <div class="toolbar">
+        <input type="text" class="search-box" id="congress-search" placeholder="🔍 Search ticker or senator…"
+          oninput="renderCongress()">
+        <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px">
+          <input type="checkbox" id="congress-buys-only" onchange="renderCongress()"> Buys only
+        </label>
+      </div>
+      <table class="sm-table">
+        <thead><tr>
+          <th>⭐</th><th>Date</th><th>Senator</th><th>Ticker</th><th>Type</th><th>Amount</th><th>Owner</th>
+        </tr></thead>
+        <tbody id="congress-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Activist Investors 13D/13G -->
+    <div class="section">
+      <h2>🎯 Activist &amp; Large Investors
+        <span id="activist-count" style="font-size:11px;color:var(--muted);font-weight:400"></span>
+      </h2>
+      <p class="sub">SC 13D/13G filings — when an investor crosses 5% ownership they must disclose within 10 days. <strong style="color:var(--purple)">13D ACTIVIST</strong> = intends to influence management (board seat, buyback, sale). <strong style="color:var(--muted)">13G PASSIVE</strong> = large holder, no activist intent. <em>The "Investor" column is who filed; the "Target" column is the stock being accumulated.</em></p>
+      <table class="sm-table">
+        <thead><tr>
+          <th>⭐</th><th>Filed</th><th>Type</th><th>Investor (who filed)</th><th>Target Company</th><th>Ticker</th><th>% Owned</th>
+        </tr></thead>
+        <tbody id="activist-body"></tbody>
+      </table>
+    </div>
+
   </div>
 </div>
 
 <script>
 var insiderData      = [];
 var institutionData  = [];
+var arkData          = {};   // ticker → {ticker, funds, total_weight, total_value, date}
+var congressData     = [];
+var activistData     = [];
 var scannerTickers   = new Set();
 var smWatchlist      = {};  // ticker → true
 
@@ -2473,6 +2930,201 @@ function renderInstitutions() {
     '<div style="color:var(--muted);padding:20px">No institutional data yet. Run smart_money.py on the VM.</div>';
 }
 
+function renderARK() {
+  var search = (document.getElementById('ark-search').value || '').trim().toUpperCase();
+  var items = Object.values(arkData).filter(function(h) {
+    return !search || h.ticker.indexOf(search) !== -1;
+  });
+  // Sort by total_weight desc
+  items.sort(function(a,b) { return b.total_weight - a.total_weight; });
+  var maxW = items.length ? items[0].total_weight : 1;
+
+  document.getElementById('ark-count').textContent =
+    '— ' + items.length + ' tickers across ' + Object.keys(ARK_FUND_LABELS).length + ' funds';
+
+  var html = '';
+  items.forEach(function(h) {
+    var match   = scannerTickers.has(h.ticker);
+    var starred = smWatchlist[h.ticker] ? ' starred' : '';
+    var barPct  = Math.min(100, Math.round(h.total_weight / maxW * 100));
+    var fundsStr = (h.funds || []).join(', ');
+    html += '<div class="ark-card">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+      + '<button id="smstar-'+h.ticker+'" class="star-btn'+starred+'" data-ticker="'+h.ticker+'" onclick="toggleSMWatch(this.dataset.ticker)" title="Add to watchlist">&#11088;</button>'
+      + '<span class="ark-ticker">' + h.ticker + '</span>'
+      + (match ? '<span class="scanner-match">📡</span>' : '')
+      + '</div>'
+      + '<div class="ark-funds">' + fundsStr + '</div>'
+      + '<div class="ark-bar-wrap"><div class="ark-bar" style="width:'+barPct+'%"></div></div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline">'
+      + '<span class="ark-weight">' + h.total_weight.toFixed(1) + '% weight</span>'
+      + '<span class="ark-val">' + fmtVal(h.total_value) + '</span>'
+      + '</div>'
+      + '</div>';
+  });
+
+  document.getElementById('ark-grid').innerHTML = html ||
+    '<div style="color:var(--muted);padding:20px">No ARK holdings data yet. Run smart_money.py --ark on the VM.</div>';
+}
+
+var ARK_FUND_LABELS = {ARKK:1,ARKG:1,ARKW:1,ARKQ:1,ARKF:1,ARKX:1};
+
+function renderCongress() {
+  var search   = (document.getElementById('congress-search').value || '').trim().toUpperCase();
+  var buysOnly = document.getElementById('congress-buys-only').checked;
+
+  var rows = congressData.filter(function(t) {
+    if (buysOnly && t.type !== 'buy') return false;
+    if (search && t.ticker.indexOf(search) === -1 &&
+        (t.senator||'').toUpperCase().indexOf(search) === -1) return false;
+    return true;
+  });
+
+  document.getElementById('congress-count').textContent = '— ' + rows.length + ' trades';
+
+  var html = '';
+  rows.forEach(function(t) {
+    var match   = scannerTickers.has(t.ticker);
+    var starred = smWatchlist[t.ticker] ? ' starred' : '';
+    var badge   = t.type === 'buy'
+      ? '<span class="buy-badge">BUY</span>'
+      : '<span class="sell-badge">SELL</span>';
+    html += '<tr>'
+      + '<td><button id="smstar-c-'+t.ticker+'" class="star-btn'+starred+'" data-ticker="'+t.ticker+'" onclick="toggleSMWatch(this.dataset.ticker)">&#11088;</button></td>'
+      + '<td>' + (t.date||'—') + '</td>'
+      + '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (t.senator||'—') + '</td>'
+      + '<td><span class="ticker-badge">' + t.ticker + '</span>' + (match?' <span class="scanner-match">📡</span>':'') + '</td>'
+      + '<td>' + badge + '</td>'
+      + '<td style="color:var(--muted);font-size:11px">' + (t.amount||'—') + '</td>'
+      + '<td style="color:var(--muted);font-size:11px">' + (t.owner||'Self') + '</td>'
+      + '</tr>';
+  });
+  document.getElementById('congress-body').innerHTML = html ||
+    '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:30px">No congressional trades found.</td></tr>';
+}
+
+function renderActivist() {
+  document.getElementById('activist-count').textContent =
+    '— ' + activistData.length + ' recent filings';
+
+  var html = '';
+  activistData.forEach(function(f) {
+    var match   = f.ticker && scannerTickers.has(f.ticker);
+    var starred = f.ticker && smWatchlist[f.ticker] ? ' starred' : '';
+    var badge   = f.is_activist
+      ? '<span class="activist-badge">13D ACTIVIST</span>'
+      : '<span class="passive-badge">13G PASSIVE</span>';
+    html += '<tr>'
+      + '<td>' + (f.ticker ? '<button id="smstar-a-'+f.ticker+'" class="star-btn'+starred+'" data-ticker="'+f.ticker+'" onclick="toggleSMWatch(this.dataset.ticker)">&#11088;</button>' : '') + '</td>'
+      + '<td>' + (f.filed||'—') + '</td>'
+      + '<td>' + badge + '</td>'
+      + '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (f.filer||'—') + '</td>'
+      + '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">' + (f.company||'—') + '</td>'
+      + '<td>' + (f.ticker ? '<span class="ticker-badge">'+(match?'📡 ':'')+f.ticker+'</span>' : '—') + '</td>'
+      + '<td>' + (f.pct_owned != null ? f.pct_owned.toFixed(1)+'%' : '—') + '</td>'
+      + '</tr>';
+  });
+  document.getElementById('activist-body').innerHTML = html ||
+    '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:30px">No activist filings found. Run smart_money.py --activist on the VM.</td></tr>';
+}
+
+function renderStats() {
+  // ── 1. Insider stats ────────────────────────────────────────────────────────
+  var insiderVol = insiderData.reduce(function(s, r) { return s + (r.value || 0); }, 0);
+  document.getElementById('st-insider-vol').textContent = fmtVal(insiderVol) || '—';
+  document.getElementById('st-insider-n').textContent   = insiderData.length + ' transactions';
+
+  // ── 2. Hedge fund stats ─────────────────────────────────────────────────────
+  var allHFTickers = new Set();
+  institutionData.forEach(function(fund) {
+    (fund.holdings || []).forEach(function(h) { if (h.ticker) allHFTickers.add(h.ticker); });
+  });
+  document.getElementById('st-hf-n').textContent     = allHFTickers.size;
+  document.getElementById('st-hf-funds').textContent = institutionData.length + ' funds tracked';
+
+  // ── 3. ARK stats ─────────────────────────────────────────────────────────────
+  var arkCount = Object.keys(arkData).length;
+  document.getElementById('st-ark-n').textContent   = arkCount;
+  document.getElementById('st-ark-sub').textContent = 'unique tickers across ' + ['ARKK','ARKG','ARKW','ARKQ','ARKF','ARKX'].filter(function(f) {
+    return Object.values(arkData).some(function(v) { return (v.funds || []).includes(f); });
+  }).length + ' ETFs';
+
+  // ── 4. Congress stats ────────────────────────────────────────────────────────
+  var congBuys  = congressData.filter(function(t) { return (t.type||'').toLowerCase() === 'buy'; }).length;
+  var congSells = congressData.filter(function(t) { return (t.type||'').toLowerCase() === 'sell'; }).length;
+  document.getElementById('st-cong-n').textContent   = congressData.length;
+  document.getElementById('st-cong-sub').textContent = congBuys + ' buys · ' + congSells + ' sells';
+
+  // ── 5. Activist stats ────────────────────────────────────────────────────────
+  var actCount13D = activistData.filter(function(f) { return f.is_activist; }).length;
+  document.getElementById('st-act-n').textContent   = activistData.length;
+  document.getElementById('st-act-sub').textContent = actCount13D + ' activist (13D) · ' + (activistData.length - actCount13D) + ' passive (13G)';
+
+  // ── 6. Conviction grid ───────────────────────────────────────────────────────
+  // Build per-ticker signal map across all 5 sources
+  var signals = {};  // ticker → { insider, hedge, ark, congress, activist }
+
+  insiderData.forEach(function(r) {
+    if (!r.ticker) return;
+    signals[r.ticker] = signals[r.ticker] || {};
+    signals[r.ticker].insider = true;
+  });
+  institutionData.forEach(function(fund) {
+    (fund.holdings || []).forEach(function(h) {
+      if (!h.ticker) return;
+      signals[h.ticker] = signals[h.ticker] || {};
+      signals[h.ticker].hedge = true;
+    });
+  });
+  Object.keys(arkData).forEach(function(t) {
+    signals[t] = signals[t] || {};
+    signals[t].ark = true;
+  });
+  congressData.forEach(function(t) {
+    if (!t.ticker || (t.type||'').toLowerCase() !== 'buy') return;
+    signals[t.ticker] = signals[t.ticker] || {};
+    signals[t.ticker].congress = true;
+  });
+  activistData.forEach(function(f) {
+    if (!f.ticker) return;
+    signals[f.ticker] = signals[f.ticker] || {};
+    signals[f.ticker].activist = true;
+  });
+
+  // Score = count of sources; sort descending
+  var ranked = Object.keys(signals).map(function(t) {
+    var s = signals[t];
+    var score = (s.insider ? 1 : 0) + (s.hedge ? 1 : 0) + (s.ark ? 1 : 0) + (s.congress ? 1 : 0) + (s.activist ? 1 : 0);
+    return { ticker: t, score: score, signals: s };
+  }).filter(function(x) { return x.score >= 2; });
+  ranked.sort(function(a, b) { return b.score - a.score; });
+
+  var top = ranked.slice(0, 20);
+  document.getElementById('cv-sub').textContent = '— ' + top.length + ' tickers with 2+ sources';
+
+  if (!top.length) {
+    document.getElementById('conviction-grid').innerHTML =
+      '<div style="color:var(--muted);padding:20px">No overlapping signals yet — run all smart_money.py sources.</div>';
+    return;
+  }
+
+  var labels = { insider: '👤 Insider', hedge: '🏛 Hedge Fund', ark: '🚀 ARK', congress: '🏙 Congress', activist: '🎯 Activist' };
+  var html = '';
+  top.forEach(function(item) {
+    var cls = item.score >= 3 ? 'cv-high' : 'cv-mid';
+    var inScanner = scannerTickers.has(item.ticker);
+    html += '<div class="cv-card ' + cls + '">';
+    html += '<div class="cv-ticker">' + item.ticker + (inScanner ? ' <span class="scanner-match">📡</span>' : '') + '</div>';
+    html += '<div class="cv-score">' + item.score + ' of 5 sources</div>';
+    html += '<div class="cv-signals">';
+    ['insider','hedge','ark','congress','activist'].forEach(function(k) {
+      if (item.signals[k]) html += '<span class="cv-chip ' + k + '">' + labels[k] + '</span>';
+    });
+    html += '</div></div>';
+  });
+  document.getElementById('conviction-grid').innerHTML = html;
+}
+
 function loadData() {
   // Load current scanner tickers (cached 10 min — changes rarely)
   fbCached('scanner/all_stocks', SM_CACHE_TTL, function(stocks) {
@@ -2492,12 +3144,19 @@ function loadData() {
 
     insiderData     = data.insiders     || [];
     institutionData = data.institutions || [];
+    arkData         = data.ark_holdings || {};
+    congressData    = data.congress     || [];
+    activistData    = data.activist     || [];
 
     var updated = data.last_updated ? new Date(data.last_updated).toLocaleString() : '—';
     document.getElementById('last-updated').textContent = 'Last updated: ' + updated + ' (cached)';
 
+    renderStats();
     renderInsiders();
     renderInstitutions();
+    renderARK();
+    renderCongress();
+    renderActivist();
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
@@ -2936,30 +3595,42 @@ def reject_recommendation(rec_id):
 
 @app.route('/api/optimizer-suggestions/approve', methods=['POST'])
 def approve_optimizer_suggestion():
-    """Approve a statistically-derived optimizer suggestion."""
+    """Queue a statistically-derived scoring suggestion for --apply on the VM."""
     try:
         import datetime
-        data     = request.get_json()
-        weights  = data.get('weights', {})
-        label    = data.get('label', 'Optimizer suggestion')
-        db_url   = FIREBASE_CONFIG.get('databaseURL', '')
-        ts       = datetime.datetime.now().isoformat()
-        rec_id   = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        # Save suggestion record
-        requests.put(
+        data         = request.get_json()
+        label        = data.get('label', 'Optimizer suggestion')
+        param        = data.get('param')        # e.g. "atr_025"
+        proposed_pts = data.get('proposed_pts') # e.g. 19
+        factor       = data.get('factor', '')
+        direction    = data.get('direction', 'boost')
+        db_url       = FIREBASE_CONFIG.get('databaseURL', '')
+        ts           = datetime.datetime.now().isoformat()
+        rec_id       = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+
+        record = {
+            'label':        label,
+            'param':        param,
+            'proposed_pts': proposed_pts,
+            'factor':       factor,
+            'direction':    direction,
+            'approved_at':  ts,
+            'status':       'approved',
+            'applied':      False
+        }
+        # Save to optimizer_suggestions list
+        if not db_url:
+            return jsonify({'ok': False, 'error': 'Firebase URL not configured (FLASK_ENV=' + str(FLASK_ENV) + ')'}), 500
+        put_resp = requests.put(
             f"{db_url}/scanner/optimizer_suggestions/{rec_id}.json",
-            json={'label': label, 'weights': weights, 'approved_at': ts, 'status': 'approved'},
-            timeout=10
+            json=record, timeout=10
         )
-        # Write to approved_weights (same path as AI suggestions)
-        requests.put(
-            f"{db_url}/scanner/approved_weights.json",
-            json={**weights, '_approved_from': f'optimizer_{rec_id}', '_approved_at': ts},
-            timeout=10
-        )
-        return jsonify({'ok': True, 'message': 'Approved. Run python ai_optimizer.py --apply on the VM to update live_scanner.py.'})
+        if put_resp.status_code not in (200, 201):
+            return jsonify({'ok': False, 'error': f'Firebase write failed: HTTP {put_resp.status_code}: {put_resp.text[:200]}'}), 500
+        return jsonify({'ok': True, 'message': 'Queued.'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'ok': False, 'error': str(e), 'trace': traceback.format_exc()[-500:]}), 500
 
 @app.route('/api/run-ai-analysis', methods=['POST'])
 def run_ai_analysis():
@@ -3049,17 +3720,19 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .edge-hurts{background:#3d1a1a;color:var(--red);}
 
 /* Suggestions */
-.suggestions{display:flex;flex-direction:column;gap:8px;margin-top:20px;}
-.suggestion-item{background:var(--bg3);border-radius:10px;padding:14px 16px;border:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
-.sug-factor{flex:1;min-width:180px;}
+.suggestions{display:flex;flex-direction:column;gap:8px;}
+.sug-section-hdr{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:4px 0;border-bottom:1px solid var(--border);margin:16px 0 8px;}
+.suggestion-item{background:var(--bg3);border-radius:10px;padding:14px 16px;border:1px solid var(--border);}
+.sug-top{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+.sug-factor{flex:1;min-width:160px;}
 .sug-factor-name{font-size:13px;font-weight:600;}
-.sug-factor-reason{font-size:11px;color:var(--muted);margin-top:3px;}
-.sug-change{display:flex;align-items:center;gap:8px;flex-shrink:0;}
-.val-chip{padding:4px 10px;border-radius:6px;font-size:13px;font-weight:700;font-family:monospace;}
-.val-cur{background:var(--bg);color:var(--muted);}
-.val-up{background:#1a3d2b;color:var(--green);}
-.val-down{background:#3d1a1a;color:var(--red);}
-.val-arrow{color:var(--muted);font-size:12px;}
+.sug-factor-comp{font-size:11px;color:var(--muted);margin-top:2px;}
+.sug-pills{display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0;}
+.dpill{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--border);color:var(--muted);white-space:nowrap;}
+.dpill.g{background:#1a3d2b;color:var(--green);border-color:#27ae6044;}
+.dpill.r{background:#3d1a1a;color:var(--red);border-color:#e74c3c44;}
+.dpill.a{background:#2d1f0a;color:var(--amber);border-color:#e67e2244;}
+.sug-advice{font-size:12px;line-height:1.5;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
 
 /* Changes table (AI section) */
 .changes-table{width:100%;border-collapse:collapse;}
@@ -3136,50 +3809,51 @@ code{background:var(--bg);padding:2px 6px;border-radius:4px;font-family:monospac
 firebase.initializeApp(FIREBASE_CONFIG);
 var fdb = firebase.database();
 
-// Current default weights (mirrors live_scanner.py + ai_optimizer.py)
-var DEFAULT_WEIGHTS = {
-  breakout_momentum_max:  28,
-  breakout_ema_full:      22,
-  breakout_ema_partial:   12,
-  breakout_hh_hl_strong:   6,
-  breakout_hh_hl_ok:       3,
-  breakout_atr_max:       12,
-  breakout_vol_max:        8,
-  breakout_dist_max:      18,
-  breakout_liquidity_max:  7,
-  penalty_weak_ema:       18,
-  penalty_far_dist:       12,
-  penalty_neg_mom:        12,
-  penalty_high_vol_atr:    8,
-  threshold_ready:        72,
-  threshold_watch:        55
+// Factor name → concrete patching info (mirrors live_scanner.py ta= assignments)
+// boostPts / reducePts = what to suggest when lift is positive / negative
+var FACTOR_PATCH_MAP = {
+  'EMA stack = FULL':    {param:'ema_full',   curPts:25, boostPts:30, reducePts:18, loc:'Technical score — EMA trend block'},
+  'EMA stack = PARTIAL': {param:'ema_partial', curPts:15, boostPts:19, reducePts:10, loc:'Technical score — EMA trend block'},
+  'ATR ≤ 0.25':     {param:'atr_025',   curPts:15, boostPts:19, reducePts:10, loc:'Technical score — ATR compression block'},
+  'ATR ≤ 0.35':     {param:'atr_030',   curPts:10, boostPts:13, reducePts:7,  loc:'Technical score — ATR compression block'},
+  'Vol dry ≤ 50%':  {param:'vc_050',    curPts:15, boostPts:18, reducePts:10, loc:'Technical score — Volume contraction block'},
+  'Vol dry ≤ 70%':  {param:'vc_065',    curPts:10, boostPts:13, reducePts:7,  loc:'Technical score — Volume contraction block'},
+  'HH/HL ≥ 0.85':   {param:'hh_hl_85', curPts:12, boostPts:16, reducePts:8,  loc:'Technical score — HH/HL structure block'},
+  'HH/HL ≥ 0.70':   {param:'hh_hl_70', curPts:8,  boostPts:11, reducePts:5,  loc:'Technical score — HH/HL structure block'},
+  'Dist ≤ 1%':      {param:'dist_1',   curPts:20, boostPts:24, reducePts:14, loc:'Technical score — Distance to level block'},
+  'Dist ≤ 3%':      {param:'dist_3p5', curPts:11, boostPts:14, reducePts:8,  loc:'Technical score — Distance to level block'}
 };
 
-// Factor name → weight key mapping
-var FACTOR_WEIGHT_MAP = {
-  'EMA stack = FULL':       'breakout_ema_full',
-  'EMA stack = PARTIAL':    'breakout_ema_partial',
-  'EMA stack = WEAK':       'penalty_weak_ema',
-  'Vol dry ≤ 50%':     'breakout_vol_max',
-  'Vol dry ≤ 70%':     'breakout_vol_max',
-  'ATR ≤ 0.25':        'breakout_atr_max',
-  'ATR ≤ 0.35':        'breakout_atr_max',
-  'HH/HL ≥ 0.85':      'breakout_hh_hl_strong',
-  'HH/HL ≥ 0.70':      'breakout_hh_hl_ok',
-  'Momentum 1M ≥ +15%':'breakout_momentum_max',
-  'Momentum 1M ≥ +8%': 'breakout_momentum_max',
-  'Dist ≤ 1%':         'breakout_dist_max',
-  'Dist ≤ 3%':         'breakout_dist_max',
-  'Status = READY':         'threshold_ready',
-  'Status = WATCH':         'threshold_watch'
+// Factor name → v4 scoring component info
+// Maps optimizer.py factor names to their v4 Quality/Setup score components
+var FACTOR_V4_MAP = {
+  'EMA stack = FULL':    {component:'Setup: EMA Stack',          score:'setup',   maxPts:20, desc:'Full EMA alignment (20pts in Setup score)'},
+  'EMA stack = PARTIAL': {component:'Setup: EMA Stack',          score:'setup',   maxPts:10, desc:'Partial EMA alignment (10pts in Setup score)'},
+  'EMA stack = WEAK':    {component:'Setup: EMA Stack',          score:'setup',   maxPts:2,  desc:'Weak EMA — scores only 2pts; hurts Setup'},
+  'Vol dry ≤ 50%':  {component:'Setup: Vol Contraction',    score:'setup',   maxPts:18, desc:'Strong vol contraction (max 18pts in Setup)'},
+  'Vol dry ≤ 70%':  {component:'Setup: Vol Contraction',    score:'setup',   maxPts:12, desc:'Moderate vol contraction (12pts in Setup)'},
+  'ATR ≤ 0.25':     {component:'Setup: ATR Coil',           score:'setup',   maxPts:15, desc:'Low ATR coil (15pts in Setup score)'},
+  'ATR ≤ 0.35':     {component:'Setup: ATR Coil',           score:'setup',   maxPts:10, desc:'Moderate ATR coil (10pts in Setup score)'},
+  'HH/HL ≥ 0.85':   {component:'Quality + Setup: HH/HL',   score:'both',    maxPts:10, desc:'Strong HH/HL (10pts Quality, 8pts Setup)'},
+  'HH/HL ≥ 0.70':   {component:'Quality + Setup: HH/HL',   score:'both',    maxPts:7,  desc:'Moderate HH/HL (7pts Quality, 5pts Setup)'},
+  'Momentum 1M ≥ +15%': {component:'Quality: Momentum 1M', score:'quality', maxPts:13, desc:'Strong 1M momentum (max 13pts in Quality)'},
+  'Momentum 1M ≥ +8%':  {component:'Quality: Momentum 1M', score:'quality', maxPts:10, desc:'Moderate 1M momentum (10pts in Quality)'},
+  'Dist ≤ 1%':      {component:'Setup: Distance to Level',  score:'setup',   maxPts:14, desc:'Very close to breakout level (max 14pts in Setup)'},
+  'Dist ≤ 3%':      {component:'Setup: Distance to Level',  score:'setup',   maxPts:6,  desc:'Near breakout level (6pts in Setup)'},
+  'RSI ≤ 55':       {component:'Setup: RSI',                score:'setup',   maxPts:8,  desc:'Low RSI = not extended (max 8pts in Setup)'},
+  'RSI ≤ 65':       {component:'Setup: RSI',                score:'setup',   maxPts:6,  desc:'Moderate RSI (6pts in Setup)'},
+  'Vol ratio ≥ 3x': {component:'Setup: Vol Ratio',          score:'setup',   maxPts:7,  desc:'High relative volume (max 7pts in Setup)'},
+  'Status = READY':      {component:'Buy Now ≥ 65',         score:'meta',    maxPts:null, desc:'Stock scored READY threshold'},
+  'Status = WATCH':      {component:'Buy Now 40–64',        score:'meta',    maxPts:null, desc:'Stock scored WATCH threshold'}
 };
 
-var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null;
+var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null, optSuggestions = {};
+var PENDING_PATCHES = {}; // keyed by id, holds patch arrays for Accept buttons
 
 // Load all data sources in parallel
-var loaded = {opt: false, ai: false, flag: false};
+var loaded = {opt: false, ai: false, flag: false, sug: false};
 function checkReady() {
-  if (loaded.opt && loaded.ai && loaded.flag) renderPage();
+  if (loaded.opt && loaded.ai && loaded.flag && loaded.sug) renderPage();
 }
 
 fdb.ref('/scanner/optimization_reports').on('value', function(snap) {
@@ -3200,7 +3874,13 @@ fdb.ref('/scanner/run_ai_requested').on('value', function(snap) {
   aiFlag = snap.val();
   loaded.flag = true;
   // Re-render just the button area if already loaded
-  if (loaded.opt && loaded.ai) renderPage();
+  if (loaded.opt && loaded.ai && loaded.sug) renderPage();
+});
+
+fdb.ref('/scanner/optimizer_suggestions').on('value', function(snap) {
+  optSuggestions = snap.val() || {};
+  loaded.sug = true;
+  if (loaded.opt && loaded.ai && loaded.flag) renderPage();
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -3231,34 +3911,194 @@ function statusBadge(status, applied) {
 }
 
 // ── Derive optimizer suggestions from factor analysis ─────────────────────────
-function deriveOptSuggestions(factors) {
-  var seen = {}, suggestions = [];
+// Returns {reinforce, reduce} — each entry has full data + concrete weight change.
+function deriveOptSuggestions(factors, baselineWR) {
+  var seen = {};
+  var reinforce = [], reduce = [];
   factors.forEach(function(f) {
-    var lift = parseFloat(f.wr_lift) || 0;
-    var wKey = FACTOR_WEIGHT_MAP[f.factor];
-    if (!wKey || seen[wKey]) return;
-    seen[wKey] = true;
-    var cur = DEFAULT_WEIGHTS[wKey];
-    if (cur == null) return;
-    var proposed = cur;
-    var reason = '';
-    if (lift >= 10) {
-      proposed = Math.round(cur * 1.25);
-      reason = 'Strong predictor (+' + lift.toFixed(1) + '% WR lift) — increase weight by 25%';
-    } else if (lift >= 5) {
-      proposed = Math.round(cur * 1.15);
-      reason = 'Mild predictor (+' + lift.toFixed(1) + '% WR lift) — increase weight by 15%';
-    } else if (lift <= -10) {
-      proposed = Math.round(cur * 0.70);
-      reason = 'Hurts performance (' + lift.toFixed(1) + '% WR drag) — decrease weight by 30%';
-    } else if (lift <= -5) {
-      proposed = Math.round(cur * 0.80);
-      reason = 'Drags performance (' + lift.toFixed(1) + '% WR drag) — decrease weight by 20%';
-    } else { return; }
-    if (proposed === cur) return;
-    suggestions.push({weight_key: wKey, factor: f.factor, current_value: cur, proposed_value: proposed, reason: reason, wr_lift: lift});
+    var lift  = parseFloat(f.wr_diff || f.wr_lift) || 0;
+    var n     = parseInt(f.n_with || f.n) || 0;
+    var info  = FACTOR_V4_MAP[f.factor];
+    var patch = FACTOR_PATCH_MAP[f.factor];
+    if (!info || seen[f.factor]) return;
+    if (Math.abs(lift) < 5 || n < 10) return;
+    seen[f.factor] = true;
+
+    var wr_with = parseFloat(f.wr_with) || null;
+
+    var entry = {
+      factor:     f.factor,
+      component:  info.component,
+      score:      info.score,
+      maxPts:     info.maxPts,
+      desc:       info.desc,
+      lift:       lift,
+      wr_with:    wr_with,
+      wr_wout:    parseFloat(f.wr_without || f.wr_wout) || null,
+      avg_with:   parseFloat(f.avg_ret_with || f.avg_with) || null,
+      n:          n,
+      baselineWR: baselineWR,
+      // Concrete weight change (only for factors with a patchable param)
+      patch:      patch || null,
+      curPts:     patch ? patch.curPts : null,
+      proposedPts:patch ? (lift >= 5 ? patch.boostPts : patch.reducePts) : null,
+      param:      patch ? patch.param  : null
+    };
+
+    if (lift >= 5)  reinforce.push(entry);
+    else            reduce.push(entry);
   });
-  return suggestions;
+
+  reinforce.sort(function(a,b){ return b.lift - a.lift; });
+  reduce.sort(function(a,b){ return a.lift - b.lift; });
+  return {reinforce: reinforce, reduce: reduce};
+}
+
+// ── Build ONE consolidated suggestion card from all signals ───────────────────
+function buildConsolidatedSug(sugs, baselineWR) {
+  var patchable = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return s.patch; });
+  var observeOnly = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return !s.patch; });
+  var totalChanges = patchable.length;
+
+  // Best projected WR = highest wr_with among boost signals (conservative: take min of boost signals)
+  var bestWR = null;
+  sugs.reinforce.forEach(function(s){ if (s.wr_with && (bestWR === null || s.wr_with < bestWR)) bestWR = s.wr_with; });
+
+  var h = '<div class="suggestion-item" id="consolidated-sug" style="border-color:#27ae6033">';
+
+  // Header
+  h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">';
+  h += '<span style="font-size:14px;font-weight:700">&#128200; Recommended Scoring Changes</span>';
+  if (totalChanges > 0) h += '<span class="dpill g">' + totalChanges + ' weight change' + (totalChanges > 1 ? 's' : '') + '</span>';
+  if (baselineWR && bestWR) {
+    h += '<span class="dpill g">Projected WR: ' + baselineWR.toFixed(1) + '% &rarr; up to ' + bestWR.toFixed(1) + '%</span>';
+  }
+  h += '</div>';
+
+  // Boost changes table
+  if (sugs.reinforce.length) {
+    h += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--green);margin-bottom:6px">&#9650; Boost weight — strong predictors</div>';
+    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;">';
+    h += '<thead><tr style="border-bottom:1px solid var(--border)">';
+    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Signal</th>';
+    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Component</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR Lift</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR with</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">N</th>';
+    if (totalChanges > 0) h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Weight change</th>';
+    h += '</tr></thead><tbody>';
+    sugs.reinforce.forEach(function(s) {
+      h += '<tr style="border-bottom:1px solid var(--border)22">';
+      h += '<td style="padding:6px 8px;font-weight:600">' + s.factor + '</td>';
+      h += '<td style="padding:6px 8px;color:var(--muted);font-size:11px">' + s.component + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--green);font-weight:700">+' + s.lift.toFixed(1) + '%</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--green)">' + (s.wr_with ? s.wr_with.toFixed(1) + '%' : '—') + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--muted)">' + s.n + '</td>';
+      if (s.patch) h += '<td style="padding:6px 8px;text-align:right"><span style="color:var(--muted)">' + s.curPts + 'pts</span> &rarr; <strong style="color:var(--green)">' + s.proposedPts + 'pts</strong></td>';
+      else         h += '<td style="padding:6px 8px;text-align:right;color:var(--muted);font-size:11px">observation only</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+  }
+
+  // Reduce changes table
+  if (sugs.reduce.length) {
+    h += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--red);margin-bottom:6px">&#9660; Reduce weight — performance drag</div>';
+    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;">';
+    h += '<thead><tr style="border-bottom:1px solid var(--border)">';
+    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Signal</th>';
+    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Component</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR Lift</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR with</th>';
+    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">N</th>';
+    if (totalChanges > 0) h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Weight change</th>';
+    h += '</tr></thead><tbody>';
+    sugs.reduce.forEach(function(s) {
+      h += '<tr style="border-bottom:1px solid var(--border)22">';
+      h += '<td style="padding:6px 8px;font-weight:600">' + s.factor + '</td>';
+      h += '<td style="padding:6px 8px;color:var(--muted);font-size:11px">' + s.component + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--red);font-weight:700">' + s.lift.toFixed(1) + '%</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--red)">' + (s.wr_with ? s.wr_with.toFixed(1) + '%' : '—') + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;color:var(--muted)">' + s.n + '</td>';
+      if (s.patch) h += '<td style="padding:6px 8px;text-align:right"><span style="color:var(--muted)">' + s.curPts + 'pts</span> &rarr; <strong style="color:var(--red)">' + s.proposedPts + 'pts</strong></td>';
+      else         h += '<td style="padding:6px 8px;text-align:right;color:var(--muted);font-size:11px">observation only</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+  }
+
+  // Single Accept button for all patchable changes
+  if (patchable.length > 0) {
+    h += '<div id="consolidated-action" style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap;">';
+
+    var myParams = patchable.map(function(s){ return s.param; });
+    var myParamsKey = myParams.slice().sort().join(',');
+
+    // Check if cron already applied these changes (Firebase source of truth for "done")
+    var sugVals = Object.values(optSuggestions);
+    var appliedParams = sugVals.filter(function(s){ return s && s.applied === true; }).map(function(s){ return s.param; });
+    var allApplied = myParams.length > 0 && myParams.every(function(p){ return appliedParams.indexOf(p) >= 0; });
+
+    // Check localStorage for "queued but not yet applied" state (reliable across page refreshes)
+    var lsKey = 'optimizer_queued_' + myParamsKey;
+    var isQueued = !allApplied && !!localStorage.getItem(lsKey);
+
+    if (allApplied) {
+      // Cron has applied — clear localStorage and show done state
+      localStorage.removeItem(lsKey);
+      h += '<span class="badge badge-applied">&#10003; Applied to live_scanner.py</span>';
+      h += '<span style="font-size:11px;color:var(--muted)">Scanner restarted with updated weights. Re-run the optimizer for fresh suggestions.</span>';
+    } else if (isQueued) {
+      h += '<span class="badge badge-pending">&#9711; Queued — cron will apply within 5 min</span>';
+      h += '<span style="font-size:11px;color:var(--muted)">The VM cron will patch live_scanner.py and restart the scanner automatically.</span>';
+    } else {
+      // Show Accept button — store lsKey on it so the handler can save state
+      var patchKey = 'opt_' + Date.now();
+      PENDING_PATCHES[patchKey] = patchable.map(function(s){ return {param: s.param, pts: s.proposedPts, factor: s.factor}; });
+      var nLabel = patchable.length + ' change' + (patchable.length > 1 ? 's' : '');
+      h += '<button class="btn btn-approve" data-key="' + patchKey + '" data-lskey="' + lsKey + '" onclick="acceptAllSuggestions(this)">&#10003; Accept all ' + nLabel + '</button>';
+      h += '<span style="font-size:11px;color:var(--muted)">Queues changes to live_scanner.py &middot; cron applies automatically within 5 min</span>';
+    }
+    h += '</div>';
+  }
+
+  h += '</div>';
+  return h;
+}
+
+async function acceptAllSuggestions(btn) {
+  var patches = PENDING_PATCHES[btn.dataset.key] || [];
+  var lsKey   = btn.dataset.lskey || '';
+  if (!patches.length) return;
+  btn.disabled = true; btn.textContent = 'Queuing ' + patches.length + ' changes...';
+  var errors = [];
+  var ts = new Date().toISOString();
+  for (var i = 0; i < patches.length; i++) {
+    var p = patches[i];
+    // Write directly via Firebase JS SDK (avoids Flask REST API auth issue)
+    var recId = ts.replace(/[:.]/g, '-') + '_' + i;
+    try {
+      await fdb.ref('/scanner/optimizer_suggestions/' + recId).set({
+        label:        p.factor + ' → ' + p.pts + 'pts',
+        param:        p.param,
+        proposed_pts: p.pts,
+        factor:       p.factor,
+        direction:    'stat',
+        approved_at:  ts,
+        status:       'approved',
+        applied:      false
+      });
+    } catch(e) { errors.push(p.factor + ': ' + e.message); }
+  }
+  var bar = document.getElementById('consolidated-action');
+  if (errors.length) {
+    bar.innerHTML = '<span style="color:var(--red)">&#9888; ' + errors.join(', ') + '</span>';
+  } else {
+    // Mark as queued in localStorage so revisiting shows "Queued" state
+    if (lsKey) localStorage.setItem(lsKey, '1');
+    bar.innerHTML = '<span class="badge badge-pending" style="margin-right:8px">&#9711; Queued — cron will apply within 5 min</span>'
+      + '<span style="font-size:11px;color:var(--muted)">The VM cron will patch live_scanner.py and restart the scanner automatically.</span>';
+  }
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
@@ -3323,34 +4163,15 @@ function renderPage() {
       h += '</tbody></table></div>';
     }
 
-    // Auto-generated suggestions
-    var sugs = deriveOptSuggestions(factors);
-    if (sugs.length) {
-      h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 10px;">Auto-generated Suggestions ('+sugs.length+')</div>';
-      h += '<div class="suggestions" id="opt-sugs">';
-      sugs.forEach(function(s) {
-        var up = s.proposed_value > s.current_value;
-        h += '<div class="suggestion-item">';
-        h += '<div class="sug-factor"><div class="sug-factor-name">'+s.weight_key+'</div>';
-        h += '<div class="sug-factor-reason">'+s.reason+'</div></div>';
-        h += '<div class="sug-change">';
-        h += '<span class="val-chip val-cur">'+s.current_value+'</span>';
-        h += '<span class="val-arrow">'+(up?'&#8593;':'&#8595;')+'</span>';
-        h += '<span class="val-chip '+(up?'val-up':'val-down')+'">'+s.proposed_value+'</span>';
-        h += '</div></div>';
-      });
-      h += '</div>';
+    // One consolidated suggestion card (all signals combined, one Accept button)
+    var baselineWR = parseFloat(stats.win_rate) || null;
+    var sugs = deriveOptSuggestions(factors, baselineWR);
+    var totalSugs = sugs.reinforce.length + sugs.reduce.length;
+    h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:24px 0 10px;">&#128200; Scoring Recommendation — based on '+(stats.total_picks||'N')+' picks</div>';
+    if (totalSugs > 0) {
+      h += buildConsolidatedSug(sugs, baselineWR);
     } else {
-      h += '<div style="margin-top:20px;padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions — no factor has &gt;5% or &lt;-5% win-rate lift yet. Run more backtest history for stronger signals.</div>';
-    }
-
-    // Approve/reject for optimizer suggestions
-    if (sugs.length) {
-      h += '<div class="action-bar" id="opt-action-bar">';
-      h += '<button class="btn btn-approve" onclick="approveOptSugs()">&#10003; Approve Suggestions</button>';
-      h += '<button class="btn btn-reject" onclick="rejectOptSugs()">&#10005; Dismiss</button>';
-      h += '<span class="action-note">Approving queues these changes. Then run <code>python ai_optimizer.py --apply</code> on the VM to patch live_scanner.py.</span>';
-      h += '</div>';
+      h += '<div style="padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions yet — need factors with &gt;5% win-rate lift and at least 10 picks. Run more backtest history for stronger signals.</div>';
     }
   }
   h += '</div></div>'; // section-body + section
@@ -3484,32 +4305,6 @@ async function triggerAiRun() {
 }
 
 // ── Optimizer approve/reject ──────────────────────────────────────────────────
-async function approveOptSugs() {
-  var sugs = deriveOptSuggestions(getLatestFactors());
-  if (!sugs.length) return;
-  var weights = Object.assign({}, DEFAULT_WEIGHTS);
-  sugs.forEach(function(s) { weights[s.weight_key] = s.proposed_value; });
-  document.getElementById('opt-action-bar').innerHTML = '<span style="color:var(--muted)">Approving...</span>';
-  try {
-    var resp = await fetch('/api/optimizer-suggestions/approve', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({weights: weights, label: 'Statistical optimizer suggestions'})
-    });
-    var data = await resp.json();
-    if (data.ok) {
-      document.getElementById('opt-action-bar').innerHTML =
-        '<span class="badge badge-approved">&#10003; Approved</span>' +
-        '<span class="action-note" style="margin-left:10px">Run <code>python ai_optimizer.py --apply</code> on the VM to apply.</span>';
-    } else { alert('Error: '+(data.error||'Unknown')); }
-  } catch(e) { alert('Network error: '+e.message); }
-}
-
-function rejectOptSugs() {
-  document.getElementById('opt-action-bar').innerHTML =
-    '<span class="badge badge-rejected">&#10005; Dismissed</span>';
-}
-
 // ── AI approve/reject ─────────────────────────────────────────────────────────
 async function approveAiRec() {
   document.getElementById('ai-action-bar').innerHTML = '<span style="color:var(--muted)">Approving...</span>';

@@ -15,13 +15,15 @@ GCP VM (scanner-prod / scanner-staging)
   └── smart_money.py    — fetches insider buys (Form 4) + hedge fund holdings (13F) from SEC EDGAR
 
 Firebase Realtime Database
-  ├── /scanner/all_stocks            — latest scan results (live dashboard)
-  ├── /scanner/history               — historical picks with forward returns (analytics)
-  ├── /scanner/first_seen            — when each ticker was first flagged
-  ├── /scanner/smart_money           — insider + institutional data
-  ├── /scanner/optimization_reports  — weekly factor analysis results
-  ├── /scanner/ai_recommendations    — Claude-suggested weight changes (pending / approved / applied)
-  └── /scanner/experiments/          — isolated experiment results (see Experiment Framework below)
+  ├── /scanner/all_stocks              — latest scan results (live dashboard)
+  ├── /scanner/history                 — historical picks with forward returns (analytics)
+  ├── /scanner/first_seen              — when each ticker was first flagged
+  ├── /scanner/smart_money             — insider + institutional data
+  ├── /scanner/optimization_reports    — weekly factor analysis results
+  ├── /scanner/ai_recommendations      — Claude-suggested weight changes (pending / approved / applied)
+  ├── /scanner/optimizer_suggestions   — stat optimizer accepted suggestions (pending / applied)
+  ├── /scanner/run_ai_requested        — flag to trigger AI analysis from the UI
+  └── /scanner/experiments/            — isolated experiment results (see Experiment Framework below)
         └── {experiment_name}/
               ├── meta     — scoring_version, created_at, status
               ├── history  — picks scored with experimental logic
@@ -39,60 +41,27 @@ Two environments — staging and production — with separate Firebase databases
 
 ## Scoring Logic
 
-### Two-track scoring system (0–95 pts, live_scanner.py)
+### Three scores (v4)
 
-`live_scanner.py` scores every stock on two independent tracks and uses whichever scores higher.
+| Score | What it measures | Max | Color |
+|-------|-----------------|-----|-------|
+| **Buy Now** | √(Quality × Setup) — geometric mean. Primary ranking metric. | 100 | Green ≥65 / Amber 40-64 / Red <40 |
+| **Quality** | How strong is the stock? RS percentile, EMA trend, momentum 1M+3M, HH/HL structure, fundamentals, liquidity | 100 | Blue |
+| **Setup** | Is the entry timing good? EMA alignment, ATR coil, vol contraction, distance to level, RSI, vol ratio | 100 | Orange |
 
-#### Track A — Breakout Setup
-
-| Factor | Max pts | Logic |
-|--------|---------|-------|
-| 1M momentum | 28 | ≥25%=28, ≥15%=22, ≥8%=15, ≥3%=9, ≥0%=4 |
-| EMA stack | 22 | full (price>10>20>50)=22, partial (10>20)=12 |
-| HH/HL structure | 6 | ≥85%=6, ≥70%=3 |
-| ATR compression | 12 | ≤0.20=12, ≤0.25=9, ≤0.30=6, ≤0.40=2 |
-| Volume contraction | 8 | ≤50%=8, ≤65%=5, ≤80%=2 |
-| Distance to level | 18 | ≤1%=18, ≤2%=14, ≤3.5%=9, ≤6%=4, ≤10%=1 |
-| Liquidity | 7 | ≥$200M/day=7, ≥$50M=5, ≥$20M=3, else=1 |
-
-Penalties: weak EMA (−18), dist >15% (−12), mom <−5% (−12), high ATR + low momentum (−8)
-
-#### Track B — Catalyst Play
-
-| Factor | Max pts | Logic |
-|--------|---------|-------|
-| Earnings coming | 35 | ≤1 day=35, ≤3d=30, ≤7d=22, ≤14d=12, ≤21d=5 |
-| Analyst upside | 25 | ≥50%=25, ≥30%=20, ≥20%=15, ≥10%=8, ≥5%=3 |
-| Buy consensus | 20 | ≥85%=20, ≥70%=14, ≥55%=8, ≥40%=3 |
-| Revenue growth YoY | 8 | ≥50%=8, ≥25%=5, ≥10%=2, <0=−5 |
-| EPS growth | 7 | ≥25%=7 |
-| Technical bonus | 7 | EMA full=5, mom≥10%=3, dist≤8%=4 (combined max 7) |
-
-### Backtest scoring (backtest.py) — v2_base_setup
-
-`backtest.py` scores the "base before breakout" setup — no fundamentals needed.
-ATR is measured as a **compression ratio** (recent ATR EMA ÷ prior ATR EMA); values below 1.0 mean the stock is coiling.
-
-| Factor | Max pts | Logic |
-|--------|---------|-------|
-| EMA structure | 18 | full=18, partial=11, weak=5 |
-| HH/HL structure | 10 | ≥85%=10, ≥70%=7, ≥55%=3 |
-| ATR compression ratio | 20 | ≤0.65=20, ≤0.75=15, ≤0.85=9, ≤0.95=4 |
-| Distance to 52-week high | 18 | ≤1%=18, ≤3%=14, ≤6%=9, ≤10%=4, ≤15%=1 |
-| Volume contraction | 12 | ≤50%=12, ≤65%=8, ≤80%=4 |
-| 3M prior momentum | 10 | ≥30%=10, ≥15%=7, ≥5%=3, <-5%=−5 |
-| Pre-breakout flag | 4 | ATR%≤3%, vol≤70%, dist≤5%, EMA full/partial |
-| Bull flag | 3 | ATR%≤2.5%, vol≤65%, mom1m≥8%, EMA full/partial |
-
-Every pick stored by backtest.py carries a `scoring_version` field (e.g. `"v1_qullamaggie"`). Bump `SCORING_VERSION` in backtest.py whenever the scoring logic changes.
+**Formula:** `Buy Now = √(Quality × Setup)`. Forces both dimensions to be good simultaneously.
+- If Quality=80, Setup=80 → Buy Now=80 ✓
+- If Quality=80, Setup=10 → Buy Now=28 (don't enter yet)
+- If Quality=10, Setup=90 → Buy Now=30 (great setup, bad stock)
 
 ### Status Labels
-| Score | Status | Meaning |
-|-------|--------|---------|
-| ≥ 72 | READY | All criteria met — breakout imminent |
-| 55–71 | WATCH | Pattern forming — wait for trigger |
-| 30–54 | BUILDING | Too early — not surfaced on dashboard |
-| < 30 | — | Hidden (fails quality gate) |
+| Buy Now | Status | Meaning |
+|---------|--------|---------|
+| ≥ 65 | READY | Strong stock in a good setup |
+| ≥ 40 | WATCH | Pattern forming — wait for trigger |
+| < 40 | BUILDING | Not yet ready |
+
+Every pick stored by backtest.py carries a `scoring_version` field (e.g. `"v4_quality_setup"`). Bump `SCORING_VERSION` in backtest.py whenever the scoring logic changes.
 
 ### Quality Gate (live scanner)
 Stock must pass ALL to appear in results:
@@ -133,7 +102,7 @@ python backtest.py --days 60 --experiment my_experiment_name
 
 Stores results in Firebase `/scanner/history/YYYY-MM-DD` — each day holds up to 200 top picks with all signals + forward returns (1W / 2W / 1M / 2M / 3M).
 
-**Important**: Downloads price data in batches of 200 tickers using `ThreadPoolExecutor` with a 120-second timeout per batch. Batches that hang are retried up to 3 times then skipped.
+**Important**: Downloads price data in batches of 25 tickers using a manual `ThreadPoolExecutor` with a 90-second timeout per batch. Uses `shutdown(wait=False)` to abandon hung yfinance threads immediately instead of blocking on exit. Cache writes are atomic: data is written to `.price_cache.tmp` first, then renamed to `.price_cache.pkl` — rename is atomic on Linux/macOS and prevents cache corruption if the process is killed mid-write.
 
 ### `optimizer.py`
 Factor analysis engine. Reads all historical picks from Firebase and identifies which signals predict winning stocks.
@@ -187,7 +156,12 @@ Flow:
 
 Every recommendation is tagged with an `experiment_id` (e.g. `ai_2026-05-14_10-30-00`) that links to the experiment framework for real backtest verification.
 
-Runs via cron every **5 minutes** (`--check-and-run` mode) waiting for a Firebase flag to be set.
+`--check-and-run` (cron every 5 min) now:
+1. Auto-applies any pending stat suggestions from Firebase `/scanner/optimizer_suggestions`
+2. Restarts `live_scanner.py` via watchdog if suggestions were applied
+3. Checks for AI analysis requests (`/scanner/run_ai_requested` flag)
+
+Accepted suggestions from the Optimizer UI are written to `/scanner/optimizer_suggestions`. The cron applies them within 5 minutes and restarts the scanner automatically.
 
 ### `smart_money.py`
 Fetches smart money signals from SEC EDGAR:
@@ -298,6 +272,12 @@ Shows all historical picks from Firebase `/scanner/history` with forward returns
 ### `/smart-money` — Smart Money
 Insider buying and hedge fund holdings in one tab. Updated by running `smart_money.py` on the VM.
 
+### `/optimizer` — Optimizer
+- **Statistical Optimizer**: factor analysis showing which signals predict winners. Generates a consolidated "Recommended Scoring Changes" card with one Accept button.
+- **Accepting suggestions**: writes to Firebase `/scanner/optimizer_suggestions` via the Firebase JS SDK (client-side, avoids Flask REST API 401 auth issues). The VM cron (`ai_optimizer.py --check-and-run`, every 5 min) patches `live_scanner.py` and restarts the scanner automatically.
+- **State tracking**: localStorage remembers accepted suggestions (key: `optimizer_queued_{sortedParams}`) so revisiting shows "Queued" state instead of the Accept button. Clears when Firebase confirms `applied=true`.
+- **AI Analysis**: Claude-powered analysis (requires Anthropic credits). Run button sets `/scanner/run_ai_requested` flag in Firebase; cron picks it up.
+
 ---
 
 ## Environments
@@ -312,6 +292,29 @@ Insider buying and hedge fund holdings in one tab. Updated by running `smart_mon
 `FLASK_ENV=staging` in the VM `.env` switches the app to the staging Firebase.
 
 **Branch policy**: all changes go to `fix/scanner-bugs` first. Only merge to `main` after staging verification and explicit approval.
+
+---
+
+## Firebase Security Rules
+
+Both staging and production databases use these rules:
+
+```json
+{
+  "rules": {
+    ".read": true,
+    ".write": false,
+    "scanner": {
+      "watchlist":              { ".write": true },
+      "sentiment_universe":    { "pinned": { ".write": true } },
+      "optimizer_suggestions": { ".write": true },
+      "run_ai_requested":      { ".write": true }
+    }
+  }
+}
+```
+
+The web app (Firebase JS SDK in browser) writes directly to these paths. Flask REST API calls on the server have no auth token and will receive 401 on write-protected paths — use client-side JS SDK writes for user-triggered actions instead.
 
 ---
 

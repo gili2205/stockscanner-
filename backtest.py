@@ -62,7 +62,7 @@ first_ref = db.reference("/scanner/first_seen")
 # Format: "v{N}_{short_description}"
 # Every pick stored in Firebase carries this tag so the optimizer can filter
 # by version and experiments can be compared apples-to-apples.
-SCORING_VERSION = "v3_three_layer"
+SCORING_VERSION = "v4_quality_setup"
 
 # ── Universe ──────────────────────────────────────────────────────────────────
 def get_universe():
@@ -110,10 +110,11 @@ def get_universe():
 
 # ── Price download ─────────────────────────────────────────────────────────────
 def _download_one_batch(batch, start_str, end_str):
-    """Run yf.download for one batch — called inside a thread so we can time it out."""
+    """Run yf.download for one batch — called inside a thread so we can time it out.
+    threads=False avoids yfinance spawning internal threads that can't be cleaned up."""
     return yf.download(
         batch, start=start_str, end=end_str,
-        auto_adjust=True, progress=False, threads=True
+        auto_adjust=True, progress=False, threads=False
     )
 
 
@@ -138,7 +139,7 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
     iso_year, iso_week, _ = date.today().isocalendar()
     cache_key = f"{len(tickers)}_{start_str}_w{iso_year}w{iso_week:02d}"
 
-    batch_size = 50
+    batch_size = 25
     batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
     # end_str only needed for yfinance calls
     end_str = str(end + timedelta(days=5))
@@ -161,9 +162,12 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
                     log.info(f"Resuming from batch {resume_from+1}/{len(batches)} "
                              f"({len(result)} tickers already cached)")
             else:
-                log.info(f"Cache key mismatch — starting fresh download")
+                stored_key = cached.get("key", "?")
+                log.info(f"Cache key mismatch (stored={stored_key}, want={cache_key}) — starting fresh")
         except Exception as e:
-            log.warning(f"Cache load failed: {e} — starting fresh download")
+            log.warning(f"Cache load failed ({e}) — deleting corrupt cache and starting fresh")
+            try: PRICE_CACHE_PATH.unlink()
+            except Exception: pass
             result = {}
             resume_from = 0
 
@@ -180,14 +184,21 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
         log.info(f"  Batch {i+1}/{len(batches)} ({len(batch)} tickers)...")
         raw = None
         for attempt in range(1, 4):
+            # NOTE: Do NOT use "with ThreadPoolExecutor() as ex" here.
+            # The context manager calls shutdown(wait=True) on exit, which blocks
+            # until the hung yfinance thread finishes — defeating the timeout.
+            # Instead, we shut down with wait=False to abandon hung threads.
+            ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                    future = ex.submit(_download_one_batch, batch, start_str, end_str)
-                    raw = future.result(timeout=180)   # 180s per smaller batch
+                future = ex.submit(_download_one_batch, batch, start_str, end_str)
+                raw = future.result(timeout=90)   # 90s per batch (25 tickers)
+                ex.shutdown(wait=False)
                 break
             except concurrent.futures.TimeoutError:
+                ex.shutdown(wait=False)   # abandon hung thread, don't block
                 log.warning(f"  Batch {i+1} attempt {attempt} timed out, retrying…")
             except Exception as e:
+                ex.shutdown(wait=False)
                 log.warning(f"  Batch {i+1} attempt {attempt} error: {e}, retrying…")
             time.sleep(5)
 
@@ -206,18 +217,24 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
             if len(raw) >= 30:
                 result[batch[0]] = raw
 
-        # ── Incremental save after every batch ────────────────────────────────
+        # ── Incremental save after every batch (atomic write) ────────────────
+        # Write to .tmp then rename — rename is atomic on Linux so a kill
+        # mid-write never corrupts the cache file.
         is_last = (i == len(batches) - 1)
+        tmp_path = PRICE_CACHE_PATH.with_suffix(".tmp")
         try:
-            with open(PRICE_CACHE_PATH, "wb") as f:
+            with open(tmp_path, "wb") as f:
                 pickle.dump({
                     "key":          cache_key,
                     "complete":     is_last,
                     "batches_done": i + 1,
                     "data":         result,
                 }, f)
+            tmp_path.replace(PRICE_CACHE_PATH)   # atomic
         except Exception as e:
             log.warning(f"  Incremental cache save failed: {e}")
+            try: tmp_path.unlink()
+            except Exception: pass
 
         time.sleep(1)
 
@@ -228,6 +245,13 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
 # ── Scoring logic (mirrors live_scanner.py) ────────────────────────────────────
 def compute_ema(series: pd.Series, period: int) -> float:
     return float(series.ewm(span=period, adjust=False).mean().iloc[-1])
+
+def compute_rsi(close: pd.Series, period: int = 14) -> float:
+    delta = close.diff()
+    gain  = delta.clip(lower=0).ewm(span=period, adjust=False).mean()
+    loss  = (-delta.clip(upper=0)).ewm(span=period, adjust=False).mean()
+    rs    = gain.iloc[-1] / max(float(loss.iloc[-1]), 1e-10)
+    return round(100 - 100 / (1 + rs), 1)
 
 
 def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict | None:
@@ -299,6 +323,9 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         # Momentum
         mom1m = round((price / float(close.iloc[-21]) - 1) * 100, 1) if len(close) >= 21 else 0.0
         mom3m = round((price / float(close.iloc[-63]) - 1) * 100, 1) if len(close) >= 63 else mom1m
+
+        # RSI (14)
+        rsi14 = compute_rsi(close)
 
         # Flags
         pre_breakout = (atr_pct <= 0.03 and vol_c <= 0.7 and dist <= 5
@@ -377,6 +404,36 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         track  = "CATALYST" if score_catalyst > score_technical else "BREAKOUT"
         status = "READY" if score >= 72 else "WATCH" if score >= 55 else "BUILDING"
 
+        # ════════════════════════════════════════════════════════════════
+        # NEW: Quality / Setup / Buy-Now scores
+        # RS percentile not available per-date in backtest (requires
+        # cross-stock comparison). Proxied from 3M momentum bucket.
+        # ════════════════════════════════════════════════════════════════
+        rs_proxy = 85 if mom3m >= 40 else 70 if mom3m >= 20 else 55 if mom3m >= 5 else 35
+
+        q = 0
+        q += 30 if rs_proxy >= 90 else 22 if rs_proxy >= 80 else 14 if rs_proxy >= 70 else 7 if rs_proxy >= 60 else 0
+        q += 12 if ema_stack == "full" else 7 if ema_stack == "partial" else 2 if ema_stack == "weak" else 0
+        q += 13 if mom1m >= 20 else 10 if mom1m >= 10 else 6 if mom1m >= 5 else 2 if mom1m >= 0 else 0
+        q += 13 if mom3m >= 40 else 9 if mom3m >= 20 else 5 if mom3m >= 8 else 1 if mom3m >= 0 else 0
+        q += 10 if hh_hl >= 0.85 else 7 if hh_hl >= 0.70 else 4 if hh_hl >= 0.55 else 0
+        # score_fundamental = 0 in backtest; no per-date fundamental data
+        q += 10 if avg_dollar_vol >= 200e6 else 7 if avg_dollar_vol >= 50e6 else 4 if avg_dollar_vol >= 20e6 else 2
+        score_quality = min(100, q)
+
+        t = 0
+        t += 20 if ema_stack == "full" else 10 if ema_stack == "partial" else 2 if ema_stack == "weak" else 0
+        t += 20 if atr_c <= 0.15 else 15 if atr_c <= 0.25 else 10 if atr_c <= 0.35 else 3 if atr_c <= 0.50 else 0
+        t += 18 if vol_c <= 0.50 else 12 if vol_c <= 0.65 else 6 if vol_c <= 0.80 else 0
+        t += 14 if dist <= 1.0 else 10 if dist <= 2.0 else 6 if dist <= 3.5 else 2 if dist <= 6.0 else 0
+        t += 8  if hh_hl >= 0.85 else 5 if hh_hl >= 0.70 else 2 if hh_hl >= 0.55 else 0
+        t += 8  if rsi14 <= 55 else 6 if rsi14 <= 65 else 3 if rsi14 <= 75 else 0
+        t += 7  if vol_ratio >= 3.0 else 4 if vol_ratio >= 2.0 else 2 if vol_ratio >= 1.5 else 0
+        t += 5  if pre_breakout else 4 if bull_flag else 0
+        # days_to_earnings not available in backtest — no earnings penalty
+        score_setup    = min(100, max(0, t))
+        score_buy_now  = round((score_quality * score_setup) ** 0.5)
+
         if score < 25:
             return None
 
@@ -404,6 +461,10 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
             "pre_breakout":      pre_breakout,
             "bull_flag":         bull_flag,
             "rs_percentile":     None,
+            "rsi":               rsi14,
+            "score_quality":     score_quality,
+            "score_setup":       score_setup,
+            "score_buy_now":     score_buy_now,
             "returns":           {}
         }
     except Exception as e:
@@ -522,70 +583,133 @@ def run_backtest(n_days: int = None, specific_date: date = None, experiment: str
     # Get existing first_seen data
     existing_first = first_ref.get() or {}
 
+    def fb_write(ref, data, retries=4, label="Firebase write"):
+        """Write to Firebase with retries — network blips won't crash the run."""
+        for attempt in range(1, retries + 1):
+            try:
+                ref.set(data)
+                return True
+            except Exception as e:
+                log.warning(f"  {label} attempt {attempt}/{retries} failed: {e}")
+                if attempt < retries:
+                    time.sleep(5 * attempt)
+        log.error(f"  {label} failed after {retries} attempts — skipping")
+        return False
+
     # Process each day
+    days_done = 0
+    days_failed = 0
     for day in all_dates:
-        log.info(f"\n--- Processing {day} ---")
+        log.info(f"\n--- Processing {day} ({days_done+1}/{len(all_dates)}) ---")
         day_t = time.time()
 
-        # Skip dates already processed (works for both production and experiments)
-        check_ref = write_ref.child(day.isoformat())
-        existing = check_ref.get()
-        if existing and len(existing) > 50:
-            log.info(f"  Already have {len(existing)} records for {day}, skipping")
-            continue
+        try:
+            # Skip dates already processed (works for both production and experiments)
+            day_str  = day.isoformat()
+            check_ref = write_ref.child(day_str)
+            try:
+                existing = check_ref.get()
+            except Exception as e:
+                log.warning(f"  Could not check existing data: {e} — processing anyway")
+                existing = None
+            if existing and len(existing) > 50:
+                log.info(f"  Already have {len(existing)} records for {day}, skipping")
+                days_done += 1
+                continue
 
-        # Score all stocks as of this day
-        results = []
-        for ticker, df in prices.items():
-            r = score_stock_historical(ticker, df, day)
-            if r:
-                results.append(r)
+            # Score all stocks as of this day
+            results = []
+            for ticker, df in prices.items():
+                try:
+                    r = score_stock_historical(ticker, df, day)
+                    if r:
+                        results.append(r)
+                except Exception as e:
+                    log.debug(f"  score_stock_historical({ticker}) failed: {e}")
 
-        if not results:
-            log.warning(f"  No results for {day}")
-            continue
+            if not results:
+                log.warning(f"  No results for {day}")
+                days_done += 1
+                continue
 
-        # Assign RS percentiles
-        scores = [r["score"] for r in results]
-        for r in results:
-            r["rs_percentile"] = round(
-                sum(1 for s in scores if s < r["score"]) / len(scores) * 100, 1
-            )
-
-        # Sort and take top 200
-        results.sort(key=lambda x: x["score"], reverse=True)
-        top200 = results[:200]
-
-        # Compute forward returns for each pick
-        for r in top200:
-            ticker = r["ticker"]
-            if ticker in prices:
-                r["returns"] = compute_returns(
-                    r["price_at_scan"], ticker, prices[ticker], day
+            # Assign RS percentiles (cross-sectional rank on this day)
+            scores = [r["score"] for r in results]
+            n = len(scores)
+            for r in results:
+                r["rs_percentile"] = round(
+                    sum(1 for s in scores if s < r["score"]) / n * 100, 1
                 )
 
-        # Write to Firebase (experiment path or production)
-        day_str = day.isoformat()
-        write_ref.child(day_str).set({r["ticker"]: r for r in top200})
+            # Sort and take top 200
+            results.sort(key=lambda x: x["score"], reverse=True)
+            top200 = results[:200]
 
-        # Update first_seen — production only
-        new_first = {}
-        if not experiment:
+            # Compute forward returns for each pick
             for r in top200:
-                t = r["ticker"]
-                if t not in existing_first:
-                    new_first[t] = {
-                        "date":  day_str,
-                        "price": r["price_at_scan"],
-                        "score": r["score"],
-                    }
-                    existing_first[t] = new_first[t]
-            if new_first:
-                first_ref.update(new_first)
+                ticker = r["ticker"]
+                if ticker in prices:
+                    try:
+                        r["returns"] = compute_returns(
+                            r["price_at_scan"], ticker, prices[ticker], day
+                        )
+                    except Exception:
+                        r["returns"] = {}
 
-        elapsed = round(time.time() - day_t, 1)
-        seen_msg = f", {len(new_first)} new first-seen" if not experiment else ""
-        log.info(f"  {day}: {len(top200)} picks stored{seen_msg} | {elapsed}s")
+            # Write to Firebase — with retry so a blip doesn't kill the run
+            fb_write(check_ref, {r["ticker"]: r for r in top200},
+                     label=f"day {day_str}")
+
+            # Update first_seen — production only
+            new_first = {}
+            if not experiment:
+                for r in top200:
+                    t = r["ticker"]
+                    if t not in existing_first:
+                        new_first[t] = {
+                            "date":  day_str,
+                            "price": r["price_at_scan"],
+                            "score": r["score"],
+                        }
+                        existing_first[t] = new_first[t]
+                if new_first:
+                    try:
+                        first_ref.update(new_first)
+                    except Exception as e:
+                        log.warning(f"  first_seen update failed: {e}")
+
+            days_done += 1
+            elapsed = round(time.time() - day_t, 1)
+            seen_msg = f", {len(new_first)} new first-seen" if not experiment else ""
+            log.info(f"  {day}: {len(top200)} picks stored{seen_msg} | {elapsed}s "
+                     f"[{days_done}/{len(all_dates)} done]")
+
+            # Periodic meta update so we can see progress in Firebase
+            if experiment and days_done % 10 == 0:
+                try:
+                    meta_ref.update({"days_done": days_done,
+                                     "last_date": day_str,
+                                     "updated_at": datetime.now().isoformat()})
+                except Exception:
+                    pass
+
+        except KeyboardInterrupt:
+            log.info(f"\nInterrupted after {days_done} days. "
+                     f"Re-run same command to resume — already-written days are skipped.")
+            if experiment:
+                try:
+                    meta_ref.update({"status": "interrupted", "days_done": days_done,
+                                     "last_date": day.isoformat()})
+                except Exception:
+                    pass
+            raise
+
+        except Exception as e:
+            days_failed += 1
+            log.error(f"  Day {day} failed unexpectedly: {e} — continuing to next day")
+            if days_failed >= 10:
+                log.error("10 consecutive-ish day failures — aborting run")
+                break
+            continue
 
     total_elapsed = round((time.time() - t_total) / 60, 1)
 
@@ -662,11 +786,24 @@ if __name__ == "__main__":
                             "Run as an experiment — results go to "
                             "/scanner/experiments/{NAME}/history instead of production. "
                             "Use this to test scoring changes before promoting to main. "
-                            "Example: --experiment v2_momentum_reweight"
+                            "Example: --experiment v4_quality_setup"
                         ))
+    parser.add_argument("--delete-experiment", type=str, default=None, metavar="NAME",
+                        help="Delete all Firebase data for an experiment and exit. "
+                             "Example: --delete-experiment v3_three_layer")
     args = parser.parse_args()
 
-    if args.update_returns:
+    if args.delete_experiment:
+        name = args.delete_experiment
+        log.info(f"Deleting experiment '{name}' from Firebase...")
+        ref = db.reference(f"/scanner/experiments/{name}")
+        existing = ref.get()
+        if existing is None:
+            log.warning(f"Experiment '{name}' not found in Firebase — nothing to delete.")
+        else:
+            ref.delete()
+            log.info(f"Deleted /scanner/experiments/{name} ✓")
+    elif args.update_returns:
         update_all_returns()
     else:
         specific = date.fromisoformat(args.date) if args.date else None
