@@ -3992,10 +3992,12 @@ function buildSugCard(s, idx) {
   // Accept button (only if we have a patchable param)
   var acceptHtml = '';
   if (s.patch) {
+    var dirStr   = isGood ? 'boost' : 'reduce';
+    var btnLabel = isGood ? '&#8593; Accept: raise to ' : '&#8595; Accept: reduce to ';
     acceptHtml = '<div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
       + '<button class="btn btn-approve" style="padding:6px 16px;font-size:12px;" '
-      + 'onclick="acceptSuggestion(\'' + cardId + '\',\'' + s.param + '\',' + s.proposedPts + ',\'' + s.factor + '\',\'' + (isGood?'boost':'reduce') + '\')">'
-      + (isGood ? '&#8593; Accept: raise to ' : '&#8595; Accept: reduce to ') + s.proposedPts + 'pts</button>'
+      + 'onclick="acceptSuggestion(\'' + cardId + '\',\'' + s.param + '\',' + s.proposedPts + ',\'' + s.factor + '\',\'' + dirStr + '\')">'
+      + btnLabel + s.proposedPts + 'pts</button>'
       + '<span style="font-size:11px;color:var(--muted)">Queues a change to live_scanner.py · run <code>python ai_optimizer.py --apply</code> on VM to apply</span>'
       + '</div>';
   }
