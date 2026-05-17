@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.0.9"
+VERSION = "v4.1.0"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -1838,12 +1838,6 @@ var fdb = firebase.database();
           (win = positive return in selected window)
         </span>
       </h2>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:var(--muted);">Layer:</span>
-        <button class="sort-btn active" id="sig-all"  onclick="setSigLayer('all')">All picks</button>
-        <button class="sort-btn"        id="sig-tech" onclick="setSigLayer('tech')">&#128202; Quality leaders</button>
-        <button class="sort-btn"        id="sig-cat"  onclick="setSigLayer('cat')">&#127807; Setup leaders</button>
-      </div>
       <div id="signal-grid"></div>
       <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin:16px 0 10px;">&#128279; Top Signal Combinations</div>
       <div class="signal-grid" id="signal-grid-combos"></div>
