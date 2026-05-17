@@ -9,10 +9,11 @@ Last updated: 2026-05-16 — v4.0.0
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| `app.py` (Flask app) | **v4.3.0** | Optimizer: Accept button queues weight change to live_scanner.py |
-| `backtest.py` | **v4_quality_setup** | `SCORING_VERSION` constant |
+| `app.py` (Flask app) | **v4.3.1** | Optimizer: full auto-apply flow with localStorage state |
+| `backtest.py` | **v4_quality_setup** | Atomic cache writes, ThreadPoolExecutor fix |
+| `ai_optimizer.py` | — | Auto-applies stat suggestions + restarts scanner in --check-and-run |
 | `smart_money.py` | — | No version constant; track via git |
-| Last updated | **2026-05-17** | v4.2.0 |
+| Last updated | **2026-05-17** | v4.3.1 |
 
 ### Version bump rules
 - **Patch** (v4.0.**x**): bug fix, UI tweak, copy change
@@ -159,7 +160,7 @@ Runs on GCP VM. Every market day:
 `set()` replaces the entire `/scanner` node and **wipes all history**.
 
 ### `backtest.py` (SCORING_VERSION: v4_quality_setup)
-Reconstructs historical scanner signals. Experiment framework isolates runs.
+Reconstructs historical scanner signals. Experiment framework isolates runs. Atomic cache writes: writes to `.price_cache.tmp` then renames to `.price_cache.pkl` (atomic on Linux/macOS, prevents corruption on kill). ThreadPoolExecutor fix: uses manual executor + `shutdown(wait=False)` to abandon hung yfinance threads immediately instead of blocking on exit. Batch size 25 tickers, 90s timeout.
 
 ```bash
 # Production
@@ -210,18 +211,23 @@ python ai_optimizer.py --check-and-run   # cron mode
 python ai_optimizer.py --apply           # apply approved rec
 ```
 
+`--check-and-run` now: (1) auto-applies any pending stat suggestions from Firebase `/scanner/optimizer_suggestions`, (2) restarts `live_scanner.py` via watchdog if applied, (3) THEN checks for AI analysis requests. `apply_stat_suggestions()` returns True/False. `PATCH_PATTERNS` use `ta+=` to match actual `live_scanner.py` variable names.
+
 ### `smart_money.py`
 - ARK holdings (ETF filings from ark-funds.com)
 - Insider buys (Form 4 from SEC EDGAR — buys > $100K)
 - Activist filings (13D/13G)
 - 13F institutional holdings (major hedge funds)
 
-### `app.py` (VERSION: v4.0.0)
+### `app.py` (VERSION: v4.3.1)
 Flask web app on Vercel. Key routes:
 - `GET /` — live dashboard
 - `GET /analytics` — historical picks (experiment-aware)
 - `GET /sentiment` — news sentiment
 - `GET /smart_money` — smart money
+- `GET /optimizer` — optimizer tab with full auto-apply flow
+
+Optimizer tab: single consolidated suggestion card with one Accept button. Writes suggestions directly via Firebase JS SDK (`fdb.ref('/scanner/optimizer_suggestions/').set()`). localStorage tracks "queued" state across refreshes. Shows Accept / Queued / Applied states based on localStorage and Firebase.
 
 ### `score_patch.py`
 Patches scores in Firebase without full rescan.
@@ -268,6 +274,13 @@ Shared constants (SCORE_READY=85, SCORE_WATCH=70, etc.)
 ### Smart Money (/smart_money)
 - ARK + insider + activist + 13F
 - Top Conviction: tickers in multiple smart money sources
+
+### Optimizer (/optimizer)
+- Statistical factor analysis showing which signals predict winners
+- Generates a consolidated "Recommended Scoring Changes" card with one Accept button
+- Accepting suggestions writes directly to Firebase `/scanner/optimizer_suggestions` via JS SDK (avoids 401 auth issues with Flask REST API)
+- VM cron (`ai_optimizer.py --check-and-run`, every 5 min) auto-applies pending suggestions, patches `live_scanner.py`, and restarts the scanner
+- localStorage tracks accepted state across page refreshes; clears when Firebase confirms `applied=true`
 
 ---
 
@@ -358,6 +371,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 | Insider scraper DNS failures | Transient GCP VM network issue. ~300 filing cap helps. |
 | Fundamentals in backtest | Always 0 (no per-date yfinance fundamental data) |
 | AI Analysis | Requires Anthropic credits before it can run |
+| Firebase write auth (REST API) | ✅ Fixed — Optimizer now writes via JS SDK client-side, bypassing Flask auth issues. Firebase rules updated to allow `.write: true` on `/scanner/optimizer_suggestions` and related paths. |
 
 ---
 
@@ -388,6 +402,20 @@ ANTHROPIC_API_KEY=sk-ant-...
 - Each Flask route has its own `<script>` block — functions don't share scope
 - Always duplicate score calculation functions in both dashboard and analytics
 
+### ThreadPoolExecutor + timeout trap
+- `with ThreadPoolExecutor() as ex:` calls `shutdown(wait=True)` on exit — defeats timeout logic
+- Fix: manual executor + `shutdown(wait=False)` to abandon hung threads
+
+### Atomic file writes
+- Writing large pickles: process kill mid-write corrupts the file
+- Fix: write to `.tmp` then `os.rename()` — atomic on Linux/macOS
+
+### Firebase rules vs REST API
+- Flask server REST API calls use no auth token → 401 on paths requiring auth
+- Firebase JS SDK in browser handles auth automatically
+- Solution: client-side writes via `fdb.ref().set()` for user-triggered actions
+- Always add explicit `.write: true` rules for paths the web app needs to write to
+
 ---
 
 ## 13. Pending / Future Work
@@ -396,5 +424,6 @@ ANTHROPIC_API_KEY=sk-ant-...
 - [ ] If v4 validated → update Status labels (BUILDING/WATCH/READY) to use Buy Now thresholds
 - [ ] If v4 validated → merge fix/scanner-bugs → main (promote to production)
 - [ ] Congressional trading: consider paid API (Quiver Quantitative)
-- [ ] Test "Approve" flow end-to-end: approve AI rec → run `--apply` → verify live_scanner.py patched
+- [x] Test "Approve" flow end-to-end: approve AI rec → run `--apply` → verify live_scanner.py patched ✅
 - [ ] Add Anthropic credits to enable AI analysis button
+- [ ] Apply same Firebase rules update to production database
