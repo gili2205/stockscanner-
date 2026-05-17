@@ -9,10 +9,10 @@ Last updated: 2026-05-16 — v4.0.0
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| `app.py` (Flask app) | **v4.1.0** | Remove layer filter from signals section |
+| `app.py` (Flask app) | **v4.2.0** | Optimizer: data-backed suggestions, advisory only |
 | `backtest.py` | **v4_quality_setup** | `SCORING_VERSION` constant |
 | `smart_money.py` | — | No version constant; track via git |
-| Last updated | **2026-05-17** | — |
+| Last updated | **2026-05-17** | v4.2.0 |
 
 ### Version bump rules
 - **Patch** (v4.0.**x**): bug fix, UI tweak, copy change

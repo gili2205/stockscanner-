@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.1.0"
+VERSION = "v4.2.0"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -3708,17 +3708,19 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .edge-hurts{background:#3d1a1a;color:var(--red);}
 
 /* Suggestions */
-.suggestions{display:flex;flex-direction:column;gap:8px;margin-top:20px;}
-.suggestion-item{background:var(--bg3);border-radius:10px;padding:14px 16px;border:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
-.sug-factor{flex:1;min-width:180px;}
+.suggestions{display:flex;flex-direction:column;gap:8px;}
+.sug-section-hdr{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:4px 0;border-bottom:1px solid var(--border);margin:16px 0 8px;}
+.suggestion-item{background:var(--bg3);border-radius:10px;padding:14px 16px;border:1px solid var(--border);}
+.sug-top{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+.sug-factor{flex:1;min-width:160px;}
 .sug-factor-name{font-size:13px;font-weight:600;}
-.sug-factor-reason{font-size:11px;color:var(--muted);margin-top:3px;}
-.sug-change{display:flex;align-items:center;gap:8px;flex-shrink:0;}
-.val-chip{padding:4px 10px;border-radius:6px;font-size:13px;font-weight:700;font-family:monospace;}
-.val-cur{background:var(--bg);color:var(--muted);}
-.val-up{background:#1a3d2b;color:var(--green);}
-.val-down{background:#3d1a1a;color:var(--red);}
-.val-arrow{color:var(--muted);font-size:12px;}
+.sug-factor-comp{font-size:11px;color:var(--muted);margin-top:2px;}
+.sug-pills{display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0;}
+.dpill{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--border);color:var(--muted);white-space:nowrap;}
+.dpill.g{background:#1a3d2b;color:var(--green);border-color:#27ae6044;}
+.dpill.r{background:#3d1a1a;color:var(--red);border-color:#e74c3c44;}
+.dpill.a{background:#2d1f0a;color:var(--amber);border-color:#e67e2244;}
+.sug-advice{font-size:12px;line-height:1.5;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
 
 /* Changes table (AI section) */
 .changes-table{width:100%;border-collapse:collapse;}
@@ -3795,42 +3797,27 @@ code{background:var(--bg);padding:2px 6px;border-radius:4px;font-family:monospac
 firebase.initializeApp(FIREBASE_CONFIG);
 var fdb = firebase.database();
 
-// Current default weights (mirrors live_scanner.py + ai_optimizer.py)
-var DEFAULT_WEIGHTS = {
-  breakout_momentum_max:  28,
-  breakout_ema_full:      22,
-  breakout_ema_partial:   12,
-  breakout_hh_hl_strong:   6,
-  breakout_hh_hl_ok:       3,
-  breakout_atr_max:       12,
-  breakout_vol_max:        8,
-  breakout_dist_max:      18,
-  breakout_liquidity_max:  7,
-  penalty_weak_ema:       18,
-  penalty_far_dist:       12,
-  penalty_neg_mom:        12,
-  penalty_high_vol_atr:    8,
-  threshold_ready:        72,
-  threshold_watch:        55
-};
-
-// Factor name → weight key mapping
-var FACTOR_WEIGHT_MAP = {
-  'EMA stack = FULL':       'breakout_ema_full',
-  'EMA stack = PARTIAL':    'breakout_ema_partial',
-  'EMA stack = WEAK':       'penalty_weak_ema',
-  'Vol dry ≤ 50%':     'breakout_vol_max',
-  'Vol dry ≤ 70%':     'breakout_vol_max',
-  'ATR ≤ 0.25':        'breakout_atr_max',
-  'ATR ≤ 0.35':        'breakout_atr_max',
-  'HH/HL ≥ 0.85':      'breakout_hh_hl_strong',
-  'HH/HL ≥ 0.70':      'breakout_hh_hl_ok',
-  'Momentum 1M ≥ +15%':'breakout_momentum_max',
-  'Momentum 1M ≥ +8%': 'breakout_momentum_max',
-  'Dist ≤ 1%':         'breakout_dist_max',
-  'Dist ≤ 3%':         'breakout_dist_max',
-  'Status = READY':         'threshold_ready',
-  'Status = WATCH':         'threshold_watch'
+// Factor name → v4 scoring component info
+// Maps optimizer.py factor names to their v4 Quality/Setup score components
+var FACTOR_V4_MAP = {
+  'EMA stack = FULL':    {component:'Setup: EMA Stack',          score:'setup',   maxPts:20, desc:'Full EMA alignment (20pts in Setup score)'},
+  'EMA stack = PARTIAL': {component:'Setup: EMA Stack',          score:'setup',   maxPts:10, desc:'Partial EMA alignment (10pts in Setup score)'},
+  'EMA stack = WEAK':    {component:'Setup: EMA Stack',          score:'setup',   maxPts:2,  desc:'Weak EMA — scores only 2pts; hurts Setup'},
+  'Vol dry ≤ 50%':  {component:'Setup: Vol Contraction',    score:'setup',   maxPts:18, desc:'Strong vol contraction (max 18pts in Setup)'},
+  'Vol dry ≤ 70%':  {component:'Setup: Vol Contraction',    score:'setup',   maxPts:12, desc:'Moderate vol contraction (12pts in Setup)'},
+  'ATR ≤ 0.25':     {component:'Setup: ATR Coil',           score:'setup',   maxPts:15, desc:'Low ATR coil (15pts in Setup score)'},
+  'ATR ≤ 0.35':     {component:'Setup: ATR Coil',           score:'setup',   maxPts:10, desc:'Moderate ATR coil (10pts in Setup score)'},
+  'HH/HL ≥ 0.85':   {component:'Quality + Setup: HH/HL',   score:'both',    maxPts:10, desc:'Strong HH/HL (10pts Quality, 8pts Setup)'},
+  'HH/HL ≥ 0.70':   {component:'Quality + Setup: HH/HL',   score:'both',    maxPts:7,  desc:'Moderate HH/HL (7pts Quality, 5pts Setup)'},
+  'Momentum 1M ≥ +15%': {component:'Quality: Momentum 1M', score:'quality', maxPts:13, desc:'Strong 1M momentum (max 13pts in Quality)'},
+  'Momentum 1M ≥ +8%':  {component:'Quality: Momentum 1M', score:'quality', maxPts:10, desc:'Moderate 1M momentum (10pts in Quality)'},
+  'Dist ≤ 1%':      {component:'Setup: Distance to Level',  score:'setup',   maxPts:14, desc:'Very close to breakout level (max 14pts in Setup)'},
+  'Dist ≤ 3%':      {component:'Setup: Distance to Level',  score:'setup',   maxPts:6,  desc:'Near breakout level (6pts in Setup)'},
+  'RSI ≤ 55':       {component:'Setup: RSI',                score:'setup',   maxPts:8,  desc:'Low RSI = not extended (max 8pts in Setup)'},
+  'RSI ≤ 65':       {component:'Setup: RSI',                score:'setup',   maxPts:6,  desc:'Moderate RSI (6pts in Setup)'},
+  'Vol ratio ≥ 3x': {component:'Setup: Vol Ratio',          score:'setup',   maxPts:7,  desc:'High relative volume (max 7pts in Setup)'},
+  'Status = READY':      {component:'Buy Now ≥ 65',         score:'meta',    maxPts:null, desc:'Stock scored READY threshold'},
+  'Status = WATCH':      {component:'Buy Now 40–64',        score:'meta',    maxPts:null, desc:'Stock scored WATCH threshold'}
 };
 
 var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null;
@@ -3889,35 +3876,88 @@ function statusBadge(status, applied) {
   return '<span class="badge '+cls+'">'+txt+'</span>';
 }
 
-// ── Derive optimizer suggestions from factor analysis ─────────────────────────
+// ── Derive optimizer suggestions from factor analysis (v4) ────────────────────
+// Returns two arrays: reinforce (positive lift) and reduce (negative lift).
+// Each entry carries the full data from optimizer.py so the UI can back up
+// every suggestion with actual numbers — no auto-apply, advisory only.
 function deriveOptSuggestions(factors) {
-  var seen = {}, suggestions = [];
+  var seen = {};
+  var reinforce = [], reduce = [];
   factors.forEach(function(f) {
-    var lift = parseFloat(f.wr_lift) || 0;
-    var wKey = FACTOR_WEIGHT_MAP[f.factor];
-    if (!wKey || seen[wKey]) return;
-    seen[wKey] = true;
-    var cur = DEFAULT_WEIGHTS[wKey];
-    if (cur == null) return;
-    var proposed = cur;
-    var reason = '';
-    if (lift >= 10) {
-      proposed = Math.round(cur * 1.25);
-      reason = 'Strong predictor (+' + lift.toFixed(1) + '% WR lift) — increase weight by 25%';
-    } else if (lift >= 5) {
-      proposed = Math.round(cur * 1.15);
-      reason = 'Mild predictor (+' + lift.toFixed(1) + '% WR lift) — increase weight by 15%';
-    } else if (lift <= -10) {
-      proposed = Math.round(cur * 0.70);
-      reason = 'Hurts performance (' + lift.toFixed(1) + '% WR drag) — decrease weight by 30%';
-    } else if (lift <= -5) {
-      proposed = Math.round(cur * 0.80);
-      reason = 'Drags performance (' + lift.toFixed(1) + '% WR drag) — decrease weight by 20%';
-    } else { return; }
-    if (proposed === cur) return;
-    suggestions.push({weight_key: wKey, factor: f.factor, current_value: cur, proposed_value: proposed, reason: reason, wr_lift: lift});
+    var lift  = parseFloat(f.wr_diff || f.wr_lift) || 0;
+    var n     = parseInt(f.n_with || f.n) || 0;
+    var info  = FACTOR_V4_MAP[f.factor];
+    if (!info || seen[f.factor]) return;
+    if (Math.abs(lift) < 5 || n < 10) return;  // only meaningful signals
+    seen[f.factor] = true;
+
+    var entry = {
+      factor:    f.factor,
+      component: info.component,
+      score:     info.score,
+      maxPts:    info.maxPts,
+      desc:      info.desc,
+      lift:      lift,
+      wr_with:   parseFloat(f.wr_with)   || null,
+      wr_wout:   parseFloat(f.wr_without || f.wr_wout) || null,
+      avg_with:  parseFloat(f.avg_ret_with || f.avg_with) || null,
+      n:         n
+    };
+
+    if (lift >= 5)  reinforce.push(entry);
+    else            reduce.push(entry);
   });
-  return suggestions;
+
+  // Sort strongest first within each group
+  reinforce.sort(function(a,b){ return b.lift - a.lift; });
+  reduce.sort(function(a,b){ return a.lift - b.lift; });
+  return {reinforce: reinforce, reduce: reduce};
+}
+
+function buildSugCard(s) {
+  var isGood = s.lift >= 0;
+  var borderCol = isGood ? '#27ae6033' : '#e74c3c33';
+  var liftCol   = isGood ? 'var(--green)' : 'var(--red)';
+  var liftSign  = isGood ? '+' : '';
+
+  // Build advice text
+  var advice = '';
+  if (s.lift >= 15) {
+    advice = '&#11088; <strong>Strong predictor.</strong> This signal adds '
+      + s.lift.toFixed(1) + '% to win rate. Its current weight ('
+      + (s.maxPts != null ? s.maxPts + 'pts' : 'threshold') + ') is justified. '
+      + 'Prioritize stocks that have this signal.';
+  } else if (s.lift >= 5) {
+    advice = '&#128994; <strong>Positive predictor.</strong> Win rate is '
+      + s.lift.toFixed(1) + '% higher with this signal. '
+      + 'Consider keeping or slightly increasing its weight in the '
+      + (s.score === 'quality' ? 'Quality' : s.score === 'setup' ? 'Setup' : 'Quality + Setup') + ' score.';
+  } else if (s.lift <= -15) {
+    advice = '&#128308; <strong>Hurts performance.</strong> Stocks with this signal win '
+      + Math.abs(s.lift).toFixed(1) + '% <em>less</em> often. '
+      + (s.maxPts != null
+        ? 'Its ' + s.maxPts + 'pt weight in the scoring may be overstated — consider reducing or removing it.'
+        : 'This threshold may be filtering out better setups.');
+  } else {
+    advice = '&#9888; <strong>Drags performance.</strong> Win rate is '
+      + Math.abs(s.lift).toFixed(1) + '% lower with this signal present. '
+      + 'Review whether its current weight reflects its actual predictive value.';
+  }
+
+  var h = '<div class="suggestion-item" style="border-color:'+borderCol+'">';
+  h += '<div class="sug-top">';
+  h += '<div class="sug-factor"><div class="sug-factor-name">'+s.factor+'</div>';
+  h += '<div class="sug-factor-comp">'+s.component+'</div></div>';
+  h += '<div class="sug-pills">';
+  if (s.wr_with  != null) h += '<span class="dpill '+(isGood?'g':'r')+'">WR with: '+s.wr_with.toFixed(1)+'%</span>';
+  if (s.wr_wout  != null) h += '<span class="dpill">WR without: '+s.wr_wout.toFixed(1)+'%</span>';
+  h += '<span class="dpill '+(isGood?'g':'r')+'">Lift: '+liftSign+s.lift.toFixed(1)+'%</span>';
+  if (s.avg_with != null) h += '<span class="dpill '+(s.avg_with>=0?'g':'r')+'">Avg ret: '+(s.avg_with>=0?'+':'')+s.avg_with.toFixed(2)+'%</span>';
+  h += '<span class="dpill">N: '+s.n+'</span>';
+  h += '</div></div>';
+  h += '<div class="sug-advice" style="color:'+liftCol+'">'+advice+'</div>';
+  h += '</div>';
+  return h;
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
@@ -3982,34 +4022,27 @@ function renderPage() {
       h += '</tbody></table></div>';
     }
 
-    // Auto-generated suggestions
+    // Data-backed suggestions (advisory only — no auto-apply)
     var sugs = deriveOptSuggestions(factors);
-    if (sugs.length) {
-      h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 10px;">Auto-generated Suggestions ('+sugs.length+')</div>';
-      h += '<div class="suggestions" id="opt-sugs">';
-      sugs.forEach(function(s) {
-        var up = s.proposed_value > s.current_value;
-        h += '<div class="suggestion-item">';
-        h += '<div class="sug-factor"><div class="sug-factor-name">'+s.weight_key+'</div>';
-        h += '<div class="sug-factor-reason">'+s.reason+'</div></div>';
-        h += '<div class="sug-change">';
-        h += '<span class="val-chip val-cur">'+s.current_value+'</span>';
-        h += '<span class="val-arrow">'+(up?'&#8593;':'&#8595;')+'</span>';
-        h += '<span class="val-chip '+(up?'val-up':'val-down')+'">'+s.proposed_value+'</span>';
-        h += '</div></div>';
-      });
-      h += '</div>';
-    } else {
-      h += '<div style="margin-top:20px;padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions — no factor has &gt;5% or &lt;-5% win-rate lift yet. Run more backtest history for stronger signals.</div>';
-    }
+    var totalSugs = sugs.reinforce.length + sugs.reduce.length;
+    if (totalSugs > 0) {
+      h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 4px;">Scoring Suggestions — based on '+(stats.total_picks||'N')+" picks &middot; advisory only</div>";
+      h += '<div style="font-size:11px;color:var(--muted);margin-bottom:14px;">Each suggestion is backed by actual win-rate data. These are observations, not automatic changes — apply your own judgment.</div>';
 
-    // Approve/reject for optimizer suggestions
-    if (sugs.length) {
-      h += '<div class="action-bar" id="opt-action-bar">';
-      h += '<button class="btn btn-approve" onclick="approveOptSugs()">&#10003; Approve Suggestions</button>';
-      h += '<button class="btn btn-reject" onclick="rejectOptSugs()">&#10005; Dismiss</button>';
-      h += '<span class="action-note">Approving queues these changes. Then run <code>python ai_optimizer.py --apply</code> on the VM to patch live_scanner.py.</span>';
-      h += '</div>';
+      if (sugs.reinforce.length) {
+        h += '<div class="sug-section-hdr" style="color:var(--green)">&#9650; Reinforce — strong predictors (keep or boost weight)</div>';
+        h += '<div class="suggestions">';
+        sugs.reinforce.forEach(function(s){ h += buildSugCard(s); });
+        h += '</div>';
+      }
+      if (sugs.reduce.length) {
+        h += '<div class="sug-section-hdr" style="color:var(--red)">&#9660; Review — signals that drag performance (consider reducing weight)</div>';
+        h += '<div class="suggestions">';
+        sugs.reduce.forEach(function(s){ h += buildSugCard(s); });
+        h += '</div>';
+      }
+    } else {
+      h += '<div style="margin-top:20px;padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions yet — need factors with &gt;5% win-rate lift and at least 10 picks. Run more backtest history for stronger signals.</div>';
     }
   }
   h += '</div></div>'; // section-body + section
@@ -4143,32 +4176,6 @@ async function triggerAiRun() {
 }
 
 // ── Optimizer approve/reject ──────────────────────────────────────────────────
-async function approveOptSugs() {
-  var sugs = deriveOptSuggestions(getLatestFactors());
-  if (!sugs.length) return;
-  var weights = Object.assign({}, DEFAULT_WEIGHTS);
-  sugs.forEach(function(s) { weights[s.weight_key] = s.proposed_value; });
-  document.getElementById('opt-action-bar').innerHTML = '<span style="color:var(--muted)">Approving...</span>';
-  try {
-    var resp = await fetch('/api/optimizer-suggestions/approve', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({weights: weights, label: 'Statistical optimizer suggestions'})
-    });
-    var data = await resp.json();
-    if (data.ok) {
-      document.getElementById('opt-action-bar').innerHTML =
-        '<span class="badge badge-approved">&#10003; Approved</span>' +
-        '<span class="action-note" style="margin-left:10px">Run <code>python ai_optimizer.py --apply</code> on the VM to apply.</span>';
-    } else { alert('Error: '+(data.error||'Unknown')); }
-  } catch(e) { alert('Network error: '+e.message); }
-}
-
-function rejectOptSugs() {
-  document.getElementById('opt-action-bar').innerHTML =
-    '<span class="badge badge-rejected">&#10005; Dismissed</span>';
-}
-
 // ── AI approve/reject ─────────────────────────────────────────────────────────
 async function approveAiRec() {
   document.getElementById('ai-action-bar').innerHTML = '<span style="color:var(--muted)">Approving...</span>';
