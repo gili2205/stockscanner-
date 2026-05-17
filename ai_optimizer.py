@@ -546,7 +546,7 @@ def apply_stat_suggestions():
 
     if not applied_ids:
         log.warning("No stat suggestions could be applied automatically.")
-        return
+        return False
 
     scanner_path.write_text(code)
     log.info(f"live_scanner.py updated with {len(applied_ids)} stat suggestion(s).")
@@ -558,7 +558,33 @@ def apply_stat_suggestions():
             "applied_at": datetime.now().isoformat()
         })
     log.info("Marked suggestions as applied in Firebase.")
-    log.info("Next: restart live_scanner.py, then run optimizer.py to verify impact.")
+    return True
+
+
+def restart_scanner():
+    """
+    Kill live_scanner.py so the watchdog cron restarts it with updated weights.
+    The watchdog runs every 5 min: pgrep -f live_scanner.py || sudo bash start.sh restart
+    """
+    import subprocess
+    log.info("Restarting live_scanner.py so new scoring weights take effect...")
+    try:
+        result = subprocess.run(
+            ["pkill", "-f", "live_scanner.py"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            log.info("Scanner process killed — watchdog will restart it within 5 minutes.")
+        else:
+            # Try sudo version as fallback
+            result2 = subprocess.run(
+                ["sudo", "bash", "/home/scanner/start.sh", "restart"],
+                capture_output=True, text=True, timeout=30
+            )
+            log.info(f"start.sh restart: {result2.stdout.strip() or 'done'}")
+    except Exception as e:
+        log.error(f"Could not restart scanner automatically: {e}")
+        log.info("Please restart manually: sudo bash /home/scanner/start.sh restart")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -662,26 +688,37 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.check_and_run:
+        did_something = False
+
+        # ── 1. Auto-apply any pending stat suggestions (accepted in the UI) ──
+        stat_applied = apply_stat_suggestions()
+        if stat_applied:
+            did_something = True
+            restart_scanner()   # kill scanner; watchdog restarts with new weights
+
+        # ── 2. Run AI analysis if user requested it in the UI ─────────────────
         flag_ref = db.reference("/scanner/run_ai_requested")
         flag = flag_ref.get()
-        if not flag or flag.get("status") != "pending":
-            log.info("No pending AI analysis request — nothing to do.")
-            sys.exit(0)
-        log.info("Pending AI request found — starting analysis...")
-        flag_ref.update({"status": "running", "started_at": datetime.now().isoformat()})
-        try:
-            rec = run_analysis(window="1m")
-            if rec:
-                flag_ref.set({"status": "done", "completed_at": datetime.now().isoformat()})
-                log.info("AI analysis complete. Flag reset to 'done'.")
-            else:
-                flag_ref.set({"status": "error", "error": "Not enough pick data",
+        if flag and flag.get("status") == "pending":
+            log.info("Pending AI request found — starting analysis...")
+            flag_ref.update({"status": "running", "started_at": datetime.now().isoformat()})
+            try:
+                rec = run_analysis(window="1m")
+                if rec:
+                    flag_ref.set({"status": "done", "completed_at": datetime.now().isoformat()})
+                    log.info("AI analysis complete.")
+                    did_something = True
+                else:
+                    flag_ref.set({"status": "error", "error": "Not enough pick data",
+                                  "completed_at": datetime.now().isoformat()})
+                    log.warning("Analysis skipped — not enough data.")
+            except Exception as e:
+                flag_ref.set({"status": "error", "error": str(e),
                               "completed_at": datetime.now().isoformat()})
-                log.warning("Analysis skipped — not enough data.")
-        except Exception as e:
-            flag_ref.set({"status": "error", "error": str(e),
-                          "completed_at": datetime.now().isoformat()})
-            log.error(f"AI analysis failed: {e}")
+                log.error(f"AI analysis failed: {e}")
+        elif not did_something:
+            log.info("Nothing pending — no stat suggestions, no AI request.")
+
         sys.exit(0)
 
     windows = ["1w", "1m", "2m", "3m"] if args.all_windows else [args.window]
