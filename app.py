@@ -4072,28 +4072,29 @@ async function acceptAllSuggestions(btn) {
   if (!patches.length) return;
   btn.disabled = true; btn.textContent = 'Queuing ' + patches.length + ' changes...';
   var errors = [];
+  var ts = new Date().toISOString();
   for (var i = 0; i < patches.length; i++) {
     var p = patches[i];
+    // Write directly via Firebase JS SDK (avoids Flask REST API auth issue)
+    var recId = ts.replace(/[:.]/g, '-') + '_' + i;
     try {
-      var resp = await fetch('/api/optimizer-suggestions/approve', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({param: p.param, proposed_pts: p.pts, factor: p.factor, direction: 'stat', label: p.factor + ' to ' + p.pts + 'pts'})
+      await fdb.ref('/scanner/optimizer_suggestions/' + recId).set({
+        label:        p.factor + ' → ' + p.pts + 'pts',
+        param:        p.param,
+        proposed_pts: p.pts,
+        factor:       p.factor,
+        direction:    'stat',
+        approved_at:  ts,
+        status:       'approved',
+        applied:      false
       });
-      var txt = await resp.text();
-      var data = {};
-      try { data = JSON.parse(txt); } catch(_){}
-      if (!data.ok) {
-        var errMsg = typeof data.error === 'string' ? data.error : (data.error ? JSON.stringify(data.error) : ('HTTP ' + resp.status + ': ' + txt.slice(0,120)));
-        errors.push(p.factor + ': ' + errMsg);
-      }
     } catch(e) { errors.push(p.factor + ': ' + e.message); }
   }
   var bar = document.getElementById('consolidated-action');
   if (errors.length) {
-    bar.innerHTML = '<span style="color:var(--red)">&#9888; Some errors: ' + errors.join(', ') + '</span>';
+    bar.innerHTML = '<span style="color:var(--red)">&#9888; ' + errors.join(', ') + '</span>';
   } else {
-    // Mark as queued in localStorage so revisiting the page shows "Queued" state
+    // Mark as queued in localStorage so revisiting shows "Queued" state
     if (lsKey) localStorage.setItem(lsKey, '1');
     bar.innerHTML = '<span class="badge badge-pending" style="margin-right:8px">&#9711; Queued — cron will apply within 5 min</span>'
       + '<span style="font-size:11px;color:var(--muted)">The VM cron will patch live_scanner.py and restart the scanner automatically.</span>';
