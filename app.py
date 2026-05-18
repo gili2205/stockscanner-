@@ -4318,17 +4318,31 @@ async function triggerAiRun() {
 async function approveAiRec() {
   document.getElementById('ai-action-bar').innerHTML = '<span style="color:var(--muted)">Approving...</span>';
   try {
-    var resp = await fetch('/api/recommendations/'+currentAiId+'/approve', {method:'POST'});
-    var data = await resp.json();
-    if (data.ok) { aiRecs[currentAiId].status = 'approved'; renderPage(); }
-    else { alert('Error: '+(data.error||'Unknown')); renderPage(); }
-  } catch(e) { alert('Network error: '+e.message); renderPage(); }
+    var ts = new Date().toISOString();
+    var rec = aiRecs[currentAiId] || {};
+    // Write status directly via Firebase JS SDK (Flask REST API has no auth token)
+    await fdb.ref('/scanner/ai_recommendations/' + currentAiId).update({
+      status: 'approved',
+      approved_at: ts
+    });
+    // Also store proposed weights for reference
+    if (rec.proposed_weights) {
+      await fdb.ref('/scanner/approved_weights').set(
+        Object.assign({}, rec.proposed_weights, {_approved_from: currentAiId, _approved_at: ts})
+      );
+    }
+    aiRecs[currentAiId].status = 'approved';
+    renderPage();
+  } catch(e) { alert('Error approving: ' + e.message); renderPage(); }
 }
 
 async function rejectAiRec() {
   if (!confirm('Reject this recommendation?')) return;
   try {
-    await fetch('/api/recommendations/'+currentAiId+'/reject', {method:'POST'});
+    await fdb.ref('/scanner/ai_recommendations/' + currentAiId).update({
+      status: 'rejected',
+      rejected_at: new Date().toISOString()
+    });
     aiRecs[currentAiId].status = 'rejected';
     renderPage();
   } catch(e) { alert('Network error: '+e.message); }
