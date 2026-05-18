@@ -3684,6 +3684,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .badge-pending{background:#1a2a3d;color:var(--blue);border:1px solid #3498db44;}
 .badge-applied{background:#1a3d2b;color:var(--green);border:1px solid #27ae6044;}
 
+/* AI rec delete button */
+.btn-delete-rec{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:2px 6px;border-radius:4px;margin-left:auto;opacity:0.5;transition:opacity .15s;}
+.btn-delete-rec:hover{opacity:1;color:var(--red);}
+/* AI rec expanded detail */
+.ai-detail{padding:14px 4px 4px;border-top:1px solid var(--border);margin-top:10px;}
+
 /* Empty state */
 .empty-state{text-align:center;padding:40px 24px;color:var(--muted);}
 .empty-state h3{color:var(--text);font-size:15px;margin-bottom:8px;}
@@ -3864,8 +3870,8 @@ fdb.ref('/scanner/optimization_reports').on('value', function(snap) {
 
 fdb.ref('/scanner/ai_recommendations').on('value', function(snap) {
   aiRecs = snap.val() || {};
-  var ids = Object.keys(aiRecs).sort().reverse();
-  if (!currentAiId || !aiRecs[currentAiId]) currentAiId = ids[0] || null;
+  // Don't auto-expand any row — user clicks to expand
+  if (currentAiId && !aiRecs[currentAiId]) currentAiId = null;
   loaded.ai = true;
   checkReady();
 });
@@ -4211,93 +4217,103 @@ function renderPage() {
     h += '<p>Click <strong style="color:var(--purple)">Run AI Analysis</strong> above to generate your first recommendation.</p>';
     h += '<p style="margin-top:8px;font-size:11px;color:var(--muted)">Make sure ANTHROPIC_API_KEY is set in /home/scanner/.env on the VM.</p></div>';
   } else {
-    // History list if multiple
-    if (aiIds.length > 1) {
-      h += '<div class="hist-list">';
-      aiIds.slice(0,5).forEach(function(id) {
-        var r = aiRecs[id];
-        var d = r.win_rate_delta || 0;
-        h += '<div class="hist-item'+(id===currentAiId?' active':'')+'" data-id="'+id+'" onclick="selectAiRec(this.dataset.id)">';
-        h += '<span class="hist-ts">'+id.replace('_',' ').replace(/_/g,':')+'</span>';
-        h += '<span class="hist-sum">'+(r.window||'')+'w &middot; '+(r.claude_summary||'').substring(0,70)+'…</span>';
-        h += '<span class="hist-delta '+dc(d)+'">'+fmt(d,true)+' WR</span>';
+    // Rows — always visible, click to expand/collapse details
+    h += '<div class="hist-list">';
+    aiIds.forEach(function(id) {
+      var r = aiRecs[id];
+      var d = r.win_rate_delta || 0;
+      var st = r.status || 'pending';
+      var stLabel = r.applied ? '&#9679; Applied' : st === 'approved' ? '&#10003; Approved' : st === 'rejected' ? '&#10005; Rejected' : '&#9711; Pending';
+      var stCls   = r.applied ? 'badge-approved' : st === 'approved' ? 'badge-pending' : st === 'rejected' ? 'badge-rejected' : 'badge-pending';
+      var isOpen  = id === currentAiId;
+      h += '<div class="hist-item'+(isOpen?' active':'')+'" style="cursor:pointer">';
+      h += '<div style="display:flex;align-items:center;gap:10px;width:100%;" onclick="selectAiRec(\''+id+'\')">';
+      h += '<span class="hist-ts">'+id.replace('_',' ').replace(/_/g,':')+'</span>';
+      h += '<span class="hist-sum">'+(r.window||'1m')+'w &middot; '+(r.claude_summary||'').substring(0,65)+'…</span>';
+      h += '<span class="hist-delta '+dc(d)+'">'+fmt(d,true)+' WR</span>';
+      h += '<span class="badge '+stCls+'" style="font-size:10px;padding:2px 7px;white-space:nowrap">'+stLabel+'</span>';
+      h += '<button class="btn-delete-rec" onclick="event.stopPropagation();deleteAiRec(\''+id+'\')" title="Delete">&#128465;</button>';
+      h += '</div>';
+
+      // Expandable detail
+      if (isOpen) {
+        var cur  = (r.current_stats  || {}).all || {};
+        var proj = (r.projected_stats|| {}).all || {};
+        var wrD  = r.win_rate_delta  || 0;
+        var avgD = r.avg_return_delta || 0;
+        h += '<div class="ai-detail">';
+
+        // Stats comparison
+        h += '<div class="cmp-grid" style="margin-top:12px">';
+        h += '<div class="cmp-card cur"><div class="cmp-lbl">&#128202; Current</div><div class="cmp-val" style="color:var(--blue)">'+fmt(cur.win_rate,false)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(cur.avg_return)+' avg &middot; '+(cur.n||'—')+' picks</div></div>';
+        h += '<div class="cmp-card proj"><div class="cmp-lbl">&#128200; Projected</div><div class="cmp-val" style="color:var(--green)">'+fmt(proj.win_rate,false)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(proj.avg_return)+' avg &middot; '+(proj.n||'—')+' picks</div></div>';
+        h += '<div class="cmp-card delta"><div class="cmp-lbl">&#9654; Improvement</div><div class="cmp-val '+dc(wrD)+'" style="font-size:32px">'+fmt(wrD,true)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(avgD)+' avg ret</div></div>';
         h += '</div>';
-      });
-      h += '</div>';
-    }
 
-    var rec = aiRecs[currentAiId];
-    if (rec) {
-      var cur  = (rec.current_stats  || {}).all || {};
-      var proj = (rec.projected_stats|| {}).all || {};
-      var wrD  = rec.win_rate_delta  || 0;
-      var avgD = rec.avg_return_delta || 0;
-      var st   = rec.status || 'pending';
+        // Reasoning
+        if (r.claude_reasoning) {
+          h += '<div class="reasoning">'+r.claude_reasoning.replace(/\\n/g,'<br>')+'</div>';
+        }
 
-      // Summary pill + status
-      h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;">';
-      h += '<div style="background:var(--purple);color:#fff;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;">&#129504; '+(rec.claude_summary||'')+'</div>';
-      h += statusBadge(st, rec.applied);
-      if (rec.claude_confidence) h += '<span class="badge '+(rec.claude_confidence==='HIGH'?'badge-approved':rec.claude_confidence==='LOW'?'badge-rejected':'badge-pending')+'">'+rec.claude_confidence+' confidence</span>';
-      h += '</div>';
+        // Changes table
+        var changes = r.changes || [];
+        if (changes.length) {
+          h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:14px 0 8px;">Proposed Weight Changes ('+changes.length+')</div>';
+          h += '<table class="changes-table"><thead><tr><th>Weight Key</th><th>Current</th><th></th><th>Proposed</th><th>Reason</th></tr></thead><tbody>';
+          changes.forEach(function(ch) {
+            var up = ch.proposed_value > ch.current_value;
+            var same = ch.proposed_value === ch.current_value;
+            var cls = same ? 'val-cur' : up ? 'val-up' : 'val-down';
+            h += '<tr><td><strong>'+ch.weight_key+'</strong></td>';
+            h += '<td><span class="val-chip val-cur">'+ch.current_value+'</span></td>';
+            h += '<td style="text-align:center;color:var(--muted)">'+(same?'=':up?'&#8593;':'&#8595;')+'</td>';
+            h += '<td><span class="val-chip '+cls+'">'+ch.proposed_value+'</span></td>';
+            h += '<td><div class="reason-text">'+ch.reason+'</div></td></tr>';
+          });
+          h += '</tbody></table>';
+        }
 
-      // Stats comparison
-      h += '<div class="cmp-grid">';
-      h += '<div class="cmp-card cur"><div class="cmp-lbl">&#128202; Current</div><div class="cmp-val" style="color:var(--blue)">'+fmt(cur.win_rate,false)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(cur.avg_return)+' avg &middot; '+(cur.n||'—')+' picks</div></div>';
-      h += '<div class="cmp-card proj"><div class="cmp-lbl">&#128200; Projected</div><div class="cmp-val" style="color:var(--green)">'+fmt(proj.win_rate,false)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(proj.avg_return)+' avg &middot; '+(proj.n||'—')+' picks</div></div>';
-      h += '<div class="cmp-card delta"><div class="cmp-lbl">&#9654; Improvement</div><div class="cmp-val '+dc(wrD)+'" style="font-size:32px">'+fmt(wrD,true)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(avgD)+' avg ret</div></div>';
-      h += '</div>';
-
-      // Reasoning
-      if (rec.claude_reasoning) {
-        h += '<div class="reasoning">'+rec.claude_reasoning.replace(/\\n/g,'<br>')+'</div>';
+        // Action bar
+        h += '<div class="action-bar" id="ai-action-bar">';
+        if (st === 'pending') {
+          h += '<button class="btn btn-approve" onclick="approveAiRec()">&#10003; Approve</button>';
+          h += '<button class="btn btn-reject" onclick="rejectAiRec()">&#10005; Reject</button>';
+          h += '<span class="action-note">Approving queues changes — cron will apply automatically within 5 min.</span>';
+        } else if (st === 'approved' && !r.applied) {
+          h += '<button class="btn btn-disabled" disabled>&#10003; Approved</button>';
+          h += '<span class="action-note">&#9711; Queued — cron will apply automatically within 5 min.</span>';
+        } else if (r.applied) {
+          h += '<button class="btn btn-disabled" disabled>&#9679; Applied</button>';
+          if (r.applied_at) h += '<span class="action-note">Applied '+r.applied_at+'</span>';
+        } else {
+          h += '<button class="btn btn-disabled" disabled>&#10005; Rejected</button>';
+        }
+        h += '</div>';
+        h += '</div>'; // ai-detail
       }
-
-      // Changes table
-      var changes = rec.changes || [];
-      if (changes.length) {
-        h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:10px;">Proposed Weight Changes ('+changes.length+')</div>';
-        h += '<table class="changes-table"><thead><tr><th>Weight Key</th><th>Current</th><th></th><th>Proposed</th><th>Reason</th></tr></thead><tbody>';
-        changes.forEach(function(ch) {
-          var up = ch.proposed_value > ch.current_value;
-          var same = ch.proposed_value === ch.current_value;
-          var cls = same ? 'val-cur' : up ? 'val-up' : 'val-down';
-          h += '<tr>';
-          h += '<td><strong>'+ch.weight_key+'</strong></td>';
-          h += '<td><span class="val-chip val-cur">'+ch.current_value+'</span></td>';
-          h += '<td style="text-align:center;color:var(--muted)">'+(same?'=':up?'&#8593;':'&#8595;')+'</td>';
-          h += '<td><span class="val-chip '+cls+'">'+ch.proposed_value+'</span></td>';
-          h += '<td><div class="reason-text">'+ch.reason+'</div></td>';
-          h += '</tr>';
-        });
-        h += '</tbody></table>';
-      }
-
-      // Action bar
-      h += '<div class="action-bar" id="ai-action-bar">';
-      if (st === 'pending') {
-        h += '<button class="btn btn-approve" onclick="approveAiRec()">&#10003; Approve</button>';
-        h += '<button class="btn btn-reject" onclick="rejectAiRec()">&#10005; Reject</button>';
-        h += '<span class="action-note">Approving queues changes — cron will apply automatically within 5 min.</span>';
-      } else if (st === 'approved' && !rec.applied) {
-        h += '<button class="btn btn-disabled" disabled>&#10003; Approved</button>';
-        h += '<span class="action-note">&#9711; Queued — cron will apply automatically within 5 min.</span>';
-      } else if (rec.applied) {
-        h += '<button class="btn btn-disabled" disabled>&#9679; Applied</button>';
-        if (rec.applied_at) h += '<span class="action-note">Applied '+rec.applied_at+'</span>';
-      } else {
-        h += '<button class="btn btn-disabled" disabled>&#10005; Rejected</button>';
-        h += '<span class="action-note">Generate a new recommendation on the VM.</span>';
-      }
-      h += '</div>';
-    }
+      h += '</div>'; // hist-item
+    });
+    h += '</div>';
   }
 
   h += '</div></div>'; // section-body + section
   page.innerHTML = h;
 }
 
-function selectAiRec(id) { currentAiId = id; renderPage(); }
+function selectAiRec(id) {
+  currentAiId = (currentAiId === id) ? null : id; // toggle
+  renderPage();
+}
+
+async function deleteAiRec(id) {
+  if (!confirm('Delete this recommendation?')) return;
+  try {
+    await fdb.ref('/scanner/ai_recommendations/' + id).remove();
+    delete aiRecs[id];
+    if (currentAiId === id) currentAiId = null;
+    renderPage();
+  } catch(e) { alert('Error deleting: ' + e.message); }
+}
 
 // ── Trigger AI run ────────────────────────────────────────────────────────────
 async function triggerAiRun() {
