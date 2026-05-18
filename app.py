@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.3.1"
+VERSION = "v4.4.0"
 
 FIREBASE_CONFIGS = {
     "production": {
