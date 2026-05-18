@@ -3688,7 +3688,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .btn-delete-rec{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:2px 6px;border-radius:4px;margin-left:auto;opacity:0.5;transition:opacity .15s;}
 .btn-delete-rec:hover{opacity:1;color:var(--red);}
 /* AI rec expanded detail */
-.ai-detail{padding:14px 4px 4px;border-top:1px solid var(--border);margin-top:10px;}
+.ai-detail{padding:16px 4px 4px;border-top:1px solid var(--border);margin-top:10px;overflow:hidden;}
 
 /* Empty state */
 .empty-state{text-align:center;padding:40px 24px;color:var(--muted);}
@@ -3762,12 +3762,13 @@ code{background:var(--bg);padding:2px 6px;border-radius:4px;font-family:monospac
 
 /* History selector */
 .hist-list{display:flex;flex-direction:column;gap:6px;margin-bottom:20px;}
-.hist-item{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color .15s;}
+.hist-item{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;display:block;cursor:pointer;transition:border-color .15s;}
 .hist-item:hover{border-color:var(--blue);}
 .hist-item.active{border-color:var(--purple);}
-.hist-ts{font-size:11px;color:var(--muted);flex-shrink:0;width:150px;}
-.hist-sum{flex:1;font-size:12px;}
-.hist-delta{font-size:13px;font-weight:700;flex-shrink:0;}
+.hist-row{display:flex;align-items:center;gap:10px;width:100%;min-width:0;}
+.hist-ts{font-size:11px;color:var(--muted);flex-shrink:0;white-space:nowrap;}
+.hist-sum{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.hist-delta{font-size:13px;font-weight:700;flex-shrink:0;white-space:nowrap;}
 
 .fg{color:var(--green);}.fr{color:var(--red);}.fa{color:var(--amber);}
 .pgfoot{padding:14px 24px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);text-align:center;}
@@ -4226,12 +4227,12 @@ function renderPage() {
       var stLabel = r.applied ? '&#9679; Applied' : st === 'approved' ? '&#10003; Approved' : st === 'rejected' ? '&#10005; Rejected' : '&#9711; Pending';
       var stCls   = r.applied ? 'badge-approved' : st === 'approved' ? 'badge-pending' : st === 'rejected' ? 'badge-rejected' : 'badge-pending';
       var isOpen  = id === currentAiId;
-      h += '<div class="hist-item'+(isOpen?' active':'')+'" style="cursor:pointer">';
-      h += '<div style="display:flex;align-items:center;gap:10px;width:100%;" data-id="'+id+'" onclick="selectAiRec(this.dataset.id)">';
+      h += '<div class="hist-item'+(isOpen?' active':'')+'">';
+      h += '<div class="hist-row" data-id="'+id+'" onclick="selectAiRec(this.dataset.id)">';
       h += '<span class="hist-ts">'+id.replace('_',' ').replace(/_/g,':')+'</span>';
-      h += '<span class="hist-sum">'+(r.window||'1m')+'w &middot; '+(r.claude_summary||'').substring(0,65)+'...</span>';
+      h += '<span class="hist-sum">'+(r.window||'1m')+'w &middot; '+(r.claude_summary||'')+'</span>';
       h += '<span class="hist-delta '+dc(d)+'">'+fmt(d,true)+' WR</span>';
-      h += '<span class="badge '+stCls+'" style="font-size:10px;padding:2px 7px;white-space:nowrap">'+stLabel+'</span>';
+      h += '<span class="badge '+stCls+'" style="font-size:10px;padding:2px 7px;white-space:nowrap;flex-shrink:0">'+stLabel+'</span>';
       h += '<button class="btn-delete-rec" data-id="'+id+'" onclick="event.stopPropagation();deleteAiRec(this.dataset.id)" title="Delete">&#128465;</button>';
       h += '</div>';
 
