@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.4.3"
+VERSION = "v4.4.4"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -3971,6 +3971,23 @@ function deriveOptSuggestions(factors, baselineWR) {
 function buildStatSugDetail(sugs, simulation, status, recId) {
   var h = '<div class="ai-detail">';
 
+  // ── Bottom-line impact card (mirrors AI optimizer cmp-grid) ──────────────
+  if (simulation && simulation.baseline_wr != null && simulation.projected_wr != null) {
+    var wrD  = simulation.wr_delta  || 0;
+    var avgD = simulation.avg_delta || 0;
+    h += '<div class="cmp-grid" style="margin-bottom:18px">';
+    h += '<div class="cmp-card cur"><div class="cmp-lbl">&#128202; Current</div>';
+    h += '<div class="cmp-val" style="color:var(--blue)">'+simulation.baseline_wr.toFixed(1)+'%</div>';
+    h += '<div class="cmp-sub">Win Rate &middot; '+(avgD!=null?fmtAvg(simulation.baseline_avg)+' avg':'')+'&middot; '+simulation.baseline_n+' picks</div></div>';
+    h += '<div class="cmp-card proj"><div class="cmp-lbl">&#128200; Projected</div>';
+    h += '<div class="cmp-val" style="color:var(--green)">'+simulation.projected_wr.toFixed(1)+'%</div>';
+    h += '<div class="cmp-sub">Win Rate &middot; '+(simulation.projected_avg!=null?fmtAvg(simulation.projected_avg)+' avg':'')+'&middot; '+simulation.projected_n+' picks</div></div>';
+    h += '<div class="cmp-card delta"><div class="cmp-lbl">&#9654; Improvement</div>';
+    h += '<div class="cmp-val '+(wrD>0?'fg':wrD<0?'fr':'')+'" style="font-size:32px">'+(wrD>=0?'+':'')+wrD.toFixed(1)+'%</div>';
+    h += '<div class="cmp-sub">Win Rate &middot; '+fmtAvg(avgD)+' avg ret</div></div>';
+    h += '</div>';
+  }
+
   // Changes tables
   function sigTable(items, color, arrow, label) {
     if (!items.length) return '';
@@ -4002,12 +4019,6 @@ function buildStatSugDetail(sugs, simulation, status, recId) {
   if (sugs) {
     h += sigTable(sugs.reinforce || [], 'var(--green)', '▲', 'Boost weight — strong predictors');
     h += sigTable(sugs.reduce    || [], 'var(--red)',   '▼', 'Reduce weight — performance drag');
-  }
-
-  // Simulation summary
-  if (simulation && simulation.baseline_wr != null) {
-    var sd = simulation.wr_delta >= 0 ? '+'+simulation.wr_delta.toFixed(1) : simulation.wr_delta.toFixed(1);
-    h += '<div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Simulated WR: <strong style="color:var(--blue)">'+simulation.baseline_wr.toFixed(1)+'%</strong> → <strong style="color:var(--green)">'+simulation.projected_wr.toFixed(1)+'%</strong> ('+sd+'%) across '+simulation.baseline_n+' picks</div>';
   }
 
   // Action bar
