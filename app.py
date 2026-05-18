@@ -4297,11 +4297,13 @@ async function triggerAiRun() {
   var btn = document.getElementById('run-ai-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Queuing...'; }
   try {
-    var resp = await fetch('/api/run-ai-analysis', {method: 'POST'});
-    var data = await resp.json();
-    if (!data.ok) { alert('Error: ' + (data.error || 'Unknown')); renderPage(); }
-    // Firebase listener will update aiFlag and re-render automatically
-  } catch(e) { alert('Network error: ' + e.message); renderPage(); }
+    // Write directly via Firebase JS SDK (Flask REST API has no auth token → 401)
+    await fdb.ref('/scanner/run_ai_requested').set({
+      status: 'pending',
+      requested_at: new Date().toISOString()
+    });
+    // Firebase listener on run_ai_requested will update aiFlag and re-render automatically
+  } catch(e) { alert('Error queuing AI analysis: ' + e.message); renderPage(); }
 }
 
 // ── Optimizer approve/reject ──────────────────────────────────────────────────
