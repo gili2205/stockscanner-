@@ -336,21 +336,26 @@ tail -f /home/scanner/backtest_v4.log
 ## 9. Cron Jobs (staging VM)
 
 ```
-# Watchdog
-*/5 * * * * pgrep -f live_scanner.py > /dev/null || sudo bash /home/scanner/start.sh restart
-
-# Backtest (nightly, market days)
-0 22 * * 1-5 cd /home/scanner && /home/scanner/venv/bin/python3 backtest.py --days 2 >> /var/log/backtest.log 2>&1
+# Backtest (nightly, market days) — sources .env for Firebase creds
+0 22 * * 1-5 cd /home/scanner && /bin/bash -c 'set -a; source /home/scanner/.env; set +a; /home/scanner/venv/bin/python backtest.py --days 2 >> /tmp/backtest_cron.log 2>&1'
 
 # Update returns (nightly)
-0 23 * * 1-5 cd /home/scanner && /home/scanner/venv/bin/python3 backtest.py --update-returns >> /var/log/backtest.log 2>&1
+0 23 * * 1-5 cd /home/scanner && /bin/bash -c 'set -a; source /home/scanner/.env; set +a; /home/scanner/venv/bin/python backtest.py --update-returns >> /tmp/backtest_cron.log 2>&1'
 
-# Statistical optimizer (weekly)
-0 4 * * 0 cd /home/scanner && /home/scanner/venv/bin/python optimizer.py --all-windows
+# Statistical optimizer (weekly, Sunday 4am)
+0 4 * * 0 cd /home/scanner && /home/scanner/venv/bin/python optimizer.py --all-windows >> /tmp/optimizer_cron.log 2>&1
 
-# AI trigger poller (every 5 min)
-*/5 * * * * cd /home/scanner && /home/scanner/venv/bin/python ai_optimizer.py --check-and-run
+# AI trigger poller (every 5 min) — flock prevents overlapping instances
+*/5 * * * * flock -n /tmp/ai_check.lock bash -c 'cd /home/scanner && /home/scanner/venv/bin/python ai_optimizer.py --check-and-run >> /tmp/ai_check.log 2>&1'
+
+# Watchdog — restart live_scanner if not running
+*/5 * * * * pgrep -f live_scanner.py > /dev/null || sudo bash /home/scanner/start.sh restart >> /var/log/scanner.log 2>&1
+
+# Sentiment (every 5 min on market days)
+0 7,12,17,22 * * 1-5 cd /home/scanner && /home/scanner/venv/bin/python3 sentiment.py --limit 200 >> /tmp/sentiment.log 2>&1
 ```
+
+**IMPORTANT:** `flock -n /tmp/ai_check.lock` on the AI poller prevents multiple instances from stacking up when AI analysis takes >5 min (e.g. calling Claude API). Without flock, each 5-min cron tick spawns a new process, causing OOM on the e2-micro.
 
 ---
 
