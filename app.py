@@ -3955,14 +3955,10 @@ function deriveOptSuggestions(factors, baselineWR) {
 }
 
 // ── Build ONE consolidated suggestion card from all signals ───────────────────
-function buildConsolidatedSug(sugs, baselineWR) {
+function buildConsolidatedSug(sugs, baselineWR, simulation) {
   var patchable = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return s.patch; });
   var observeOnly = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return !s.patch; });
   var totalChanges = patchable.length;
-
-  // Best projected WR = highest wr_with among boost signals (conservative: take min of boost signals)
-  var bestWR = null;
-  sugs.reinforce.forEach(function(s){ if (s.wr_with && (bestWR === null || s.wr_with < bestWR)) bestWR = s.wr_with; });
 
   var h = '<div class="suggestion-item" id="consolidated-sug" style="border-color:#27ae6033">';
 
@@ -3970,8 +3966,18 @@ function buildConsolidatedSug(sugs, baselineWR) {
   h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">';
   h += '<span style="font-size:14px;font-weight:700">&#128200; Recommended Scoring Changes</span>';
   if (totalChanges > 0) h += '<span class="dpill g">' + totalChanges + ' weight change' + (totalChanges > 1 ? 's' : '') + '</span>';
-  if (baselineWR && bestWR) {
-    h += '<span class="dpill g">Projected WR: ' + baselineWR.toFixed(1) + '% &rarr; up to ' + bestWR.toFixed(1) + '%</span>';
+  // Show simulation result if available, otherwise fall back to naive estimate
+  if (simulation && simulation.baseline_wr != null && simulation.projected_wr != null) {
+    var simDelta = simulation.wr_delta >= 0 ? '+' + simulation.wr_delta.toFixed(1) : simulation.wr_delta.toFixed(1);
+    var simColor = simulation.wr_delta >= 0 ? 'var(--green)' : 'var(--red)';
+    h += '<span class="dpill g" title="Simulated by re-scoring ' + simulation.baseline_n + ' historical picks with proposed weights">Simulated WR: ' + simulation.baseline_wr.toFixed(1) + '% &rarr; ' + simulation.projected_wr.toFixed(1) + '% (' + simDelta + '%)</span>';
+    if (simulation.avg_delta != null) {
+      var avgDelta = simulation.avg_delta >= 0 ? '+' + simulation.avg_delta.toFixed(2) : simulation.avg_delta.toFixed(2);
+      h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)">Avg return ' + avgDelta + '%</span>';
+    }
+  } else if (baselineWR) {
+    // No simulation yet (old report) — show note to re-run optimizer
+    h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)" title="Re-run optimizer.py to get a simulated projection">&#9432; Re-run optimizer for simulation</span>';
   }
   h += '</div>';
 
@@ -4165,11 +4171,12 @@ function renderPage() {
 
     // One consolidated suggestion card (all signals combined, one Accept button)
     var baselineWR = parseFloat(stats.win_rate) || null;
+    var simulation = rData.simulation || null;  // pre-computed simulation from optimizer.py
     var sugs = deriveOptSuggestions(factors, baselineWR);
     var totalSugs = sugs.reinforce.length + sugs.reduce.length;
     h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:24px 0 10px;">&#128200; Scoring Recommendation — based on '+(stats.total_picks||'N')+' picks</div>';
     if (totalSugs > 0) {
-      h += buildConsolidatedSug(sugs, baselineWR);
+      h += buildConsolidatedSug(sugs, baselineWR, simulation);
     } else {
       h += '<div style="padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions yet — need factors with &gt;5% win-rate lift and at least 10 picks. Run more backtest history for stronger signals.</div>';
     }

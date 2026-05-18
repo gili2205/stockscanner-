@@ -204,6 +204,99 @@ def run_factor_analysis(picks, window):
     return results
 
 
+def simulate_suggestions(picks):
+    """
+    Derive weight suggestions from factor analysis and simulate their impact
+    by re-scoring ALL historical picks with the proposed weights.
+
+    Uses the same FACTOR_PATCH_MAP as the UI (app.py) so suggestions are consistent.
+    Returns a dict with baseline vs projected win rate / avg return, stored in the report.
+    """
+    factors = run_factor_analysis(picks, "simulation")
+
+    # Mirror of FACTOR_PATCH_MAP in app.py — keep in sync
+    FACTOR_PATCH_MAP = {
+        'EMA stack = FULL':    {'param': 'ema_full',    'curPts': 25, 'boostPts': 30, 'reducePts': 18},
+        'EMA stack = PARTIAL': {'param': 'ema_partial', 'curPts': 15, 'boostPts': 19, 'reducePts': 10},
+        'ATR ≤ 0.25':          {'param': 'atr_025',     'curPts': 15, 'boostPts': 19, 'reducePts': 10},
+        'ATR ≤ 0.35':          {'param': 'atr_030',     'curPts': 10, 'boostPts': 13, 'reducePts':  7},
+        'Vol dry ≤ 50%':       {'param': 'vc_050',      'curPts': 15, 'boostPts': 18, 'reducePts': 10},
+        'Vol dry ≤ 70%':       {'param': 'vc_065',      'curPts': 10, 'boostPts': 13, 'reducePts':  7},
+        'HH/HL ≥ 0.85':        {'param': 'hh_hl_85',   'curPts': 12, 'boostPts': 16, 'reducePts':  8},
+        'HH/HL ≥ 0.70':        {'param': 'hh_hl_70',   'curPts':  8, 'boostPts': 11, 'reducePts':  5},
+        'Dist ≤ 1%':           {'param': 'dist_1',      'curPts': 20, 'boostPts': 24, 'reducePts': 14},
+        'Dist ≤ 3%':           {'param': 'dist_3p5',    'curPts': 11, 'boostPts': 14, 'reducePts':  8},
+    }
+
+    # Condition functions that match each param to a pick's signals
+    PARAM_CONDITIONS = {
+        'atr_025':    lambda p: (p.get('atr') or 1)              <= 0.25,
+        'atr_030':    lambda p: (p.get('atr') or 1)              <= 0.35,
+        'vc_050':     lambda p: (p.get('vol_contraction') or 1)  <= 0.50,
+        'vc_065':     lambda p: (p.get('vol_contraction') or 1)  <= 0.65,
+        'ema_full':   lambda p: p.get('ema_stack') == 'full',
+        'ema_partial':lambda p: p.get('ema_stack') == 'partial',
+        'hh_hl_85':   lambda p: (p.get('hh_hl') or 0)           >= 0.85,
+        'hh_hl_70':   lambda p: (p.get('hh_hl') or 0)           >= 0.70,
+        'dist_1':     lambda p: (p.get('dist_to_level') or 100)  <= 1.0,
+        'dist_3p5':   lambda p: (p.get('dist_to_level') or 100)  <= 3.5,
+    }
+
+    # Determine which patches to apply (lift >= 5% → boost, <= -5% → reduce)
+    patches = []
+    for f in factors:
+        pm = FACTOR_PATCH_MAP.get(f['factor'])
+        if not pm:
+            continue
+        lift = f['wr_diff']
+        if lift >= 5:
+            patches.append({'param': pm['param'], 'delta': pm['boostPts'] - pm['curPts'],
+                             'factor': f['factor'], 'direction': 'boost'})
+        elif lift <= -5:
+            patches.append({'param': pm['param'], 'delta': pm['reducePts'] - pm['curPts'],
+                             'factor': f['factor'], 'direction': 'reduce'})
+
+    if not patches:
+        return None
+
+    # Baseline — all picks shown
+    all_rets = [p['_return'] for p in picks]
+    baseline_wr  = round(win_rate(all_rets) or 0, 1)
+    baseline_avg = round(mean(all_rets) or 0, 2)
+
+    # Re-score each pick: add deltas for active signals, keep score >= 0
+    simulated_rets = []
+    for p in picks:
+        base_score = p.get('score_buy_now') or p.get('score') or 0
+        delta = sum(
+            patch['delta']
+            for patch in patches
+            if PARAM_CONDITIONS.get(patch['param'], lambda _: False)(p)
+        )
+        new_score = max(0, base_score + delta)
+        # Only count picks that would still surface (score >= 40 = WATCH threshold)
+        if new_score >= 40:
+            simulated_rets.append(p['_return'])
+
+    if len(simulated_rets) < 20:
+        return None
+
+    projected_wr  = round(win_rate(simulated_rets) or 0, 1)
+    projected_avg = round(mean(simulated_rets) or 0, 2)
+
+    return {
+        'baseline_wr':   baseline_wr,
+        'baseline_avg':  baseline_avg,
+        'baseline_n':    len(picks),
+        'projected_wr':  projected_wr,
+        'projected_avg': projected_avg,
+        'projected_n':   len(simulated_rets),
+        'wr_delta':      round(projected_wr  - baseline_wr,  1),
+        'avg_delta':     round(projected_avg - baseline_avg, 2),
+        'patches':       patches,
+    }
+
+
 def score_band_analysis(picks, window):
     """Break down performance by score decile."""
     bands = defaultdict(list)
@@ -442,12 +535,20 @@ if __name__ == "__main__":
         factors = run_factor_analysis(picks, window)
         bands   = score_band_analysis(picks, window)
 
+        # Simulate proposed weight changes on all picks for this window
+        simulation = simulate_suggestions(picks)
+        if simulation:
+            log.info(f"Simulation ({window}): WR {simulation['baseline_wr']}% → "
+                     f"{simulation['projected_wr']}% ({simulation['wr_delta']:+.1f}%) "
+                     f"on {simulation['baseline_n']} picks")
+
         print_report(stats, factors, bands, window)
 
         all_reports[window] = {
-            "stats":   stats,
-            "factors": factors,
-            "bands":   bands,
+            "stats":      stats,
+            "factors":    factors,
+            "bands":      bands,
+            "simulation": simulation,
         }
 
     if not all_reports:
