@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.4.0"
+VERSION = "v4.4.1"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -4160,13 +4160,18 @@ function renderPage() {
     });
     h += '</div>';
 
+    // Report timestamp
+    var repTs = optIds[0] ? optIds[0].replace('report_','').replace(/_/g,':').replace(':','T').replace(':','-').replace(':','-') : null;
+    var repDate = repTs ? (function(){try{return new Date(repTs).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}catch(e){return optIds[0];}})() : null;
+    if (repDate) h += '<div style="font-size:11px;color:var(--muted);margin-bottom:12px;">&#128337; Report generated '+repDate+' · Stats use first-seen picks (matches analytics page)</div>';
+
     // Overall stats
     h += '<div class="stats-row">';
     h += '<div class="stat-box"><div class="stat-box-lbl">Picks analyzed</div><div class="stat-box-val">'+(stats.total_picks||'—')+'</div><div class="stat-box-sub">'+(stats.date_range||'')+'</div></div>';
     h += '<div class="stat-box"><div class="stat-box-lbl">Win Rate</div><div class="stat-box-val '+(parseFloat(stats.win_rate)>=55?'fg':parseFloat(stats.win_rate)>=45?'fa':'fr')+'">'+fmt(stats.win_rate,false)+'</div><div class="stat-box-sub">'+win+' window</div></div>';
     h += '<div class="stat-box"><div class="stat-box-lbl">Avg Return</div><div class="stat-box-val '+dc(stats.avg_return)+'">'+fmtAvg(stats.avg_return)+'</div><div class="stat-box-sub">per pick</div></div>';
-    h += '<div class="stat-box"><div class="stat-box-lbl">Best Pick</div><div class="stat-box-val fg">'+fmt(stats.best,true)+'</div></div>';
-    h += '<div class="stat-box"><div class="stat-box-lbl">Worst Pick</div><div class="stat-box-val fr">'+fmt(stats.worst,true)+'</div></div>';
+    h += '<div class="stat-box"><div class="stat-box-lbl">Best Pick</div><div class="stat-box-val fg">'+fmt(stats.best,true)+'</div><div class="stat-box-sub">'+(stats.best_ticker||'')+'</div></div>';
+    h += '<div class="stat-box"><div class="stat-box-lbl">Worst Pick</div><div class="stat-box-val fr">'+fmt(stats.worst,true)+'</div><div class="stat-box-sub">'+(stats.worst_ticker||'')+'</div></div>';
     h += '</div>';
 
     // Factor table
