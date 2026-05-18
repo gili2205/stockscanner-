@@ -57,11 +57,17 @@ Two identical VMs — one per environment:
 | | Production | Staging |
 |---|---|---|
 | Instance name | `scanner-prod` | `scanner-staging` |
-| OS | Debian/Ubuntu |  Debian/Ubuntu |
+| Instance name (GCP) | `instance-20260427-090614` | `scanner-staging` |
+| External IP | (check GCP console) | `34.134.86.25` |
+| Machine type | **e2-micro** (1 vCPU, 1 GB RAM) | **e2-micro** (1 vCPU, 1 GB RAM) |
+| OS | Debian/Ubuntu | Debian/Ubuntu |
 | Python | 3.12 (venv at `/home/scanner/venv`) | Same |
 | Working dir | `/home/scanner/` | `/home/scanner/` |
 | Git branch | `main` | `fix/scanner-bugs` |
 | Firebase | Production DB | Staging DB |
+| SSH user | `gilih2205` | `gilih2205` |
+
+> ⚠️ **Memory constraint**: e2-micro has only 1 GB RAM. The 180-day backtest loads ~4,000 tickers × 18 months of OHLCV data, which can hit ~800 MB+ and cause OOM kills. The VM freezes (SSH becomes unreachable) when this happens. **Workaround**: run backtest during off-hours when `live_scanner.py` memory use is lower, or upgrade to e2-small (2 GB) for backtest runs.
 
 **Process management:**
 - `live_scanner.py` runs as a **systemd service** (`scanner.service`)
@@ -553,3 +559,5 @@ requests              — HTTP (smart_money.py)
 | yfinance rate limiting | Low | GCP IPs occasionally rate-limited; batching + retry mitigates |
 | Firebase rules open for reading | Low | Dashboard data is not sensitive; acceptable trade-off for simplicity |
 | `smart_money.py` Form 4 insider buys returning 0 | Medium | Known bug, deferred |
+| e2-micro OOM during 180-day backtest | High | 4000 tickers × 18 months of OHLCV exhausts 1 GB RAM. VM freezes, SSH unreachable. Fix: upgrade to e2-small for backtest runs, or stream data per-day instead of loading all at once. |
+| Firebase write rules | Low | Browser JS SDK writes require explicit `.write: true` per path. Flask REST API calls have no auth token → always 401. Use JS SDK for all browser-triggered writes. |
