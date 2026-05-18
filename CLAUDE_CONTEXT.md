@@ -211,7 +211,7 @@ python ai_optimizer.py --check-and-run   # cron mode
 python ai_optimizer.py --apply           # apply approved rec
 ```
 
-`--check-and-run` now: (1) auto-applies any pending stat suggestions from Firebase `/scanner/optimizer_suggestions`, (2) restarts `live_scanner.py` via watchdog if applied, (3) THEN checks for AI analysis requests. `apply_stat_suggestions()` returns True/False. `PATCH_PATTERNS` use `ta+=` to match actual `live_scanner.py` variable names.
+`--check-and-run` now: (0) auto-applies any approved AI recommendations from Firebase `/scanner/ai_recommendations`, (1) auto-applies any pending stat suggestions from Firebase `/scanner/optimizer_suggestions`, (2) restarts `live_scanner.py` via watchdog if anything was applied, (3) THEN checks for new AI analysis requests. Both `apply_approved_recommendation()` and `apply_stat_suggestions()` return True/False. `PATCH_PATTERNS` use `ta+=` to match actual `live_scanner.py` variable names. User never needs to run `--apply` manually — cron handles everything within 5 min.
 
 ### `smart_money.py`
 - ARK holdings (ETF filings from ark-funds.com)
@@ -306,11 +306,14 @@ Merge to `main` only after explicit user approval.
 
 ## 8. VM Commands
 
+**IMPORTANT: The repo root on the VM is `/home/scanner/` — NOT `/home/scanner/stockscanner` or any subdirectory.**
+All scripts (`ai_optimizer.py`, `live_scanner.py`, etc.) live directly in `/home/scanner/`.
+
 ```bash
 # SSH
 ssh gilih2205@scanner-staging
 
-# Always cd first
+# Always cd first — repo root IS /home/scanner
 cd /home/scanner
 
 # Pull latest
