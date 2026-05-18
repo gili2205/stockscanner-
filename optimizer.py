@@ -75,7 +75,11 @@ def fmt_wr(v):
 # ── Load data ──────────────────────────────────────────────────────────────────
 
 def load_picks(window="1m", source_ref=None, label="production"):
-    """Load all historical picks that have a return for the given window.
+    """Load historical picks that have a return for the given window.
+
+    Deduplicates to the FIRST occurrence of each ticker (same logic as the
+    analytics dashboard's buildPicks()). This ensures optimizer stats match
+    what the user sees in the analytics page.
 
     source_ref : Firebase DatabaseReference | None
         Reference to load history from. Defaults to /scanner/history.
@@ -87,7 +91,8 @@ def load_picks(window="1m", source_ref=None, label="production"):
     log.info(f"Loading {label} picks from Firebase ({window} window)...")
     history = ref.get() or {}
 
-    picks = []
+    # Collect all occurrences keyed by (day, ticker)
+    all_picks = []
     skipped = 0
     for day_str, day_data in history.items():
         if not isinstance(day_data, dict):
@@ -102,12 +107,25 @@ def load_picks(window="1m", source_ref=None, label="production"):
             if ret is None:
                 skipped += 1
                 continue
-            pick["_return"] = ret
-            pick["_day"]    = day_str
-            picks.append(pick)
+            p = dict(pick)
+            p["_return"] = ret
+            p["_day"]    = day_str
+            p["_ticker"] = ticker
+            all_picks.append(p)
+
+    # Deduplicate: keep only the earliest scan date per ticker
+    # (mirrors analytics dashboard buildPicks() which uses first-seen)
+    first_seen = {}
+    for p in all_picks:
+        t = p["_ticker"]
+        if t not in first_seen or p["_day"] < first_seen[t]["_day"]:
+            first_seen[t] = p
+
+    picks = list(first_seen.values())
 
     log.info(f"Loaded {len(picks)} {label} picks with {window} returns "
-             f"({skipped} skipped — no return data yet)")
+             f"({skipped} skipped — no return data yet; "
+             f"{len(all_picks)-len(picks)} duplicate ticker-days removed)")
     return picks
 
 
@@ -321,6 +339,10 @@ def score_band_analysis(picks, window):
 def overall_stats(picks, window):
     rets = [p["_return"] for p in picks]
     days = sorted(set(p["_day"] for p in picks))
+    best_val  = round(max(rets), 2)  if rets else None
+    worst_val = round(min(rets), 2)  if rets else None
+    best_pick  = next((p for p in picks if round(p["_return"], 2) == best_val),  None)
+    worst_pick = next((p for p in picks if round(p["_return"], 2) == worst_val), None)
     return {
         "window":        window,
         "total_picks":   len(picks),
@@ -329,8 +351,10 @@ def overall_stats(picks, window):
         "win_rate":      win_rate(rets),
         "avg_return":    round(mean(rets), 2)   if rets else None,
         "med_return":    round(median(rets), 2) if rets else None,
-        "best":          round(max(rets), 2)    if rets else None,
-        "worst":         round(min(rets), 2)    if rets else None,
+        "best":          best_val,
+        "best_ticker":   best_pick.get("_ticker", "") if best_pick else "",
+        "worst":         worst_val,
+        "worst_ticker":  worst_pick.get("_ticker", "") if worst_pick else "",
     }
 
 

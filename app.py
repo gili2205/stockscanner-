@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.4.0"
+VERSION = "v4.4.6"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -3854,14 +3854,26 @@ var FACTOR_V4_MAP = {
   'Status = WATCH':      {component:'Buy Now 40–64',        score:'meta',    maxPts:null, desc:'Stock scored WATCH threshold'}
 };
 
-var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null, optSuggestions = {};
+var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null;
+var optSuggestions = {}, statRecs = {}, currentStatId = null;
 var selectedOptWindow = '1m';
-var PENDING_PATCHES = {}; // keyed by id, holds patch arrays for Accept buttons
+
+// Rejected pending stat recs (keyed by report timestamp) — persisted in localStorage
+function getRejectedStatRecs() {
+  try { return JSON.parse(localStorage.getItem('rejected_stat_recs') || '{}'); } catch(e) { return {}; }
+}
+function rejectPendingStatRec(reportId) {
+  var r = getRejectedStatRecs();
+  r[reportId] = true;
+  localStorage.setItem('rejected_stat_recs', JSON.stringify(r));
+  currentStatId = null;
+  renderPage();
+}
 
 // Load all data sources in parallel
-var loaded = {opt: false, ai: false, flag: false, sug: false};
+var loaded = {opt: false, ai: false, flag: false, sug: false, stat: false};
 function checkReady() {
-  if (loaded.opt && loaded.ai && loaded.flag && loaded.sug) renderPage();
+  if (loaded.opt && loaded.ai && loaded.flag && loaded.sug && loaded.stat) renderPage();
 }
 
 fdb.ref('/scanner/optimization_reports').on('value', function(snap) {
@@ -3872,7 +3884,6 @@ fdb.ref('/scanner/optimization_reports').on('value', function(snap) {
 
 fdb.ref('/scanner/ai_recommendations').on('value', function(snap) {
   aiRecs = snap.val() || {};
-  // Don't auto-expand any row — user clicks to expand
   if (currentAiId && !aiRecs[currentAiId]) currentAiId = null;
   loaded.ai = true;
   checkReady();
@@ -3881,14 +3892,20 @@ fdb.ref('/scanner/ai_recommendations').on('value', function(snap) {
 fdb.ref('/scanner/run_ai_requested').on('value', function(snap) {
   aiFlag = snap.val();
   loaded.flag = true;
-  // Re-render just the button area if already loaded
-  if (loaded.opt && loaded.ai && loaded.sug) renderPage();
+  if (loaded.opt && loaded.ai && loaded.sug && loaded.stat) renderPage();
 });
 
 fdb.ref('/scanner/optimizer_suggestions').on('value', function(snap) {
   optSuggestions = snap.val() || {};
   loaded.sug = true;
-  if (loaded.opt && loaded.ai && loaded.flag) renderPage();
+  checkReady();
+});
+
+fdb.ref('/scanner/stat_recommendations').on('value', function(snap) {
+  statRecs = snap.val() || {};
+  if (currentStatId && !statRecs[currentStatId]) currentStatId = null;
+  loaded.stat = true;
+  checkReady();
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -3962,157 +3979,156 @@ function deriveOptSuggestions(factors, baselineWR) {
   return {reinforce: reinforce, reduce: reduce};
 }
 
-// ── Build ONE consolidated suggestion card from all signals ───────────────────
-function buildConsolidatedSug(sugs, baselineWR, simulation) {
-  var patchable = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return s.patch; });
-  var observeOnly = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return !s.patch; });
-  var totalChanges = patchable.length;
+// ── Stat suggestion detail body (shared between pending row and stored rows) ───
+function buildStatSugDetail(sugs, simulation, status, recId) {
+  var h = '<div class="ai-detail">';
 
-  var h = '<div class="suggestion-item" id="consolidated-sug" style="border-color:#27ae6033">';
-
-  // Header
-  h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">';
-  h += '<span style="font-size:14px;font-weight:700">&#128200; Recommended Scoring Changes</span>';
-  if (totalChanges > 0) h += '<span class="dpill g">' + totalChanges + ' weight change' + (totalChanges > 1 ? 's' : '') + '</span>';
-  // Show simulation result if available, otherwise fall back to naive estimate
+  // ── Bottom-line impact card (mirrors AI optimizer cmp-grid) ──────────────
   if (simulation && simulation.baseline_wr != null && simulation.projected_wr != null) {
-    var simDelta = simulation.wr_delta >= 0 ? '+' + simulation.wr_delta.toFixed(1) : simulation.wr_delta.toFixed(1);
-    var simColor = simulation.wr_delta >= 0 ? 'var(--green)' : 'var(--red)';
-    h += '<span class="dpill g" title="Simulated by re-scoring ' + simulation.baseline_n + ' historical picks with proposed weights">Simulated WR: ' + simulation.baseline_wr.toFixed(1) + '% &rarr; ' + simulation.projected_wr.toFixed(1) + '% (' + simDelta + '%)</span>';
-    if (simulation.avg_delta != null) {
-      var avgDelta = simulation.avg_delta >= 0 ? '+' + simulation.avg_delta.toFixed(2) : simulation.avg_delta.toFixed(2);
-      h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)">Avg return ' + avgDelta + '%</span>';
-    }
-  } else if (baselineWR) {
-    // No simulation yet (old report) — show note to re-run optimizer
-    h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)" title="Optimizer reruns every Sunday at 4am">&#9432; Simulation updates Sunday</span>';
-  }
-  h += '</div>';
-
-  // Boost changes table
-  if (sugs.reinforce.length) {
-    h += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--green);margin-bottom:6px">&#9650; Boost weight — strong predictors</div>';
-    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;">';
-    h += '<thead><tr style="border-bottom:1px solid var(--border)">';
-    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Signal</th>';
-    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Component</th>';
-    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR Lift</th>';
-    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR with</th>';
-    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">N</th>';
-    if (totalChanges > 0) h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Weight change</th>';
-    h += '</tr></thead><tbody>';
-    sugs.reinforce.forEach(function(s) {
-      h += '<tr style="border-bottom:1px solid var(--border)22">';
-      h += '<td style="padding:6px 8px;font-weight:600">' + s.factor + '</td>';
-      h += '<td style="padding:6px 8px;color:var(--muted);font-size:11px">' + s.component + '</td>';
-      h += '<td style="padding:6px 8px;text-align:right;color:var(--green);font-weight:700">+' + s.lift.toFixed(1) + '%</td>';
-      h += '<td style="padding:6px 8px;text-align:right;color:var(--green)">' + (s.wr_with ? s.wr_with.toFixed(1) + '%' : '—') + '</td>';
-      h += '<td style="padding:6px 8px;text-align:right;color:var(--muted)">' + s.n + '</td>';
-      if (s.patch) h += '<td style="padding:6px 8px;text-align:right"><span style="color:var(--muted)">' + s.curPts + 'pts</span> &rarr; <strong style="color:var(--green)">' + s.proposedPts + 'pts</strong></td>';
-      else         h += '<td style="padding:6px 8px;text-align:right;color:var(--muted);font-size:11px">observation only</td>';
-      h += '</tr>';
-    });
-    h += '</tbody></table>';
-  }
-
-  // Reduce changes table
-  if (sugs.reduce.length) {
-    h += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--red);margin-bottom:6px">&#9660; Reduce weight — performance drag</div>';
-    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;">';
-    h += '<thead><tr style="border-bottom:1px solid var(--border)">';
-    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Signal</th>';
-    h += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Component</th>';
-    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR Lift</th>';
-    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR with</th>';
-    h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">N</th>';
-    if (totalChanges > 0) h += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Weight change</th>';
-    h += '</tr></thead><tbody>';
-    sugs.reduce.forEach(function(s) {
-      h += '<tr style="border-bottom:1px solid var(--border)22">';
-      h += '<td style="padding:6px 8px;font-weight:600">' + s.factor + '</td>';
-      h += '<td style="padding:6px 8px;color:var(--muted);font-size:11px">' + s.component + '</td>';
-      h += '<td style="padding:6px 8px;text-align:right;color:var(--red);font-weight:700">' + s.lift.toFixed(1) + '%</td>';
-      h += '<td style="padding:6px 8px;text-align:right;color:var(--red)">' + (s.wr_with ? s.wr_with.toFixed(1) + '%' : '—') + '</td>';
-      h += '<td style="padding:6px 8px;text-align:right;color:var(--muted)">' + s.n + '</td>';
-      if (s.patch) h += '<td style="padding:6px 8px;text-align:right"><span style="color:var(--muted)">' + s.curPts + 'pts</span> &rarr; <strong style="color:var(--red)">' + s.proposedPts + 'pts</strong></td>';
-      else         h += '<td style="padding:6px 8px;text-align:right;color:var(--muted);font-size:11px">observation only</td>';
-      h += '</tr>';
-    });
-    h += '</tbody></table>';
-  }
-
-  // Single Accept button for all patchable changes
-  if (patchable.length > 0) {
-    h += '<div id="consolidated-action" style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap;">';
-
-    var myParams = patchable.map(function(s){ return s.param; });
-    var myParamsKey = myParams.slice().sort().join(',');
-
-    // Check if cron already applied these changes (Firebase source of truth for "done")
-    var sugVals = Object.values(optSuggestions);
-    var appliedParams = sugVals.filter(function(s){ return s && s.applied === true; }).map(function(s){ return s.param; });
-    var allApplied = myParams.length > 0 && myParams.every(function(p){ return appliedParams.indexOf(p) >= 0; });
-
-    // Check localStorage for "queued but not yet applied" state (reliable across page refreshes)
-    var lsKey = 'optimizer_queued_' + myParamsKey;
-    var isQueued = !allApplied && !!localStorage.getItem(lsKey);
-
-    if (allApplied) {
-      // Cron has applied — clear localStorage and show done state
-      localStorage.removeItem(lsKey);
-      h += '<span class="badge badge-applied">&#10003; Applied to live_scanner.py</span>';
-      h += '<span style="font-size:11px;color:var(--muted)">Scanner restarted with updated weights. Re-run the optimizer for fresh suggestions.</span>';
-    } else if (isQueued) {
-      h += '<span class="badge badge-pending">&#9711; Queued — cron will apply within 5 min</span>';
-      h += '<span style="font-size:11px;color:var(--muted)">The VM cron will patch live_scanner.py and restart the scanner automatically.</span>';
-    } else {
-      // Show Accept button — store lsKey on it so the handler can save state
-      var patchKey = 'opt_' + Date.now();
-      PENDING_PATCHES[patchKey] = patchable.map(function(s){ return {param: s.param, pts: s.proposedPts, factor: s.factor}; });
-      var nLabel = patchable.length + ' change' + (patchable.length > 1 ? 's' : '');
-      h += '<button class="btn btn-approve" data-key="' + patchKey + '" data-lskey="' + lsKey + '" onclick="acceptAllSuggestions(this)">&#10003; Accept all ' + nLabel + '</button>';
-      h += '<span style="font-size:11px;color:var(--muted)">Queues changes to live_scanner.py &middot; cron applies automatically within 5 min</span>';
-    }
+    var wrD  = simulation.wr_delta  || 0;
+    var avgD = simulation.avg_delta || 0;
+    h += '<div class="cmp-grid" style="margin-bottom:18px">';
+    h += '<div class="cmp-card cur"><div class="cmp-lbl">&#128202; Current</div>';
+    h += '<div class="cmp-val" style="color:var(--blue)">'+simulation.baseline_wr.toFixed(1)+'%</div>';
+    h += '<div class="cmp-sub">Win Rate &middot; '+(avgD!=null?fmtAvg(simulation.baseline_avg)+' avg':'')+'&middot; '+simulation.baseline_n+' picks</div></div>';
+    h += '<div class="cmp-card proj"><div class="cmp-lbl">&#128200; Projected</div>';
+    h += '<div class="cmp-val" style="color:var(--green)">'+simulation.projected_wr.toFixed(1)+'%</div>';
+    h += '<div class="cmp-sub">Win Rate &middot; '+(simulation.projected_avg!=null?fmtAvg(simulation.projected_avg)+' avg':'')+'&middot; '+simulation.projected_n+' picks</div></div>';
+    h += '<div class="cmp-card delta"><div class="cmp-lbl">&#9654; Improvement</div>';
+    h += '<div class="cmp-val '+(wrD>0?'fg':wrD<0?'fr':'')+'" style="font-size:32px">'+(wrD>=0?'+':'')+wrD.toFixed(1)+'%</div>';
+    h += '<div class="cmp-sub">Win Rate &middot; '+fmtAvg(avgD)+' avg ret</div></div>';
     h += '</div>';
   }
 
+  // Changes tables
+  function sigTable(items, color, arrow, label) {
+    if (!items.length) return '';
+    var t = '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:'+color+';margin-bottom:6px">'+arrow+' '+label+'</div>';
+    t += '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;">';
+    t += '<thead><tr style="border-bottom:1px solid var(--border)">';
+    t += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Signal</th>';
+    t += '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Component</th>';
+    t += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR Lift</th>';
+    t += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">WR with</th>';
+    t += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">N</th>';
+    t += '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--muted);font-weight:600">Weight change</th>';
+    t += '</tr></thead><tbody>';
+    items.forEach(function(s) {
+      t += '<tr style="border-bottom:1px solid var(--border)22">';
+      t += '<td style="padding:6px 8px;font-weight:600">'+s.factor+'</td>';
+      t += '<td style="padding:6px 8px;color:var(--muted);font-size:11px">'+s.component+'</td>';
+      t += '<td style="padding:6px 8px;text-align:right;color:'+color+';font-weight:700">'+(s.lift>=0?'+':'')+s.lift.toFixed(1)+'%</td>';
+      t += '<td style="padding:6px 8px;text-align:right;color:'+color+'">'+(s.wr_with?s.wr_with.toFixed(1)+'%':'—')+'</td>';
+      t += '<td style="padding:6px 8px;text-align:right;color:var(--muted)">'+s.n+'</td>';
+      if (s.patch) t += '<td style="padding:6px 8px;text-align:right"><span style="color:var(--muted)">'+s.curPts+'pts</span> &rarr; <strong style="color:'+color+'">'+s.proposedPts+'pts</strong></td>';
+      else         t += '<td style="padding:6px 8px;text-align:right;color:var(--muted);font-size:11px">observation only</td>';
+      t += '</tr>';
+    });
+    t += '</tbody></table>';
+    return t;
+  }
+
+  if (sugs) {
+    h += sigTable(sugs.reinforce || [], 'var(--green)', '▲', 'Boost weight — strong predictors');
+    h += sigTable(sugs.reduce    || [], 'var(--red)',   '▼', 'Reduce weight — performance drag');
+  }
+
+  // Action bar
+  h += '<div class="action-bar" id="stat-action-bar-'+(recId||'pending')+'">';
+  if (!status || status === 'pending') {
+    h += '<button class="btn btn-approve" data-statid="pending" onclick="acceptStatSuggestion(this)">&#10003; Accept</button>';
+    h += '<button class="btn btn-reject" data-reportid="__pending__" onclick="rejectPendingStatRec(this.dataset.reportid)">&#10005; Dismiss</button>';
+    h += '<span class="action-note">Queues changes to live_scanner.py · cron applies automatically within 5 min</span>';
+  } else if (status === 'queued') {
+    h += '<span class="badge badge-pending">&#9711; Queued — cron will apply within 5 min</span>';
+    h += '<span class="action-note">The VM cron will patch live_scanner.py and restart the scanner automatically.</span>';
+  } else if (status === 'applied') {
+    h += '<span class="badge badge-applied">&#10003; Applied to live_scanner.py</span>';
+    h += '<span class="action-note">Scanner restarted with updated weights. Re-run the optimizer for fresh suggestions.</span>';
+  }
   h += '</div>';
+
+  h += '</div>'; // ai-detail
   return h;
 }
 
-async function acceptAllSuggestions(btn) {
-  var patches = PENDING_PATCHES[btn.dataset.key] || [];
-  var lsKey   = btn.dataset.lskey || '';
-  if (!patches.length) return;
-  btn.disabled = true; btn.textContent = 'Queuing ' + patches.length + ' changes...';
+// ── Accept stat suggestion → write batch to stat_recommendations + individual params ──
+var _pendingStatSugs = null; // holds current computed sugs for accept handler
+
+async function acceptStatSuggestion(btn) {
+  if (!_pendingStatSugs) return;
+  var patchable = (_pendingStatSugs.reinforce || []).concat(_pendingStatSugs.reduce || []).filter(function(s){ return s.patch; });
+  if (!patchable.length) return;
+
+  var bar = document.getElementById('stat-action-bar-pending');
+  if (bar) bar.innerHTML = '<span style="color:var(--muted)">Queuing '+patchable.length+' changes...</span>';
+
+  var ts  = new Date().toISOString();
+  var batchId = 'stat_' + ts.replace(/[:.]/g, '-');
+  var paramIds = [];
   var errors = [];
-  var ts = new Date().toISOString();
-  for (var i = 0; i < patches.length; i++) {
-    var p = patches[i];
-    // Write directly via Firebase JS SDK (avoids Flask REST API auth issue)
-    var recId = ts.replace(/[:.]/g, '-') + '_' + i;
+
+  // Write individual params to optimizer_suggestions (VM reads these to apply)
+  for (var i = 0; i < patchable.length; i++) {
+    var s = patchable[i];
+    var recId = batchId + '_' + i;
+    paramIds.push(recId);
     try {
       await fdb.ref('/scanner/optimizer_suggestions/' + recId).set({
-        label:        p.factor + ' → ' + p.pts + 'pts',
-        param:        p.param,
-        proposed_pts: p.pts,
-        factor:       p.factor,
+        label:        s.factor + ' → ' + s.proposedPts + 'pts',
+        param:        s.param,
+        proposed_pts: s.proposedPts,
+        factor:       s.factor,
         direction:    'stat',
+        batch_id:     batchId,
         approved_at:  ts,
         status:       'approved',
         applied:      false
       });
-    } catch(e) { errors.push(p.factor + ': ' + e.message); }
+    } catch(e) { errors.push(s.factor + ': ' + e.message); }
   }
-  var bar = document.getElementById('consolidated-action');
+
   if (errors.length) {
-    bar.innerHTML = '<span style="color:var(--red)">&#9888; ' + errors.join(', ') + '</span>';
-  } else {
-    // Mark as queued in localStorage so revisiting shows "Queued" state
-    if (lsKey) localStorage.setItem(lsKey, '1');
-    bar.innerHTML = '<span class="badge badge-pending" style="margin-right:8px">&#9711; Queued — cron will apply within 5 min</span>'
-      + '<span style="font-size:11px;color:var(--muted)">The VM cron will patch live_scanner.py and restart the scanner automatically.</span>';
+    if (bar) bar.innerHTML = '<span style="color:var(--red)">&#9888; ' + errors.join(', ') + '</span>';
+    return;
   }
+
+  // Write batch record to stat_recommendations (UI reads this for the rows list)
+  var simCopy = _pendingStatSugs._simulation || null;
+  var changesSummary = patchable.map(function(s){ return s.factor + ' → ' + s.proposedPts + 'pts'; });
+  try {
+    await fdb.ref('/scanner/stat_recommendations/' + batchId).set({
+      created_at:   ts,
+      window:       selectedOptWindow,
+      n_changes:    patchable.length,
+      summary:      changesSummary.join(', '),
+      changes:      patchable.map(function(s){ return {param:s.param, factor:s.factor, curPts:s.curPts, proposedPts:s.proposedPts, component:s.component, lift:s.lift, wr_with:s.wr_with||null, n:s.n}; }),
+      simulation:   simCopy,
+      param_ids:    paramIds,
+      status:       'queued',
+      applied:      false
+    });
+  } catch(e) {
+    if (bar) bar.innerHTML = '<span style="color:var(--red)">&#9888; Batch write failed: ' + e.message + '</span>';
+    return;
+  }
+
+  // Firebase listener will pick up the new batch and re-render
+}
+
+function selectStatRec(id) {
+  currentStatId = (currentStatId === id) ? null : id;
+  renderPage();
+}
+
+async function deleteStatRec(id) {
+  if (!confirm('Delete this recommendation?')) return;
+  try {
+    await fdb.ref('/scanner/stat_recommendations/' + id).remove();
+    delete statRecs[id];
+    if (currentStatId === id) currentStatId = null;
+    renderPage();
+  } catch(e) { alert('Error deleting: ' + e.message); }
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
@@ -4155,15 +4171,6 @@ function renderPage() {
     });
     h += '</div>';
 
-    // Overall stats
-    h += '<div class="stats-row">';
-    h += '<div class="stat-box"><div class="stat-box-lbl">Picks analyzed</div><div class="stat-box-val">'+(stats.total_picks||'—')+'</div><div class="stat-box-sub">'+(stats.date_range||'')+'</div></div>';
-    h += '<div class="stat-box"><div class="stat-box-lbl">Win Rate</div><div class="stat-box-val '+(parseFloat(stats.win_rate)>=55?'fg':parseFloat(stats.win_rate)>=45?'fa':'fr')+'">'+fmt(stats.win_rate,false)+'</div><div class="stat-box-sub">'+win+' window</div></div>';
-    h += '<div class="stat-box"><div class="stat-box-lbl">Avg Return</div><div class="stat-box-val '+dc(stats.avg_return)+'">'+fmtAvg(stats.avg_return)+'</div><div class="stat-box-sub">per pick</div></div>';
-    h += '<div class="stat-box"><div class="stat-box-lbl">Best Pick</div><div class="stat-box-val fg">'+fmt(stats.best,true)+'</div></div>';
-    h += '<div class="stat-box"><div class="stat-box-lbl">Worst Pick</div><div class="stat-box-val fr">'+fmt(stats.worst,true)+'</div></div>';
-    h += '</div>';
-
     // Factor table
     if (factors.length) {
       h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:10px;">Factor Analysis — sorted by win-rate lift</div>';
@@ -4187,17 +4194,71 @@ function renderPage() {
       h += '</tbody></table></div>';
     }
 
-    // One consolidated suggestion card (all signals combined, one Accept button)
+    // ── Scoring Recommendations (row-based, like AI recs) ────────────────────
     var baselineWR = parseFloat(stats.win_rate) || null;
-    var simulation = rData.simulation || null;  // pre-computed simulation from optimizer.py
+    var simulation = rData.simulation || null;
     var sugs = deriveOptSuggestions(factors, baselineWR);
-    var totalSugs = sugs.reinforce.length + sugs.reduce.length;
-    h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:24px 0 10px;">&#128200; Scoring Recommendation — based on '+(stats.total_picks||'N')+' picks</div>';
-    if (totalSugs > 0) {
-      h += buildConsolidatedSug(sugs, baselineWR, simulation);
-    } else {
+    var patchable = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return s.patch; });
+    sugs._simulation = simulation;
+    _pendingStatSugs = (patchable.length > 0) ? sugs : null;
+
+    h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:24px 0 10px;">&#128200; Scoring Recommendations</div>';
+    h += '<div class="hist-list">';
+
+    // ── Current pending row (computed live from latest report) ────────────────
+    var pendingReportId = optIds[0];
+    var rejectedRecs = getRejectedStatRecs();
+    var simNeg = simulation && simulation.wr_delta != null && simulation.wr_delta < 0;
+    if (patchable.length > 0 && !simNeg && !rejectedRecs[pendingReportId]) {
+      var isOpen = currentStatId === '__pending__';
+      h += '<div class="hist-item'+(isOpen?' active':'')+'">';
+      h += '<div class="hist-row" data-id="__pending__" onclick="selectStatRec(this.dataset.id)">';
+      h += '<span class="hist-ts">'+pendingReportId.replace('report_','').replace(/_/g,' ')+'</span>';
+      h += '<span class="hist-sum">'+win+' window &middot; '+patchable.length+' weight change'+(patchable.length>1?'s':'');
+      if (simulation && simulation.wr_delta != null) h += ' &middot; WR +'+(simulation.wr_delta).toFixed(1)+'%';
+      h += '</span>';
+      h += '<span class="badge badge-pending" style="font-size:10px;padding:2px 7px;white-space:nowrap;flex-shrink:0">&#9711; Pending</span>';
+      h += '</div>';
+      if (isOpen) h += buildStatSugDetail(sugs, simulation, 'pending', null);
+      h += '</div>';
+    } else if (!patchable.length || simNeg) {
       h += '<div style="padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions yet — need factors with &gt;5% win-rate lift and at least 10 picks. Run more backtest history for stronger signals.</div>';
     }
+
+    // ── Accepted / applied batches from Firebase ──────────────────────────────
+    var statIds = Object.keys(statRecs).sort().reverse();
+    statIds.forEach(function(sid) {
+      var r = statRecs[sid];
+      var isOpen = currentStatId === sid;
+      var st = r.applied ? 'applied' : (r.status || 'queued');
+      var stLabel = st === 'applied' ? '&#9679; Applied' : '&#9711; Queued';
+      var stCls   = st === 'applied' ? 'badge-approved' : 'badge-pending';
+
+      // Reconstruct sugs-like object from stored changes for detail view
+      var storedSugs = null;
+      if (r.changes && r.changes.length) {
+        var reinforce = [], reduce = [];
+        r.changes.forEach(function(c) {
+          var item = {factor:c.factor, component:c.component||'', param:c.param, curPts:c.curPts, proposedPts:c.proposedPts, lift:c.lift||0, wr_with:c.wr_with||null, n:c.n||0, patch:true};
+          if ((c.lift||0) >= 0) reinforce.push(item); else reduce.push(item);
+        });
+        storedSugs = {reinforce:reinforce, reduce:reduce};
+      }
+
+      h += '<div class="hist-item'+(isOpen?' active':'')+'">';
+      h += '<div class="hist-row" data-id="'+sid+'" onclick="selectStatRec(this.dataset.id)">';
+      h += '<span class="hist-ts">'+(r.created_at||sid).slice(0,16).replace('T',' ')+'</span>';
+      h += '<span class="hist-sum">'+(r.window||'1m')+' window &middot; '+(r.n_changes||0)+' weight change'+((r.n_changes||0)>1?'s':'');
+      if (r.simulation && r.simulation.wr_delta != null) h += ' &middot; WR '+(r.simulation.wr_delta>=0?'+':'')+r.simulation.wr_delta.toFixed(1)+'%';
+      h += '</span>';
+      h += '<span class="badge '+stCls+'" style="font-size:10px;padding:2px 7px;white-space:nowrap;flex-shrink:0">'+stLabel+'</span>';
+      h += '<button class="btn-delete-rec" data-id="'+sid+'" onclick="event.stopPropagation();deleteStatRec(this.dataset.id)" title="Delete">&#128465;</button>';
+      h += '</div>';
+      if (isOpen) h += buildStatSugDetail(storedSugs, r.simulation, st, sid);
+      h += '</div>';
+    });
+
+    h += '</div>'; // hist-list
   }
   h += '</div></div>'; // section-body + section
 
