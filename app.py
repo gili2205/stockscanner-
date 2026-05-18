@@ -3855,6 +3855,7 @@ var FACTOR_V4_MAP = {
 };
 
 var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null, optSuggestions = {};
+var selectedOptWindow = '1m';
 var PENDING_PATCHES = {}; // keyed by id, holds patch arrays for Accept buttons
 
 // Load all data sources in parallel
@@ -4138,11 +4139,21 @@ function renderPage() {
     h += '<div class="cmd-block">cd /home/scanner<br>/home/scanner/venv/bin/python optimizer.py --all-windows</div></div>';
   } else {
     var rep = optReports[optIds[0]];
-    var win = rep.windows && rep.windows[0] ? rep.windows[0] : '1m';
+    var availWindows = rep.windows || ['1m'];
+    // Use selectedOptWindow if available, else fallback to first available
+    var win = availWindows.indexOf(selectedOptWindow) >= 0 ? selectedOptWindow : availWindows[0];
     var rData = (rep.reports || {})[win] || {};
     var stats = rData.stats || {};
     var factors = rData.factors || [];
     var bands = rData.bands || [];
+
+    // Window selector
+    h += '<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">';
+    availWindows.forEach(function(w) {
+      var active = w === win;
+      h += '<button data-win="'+w+'" onclick="selectedOptWindow=this.dataset.win;renderPage()" style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid '+(active?'var(--purple)':'var(--border)')+';background:'+(active?'var(--purple)':'var(--bg3)')+';color:'+(active?'#fff':'var(--muted)')+'">'+w+'</button>';
+    });
+    h += '</div>';
 
     // Overall stats
     h += '<div class="stats-row">';
@@ -4369,7 +4380,8 @@ function getLatestFactors() {
   var ids = Object.keys(optReports).sort().reverse();
   if (!ids.length) return [];
   var rep = optReports[ids[0]];
-  var win = rep.windows && rep.windows[0] ? rep.windows[0] : '1m';
+  var availWindows = rep.windows || ['1m'];
+  var win = availWindows.indexOf(selectedOptWindow) >= 0 ? selectedOptWindow : availWindows[0];
   return ((rep.reports || {})[win] || {}).factors || [];
 }
 </script>
