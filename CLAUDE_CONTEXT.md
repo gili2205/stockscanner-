@@ -288,6 +288,7 @@ Shared constants (SCORE_READY=85, SCORE_WATCH=70, etc.)
 
 **NEVER push directly to `main` without staging verification.**
 **NEVER create new branches. Use `fix/scanner-bugs` for staging.**
+**NEVER merge to `main` without explicit user approval. Always wait for the user to say "merge to main" or "promote to production".**
 
 All changes go to `fix/scanner-bugs` first:
 ```bash
