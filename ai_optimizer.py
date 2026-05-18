@@ -413,38 +413,43 @@ def apply_approved_recommendation():
     code = scanner_path.read_text()
     applied = []
 
-    # Map weight keys to exact regex patterns in live_scanner.py (ta= technical score)
-    # Format: param_key → (regex_pattern, current_value_str, description)
+    # Map DEFAULT_WEIGHTS keys → regex patterns in live_scanner.py
+    # 2-group patterns: (prefix)(number)          → replacement: group1 + new_val
+    # 3-group patterns: (prefix)(number)(suffix)  → replacement: group1 + new_val + group3
     PATCH_PATTERNS = {
-        # EMA trend structure
-        "ema_full":    (r"(if\s+ema==\"full\":\s+ta\+=)(\d+)",    "EMA full pts"),
-        "ema_partial": (r"(elif\s+ema==\"partial\":\s+ta\+=)(\d+)","EMA partial pts"),
-        # ATR compression
-        "atr_025":     (r"(elif\s+atr_c<=0\.25:\s+ta\+=)(\d+)",   "ATR ≤0.25 pts"),
-        "atr_030":     (r"(elif\s+atr_c<=0\.30:\s+ta\+=)(\d+)",   "ATR ≤0.30 pts"),
-        # Volume contraction
-        "vc_050":      (r"(if\s+vc<=0\.50:\s+ta\+=)(\d+)",        "Vol contraction ≤50% pts"),
-        "vc_065":      (r"(elif\s+vc<=0\.65:\s+ta\+=)(\d+)",      "Vol contraction ≤65% pts"),
-        # HH/HL structure
-        "hh_hl_85":   (r"(if\s+hh_hl>=0\.85:\s+ta\+=)(\d+)",     "HH/HL ≥0.85 pts"),
-        "hh_hl_70":   (r"(elif\s+hh_hl>=0\.70:\s+ta\+=)(\d+)",   "HH/HL ≥0.70 pts"),
-        # Distance to level
-        "dist_1":      (r"(if\s+dist<=1\.0:\s+ta\+=)(\d+)",       "Dist ≤1% pts"),
-        "dist_3p5":    (r"(elif\s+dist<=3\.5:\s+ta\+=)(\d+)",     "Dist ≤3.5% pts"),
+        # ── Positive scoring (ta+=N) ────────────────────────────────────────────
+        "breakout_ema_full":      (r"(if\s+ema==\"full\":\s+ta\+=)(\d+)",              "EMA full pts"),
+        "breakout_ema_partial":   (r"(elif\s+ema==\"partial\":\s+ta\+=)(\d+)",         "EMA partial pts"),
+        "breakout_hh_hl_strong":  (r"(if\s+hh_hl>=0\.85:\s+ta\+=)(\d+)",             "HH/HL strong pts"),
+        "breakout_hh_hl_ok":      (r"(elif\s+hh_hl>=0\.70:\s+ta\+=)(\d+)",           "HH/HL ok pts"),
+        "breakout_atr_max":       (r"(if\s+atr_c<=0\.20:\s+ta\+=)(\d+)",             "ATR max pts"),
+        "breakout_vol_max":       (r"(if\s+vc<=0\.50:\s+ta\+=)(\d+)",                "Vol contraction max pts"),
+        "breakout_dist_max":      (r"(if\s+dist<=1\.0:\s+ta\+=)(\d+)",               "Dist max pts"),
+        "breakout_liquidity_max": (r"(if\s+avg_dollar_vol>=200_000_000:\s+ta\+=)(\d+)", "Liquidity max pts"),
+        # ── Penalties: ta=max(0,ta-N) — 3-group to preserve closing ) ──────────
+        "penalty_weak_ema":       (r"(if\s+ema==\"weak\":\s+ta=max\(0,ta-)(\d+)(\))", "Weak EMA penalty"),
+        "penalty_far_dist":       (r"(if\s+dist>15:\s+ta=max\(0,ta-)(\d+)(\))",       "Far dist penalty"),
+        "penalty_neg_mom":        (r"(if\s+mom1m<-5:\s+ta=max\(0,ta-)(\d+)(\))",      "Neg momentum penalty"),
+        "penalty_high_vol_atr":   (r"(if\s+atr_c>0\.7\s+and\s+mom1m<10:\s+ta=max\(0,ta-)(\d+)(\))", "High vol ATR penalty"),
+        # ── Status thresholds — 3-group to preserve trailing text ───────────────
+        "threshold_ready":        (r'("READY"\s+if\s+score>=)(\d+)(\s+else)',          "READY threshold"),
+        "threshold_watch":        (r'("WATCH"\s+if\s+score>=)(\d+)(\s+else)',          "WATCH threshold"),
     }
 
     import re as re_mod
     for key, new_val in changes.items():
         if key not in PATCH_PATTERNS:
-            log.warning(f"  No patch pattern for '{key}' — edit live_scanner.py manually")
+            log.warning(f"  No patch pattern for '{key}' — skipping (not patchable automatically)")
             continue
-        pattern, desc = PATCH_PATTERNS[key]
-        # Pattern captures (prefix)(current_number) — replace number with new_val
-        new_code = re_mod.sub(
-            pattern,
-            lambda m, nv=str(new_val): m.group(1) + nv,
-            code
-        )
+        entry = PATCH_PATTERNS[key]
+        pattern, desc = entry[0], entry[1]
+        # 2-group: prefix + number; 3-group: prefix + number + suffix
+        def make_replacement(nv, pat):
+            def repl(m):
+                suffix = m.group(3) if len(m.groups()) >= 3 else ''
+                return m.group(1) + str(nv) + suffix
+            return repl
+        new_code = re_mod.sub(pattern, make_replacement(new_val, pattern), code)
         if new_code != code:
             old_match = re_mod.search(pattern, code)
             old_val = old_match.group(2) if old_match else "?"
