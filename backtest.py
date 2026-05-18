@@ -132,12 +132,12 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
     every batch so a crash/restart can resume from where it left off rather
     than re-downloading from scratch.
     """
-    import pickle
+    import pickle, os as _os
 
     start_str = str(start - timedelta(days=90))
-    # Use ISO year+week so the key doesn't change day-to-day
-    iso_year, iso_week, _ = date.today().isocalendar()
-    cache_key = f"{len(tickers)}_{start_str}_w{iso_year}w{iso_week:02d}"
+    # Key = ticker count + start date only. No week/date suffix — week rollover
+    # was causing daily cache misses. Freshness is enforced by file mtime instead.
+    cache_key = f"{len(tickers)}_{start_str}"
 
     batch_size = 25
     batches = [tickers[i:i+batch_size] for i in range(0, len(tickers), batch_size)]
@@ -149,27 +149,35 @@ def download_prices(tickers: list, start: date, end: date) -> dict:
     resume_from  = 0   # batch index to start/resume from
 
     if PRICE_CACHE_PATH.exists():
-        try:
-            with open(PRICE_CACHE_PATH, "rb") as f:
-                cached = pickle.load(f)
-            if cached.get("key") == cache_key:
-                result = cached.get("data", {})
-                if cached.get("complete"):
-                    log.info(f"Loaded {len(result)} tickers from complete disk cache")
-                    return result
-                else:
-                    resume_from = cached.get("batches_done", 0)
-                    log.info(f"Resuming from batch {resume_from+1}/{len(batches)} "
-                             f"({len(result)} tickers already cached)")
-            else:
-                stored_key = cached.get("key", "?")
-                log.info(f"Cache key mismatch (stored={stored_key}, want={cache_key}) — starting fresh")
-        except Exception as e:
-            log.warning(f"Cache load failed ({e}) — deleting corrupt cache and starting fresh")
+        # Expire cache if older than PRICE_CACHE_MAX_AGE_HOURS
+        age_hours = (_os.path.getmtime(PRICE_CACHE_PATH) - 0) / 3600
+        age_hours = (time.time() - _os.path.getmtime(PRICE_CACHE_PATH)) / 3600
+        if age_hours > PRICE_CACHE_MAX_AGE_HOURS:
+            log.info(f"Cache expired ({age_hours:.1f}h old) — starting fresh download")
             try: PRICE_CACHE_PATH.unlink()
             except Exception: pass
-            result = {}
-            resume_from = 0
+        else:
+            try:
+                with open(PRICE_CACHE_PATH, "rb") as f:
+                    cached = pickle.load(f)
+                if cached.get("key") == cache_key:
+                    result = cached.get("data", {})
+                    if cached.get("complete"):
+                        log.info(f"Loaded {len(result)} tickers from complete disk cache ({age_hours:.1f}h old)")
+                        return result
+                    else:
+                        resume_from = cached.get("batches_done", 0)
+                        log.info(f"Resuming from batch {resume_from+1}/{len(batches)} "
+                                 f"({len(result)} tickers already cached, {age_hours:.1f}h old)")
+                else:
+                    stored_key = cached.get("key", "?")
+                    log.info(f"Cache key mismatch (stored={stored_key}, want={cache_key}) — starting fresh")
+            except Exception as e:
+                log.warning(f"Cache load failed ({e}) — deleting corrupt cache and starting fresh")
+                try: PRICE_CACHE_PATH.unlink()
+                except Exception: pass
+                result = {}
+                resume_from = 0
 
     # ── Download remaining batches ────────────────────────────────────────────
     if resume_from == 0:
