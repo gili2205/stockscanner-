@@ -9,11 +9,11 @@ Last updated: 2026-05-16 — v4.0.0
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| `app.py` (Flask app) | **v4.3.1** | Optimizer: full auto-apply flow with localStorage state |
+| `app.py` (Flask app) | **v4.4.0** | AI rec auto-apply end-to-end; collapsible rec rows; delete button |
 | `backtest.py` | **v4_quality_setup** | Atomic cache writes, ThreadPoolExecutor fix |
-| `ai_optimizer.py` | — | Auto-applies stat suggestions + restarts scanner in --check-and-run |
+| `ai_optimizer.py` | — | Full auto-apply: approved AI recs + stat suggestions via cron |
 | `smart_money.py` | — | No version constant; track via git |
-| Last updated | **2026-05-17** | v4.3.1 |
+| Last updated | **2026-05-18** | v4.4.0 |
 
 ### Version bump rules
 - **Patch** (v4.0.**x**): bug fix, UI tweak, copy change
@@ -211,7 +211,7 @@ python ai_optimizer.py --check-and-run   # cron mode
 python ai_optimizer.py --apply           # apply approved rec
 ```
 
-`--check-and-run` now: (1) auto-applies any pending stat suggestions from Firebase `/scanner/optimizer_suggestions`, (2) restarts `live_scanner.py` via watchdog if applied, (3) THEN checks for AI analysis requests. `apply_stat_suggestions()` returns True/False. `PATCH_PATTERNS` use `ta+=` to match actual `live_scanner.py` variable names.
+`--check-and-run` now: (0) auto-applies any approved AI recommendations from Firebase `/scanner/ai_recommendations`, (1) auto-applies any pending stat suggestions from Firebase `/scanner/optimizer_suggestions`, (2) restarts `live_scanner.py` via watchdog if anything was applied, (3) THEN checks for new AI analysis requests. Both `apply_approved_recommendation()` and `apply_stat_suggestions()` return True/False. `PATCH_PATTERNS` use `ta+=` to match actual `live_scanner.py` variable names. User never needs to run `--apply` manually — cron handles everything within 5 min.
 
 ### `smart_money.py`
 - ARK holdings (ETF filings from ark-funds.com)
@@ -288,6 +288,7 @@ Shared constants (SCORE_READY=85, SCORE_WATCH=70, etc.)
 
 **NEVER push directly to `main` without staging verification.**
 **NEVER create new branches. Use `fix/scanner-bugs` for staging.**
+**NEVER merge to `main` without explicit user approval. Always wait for the user to say "merge to main" or "promote to production".**
 
 All changes go to `fix/scanner-bugs` first:
 ```bash
@@ -301,15 +302,47 @@ Merge to `main` only after explicit user approval.
 
 **Vercel auto-deploys `app.py` changes — never tell the user to git pull for UI changes.**
 
+### Promoting to production — full checklist
+
+After user says "merge to main" or "promote to production":
+
+```bash
+# 1. Merge on local machine
+git checkout main
+git merge fix/scanner-bugs
+git push origin main
+
+# 2. Pull on production VM
+ssh gilih2205@<prod-ip>
+cd /home/scanner
+git pull origin main
+
+# 3. Restart scanner only if live_scanner.py changed
+sudo bash /home/scanner/start.sh restart
+
+# 4. Manual steps (if needed):
+#    - Update Firebase rules on production DB (stockscanner-f9f81-default-rtdb)
+#      if new Firebase paths were added (ai_recommendations, approved_weights, etc.)
+#    - Update production crontab if cron jobs changed
+```
+
+**After merge, switch back to staging branch for future work:**
+```bash
+git checkout fix/scanner-bugs
+```
+
 ---
 
 ## 8. VM Commands
+
+**IMPORTANT: The repo root on the VM is `/home/scanner/` — NOT `/home/scanner/stockscanner` or any subdirectory.**
+All scripts (`ai_optimizer.py`, `live_scanner.py`, etc.) live directly in `/home/scanner/`.
 
 ```bash
 # SSH
 ssh gilih2205@scanner-staging
 
-# Always cd first
+# Always cd first — repo root IS /home/scanner
 cd /home/scanner
 
 # Pull latest
@@ -332,21 +365,26 @@ tail -f /home/scanner/backtest_v4.log
 ## 9. Cron Jobs (staging VM)
 
 ```
-# Watchdog
-*/5 * * * * pgrep -f live_scanner.py > /dev/null || sudo bash /home/scanner/start.sh restart
-
-# Backtest (nightly, market days)
-0 22 * * 1-5 cd /home/scanner && /home/scanner/venv/bin/python3 backtest.py --days 2 >> /var/log/backtest.log 2>&1
+# Backtest (nightly, market days) — sources .env for Firebase creds
+0 22 * * 1-5 cd /home/scanner && /bin/bash -c 'set -a; source /home/scanner/.env; set +a; /home/scanner/venv/bin/python backtest.py --days 2 >> /tmp/backtest_cron.log 2>&1'
 
 # Update returns (nightly)
-0 23 * * 1-5 cd /home/scanner && /home/scanner/venv/bin/python3 backtest.py --update-returns >> /var/log/backtest.log 2>&1
+0 23 * * 1-5 cd /home/scanner && /bin/bash -c 'set -a; source /home/scanner/.env; set +a; /home/scanner/venv/bin/python backtest.py --update-returns >> /tmp/backtest_cron.log 2>&1'
 
-# Statistical optimizer (weekly)
-0 4 * * 0 cd /home/scanner && /home/scanner/venv/bin/python optimizer.py --all-windows
+# Statistical optimizer (weekly, Sunday 4am)
+0 4 * * 0 cd /home/scanner && /home/scanner/venv/bin/python optimizer.py --all-windows >> /tmp/optimizer_cron.log 2>&1
 
-# AI trigger poller (every 5 min)
-*/5 * * * * cd /home/scanner && /home/scanner/venv/bin/python ai_optimizer.py --check-and-run
+# AI trigger poller (every 5 min) — flock prevents overlapping instances
+*/5 * * * * flock -n /tmp/ai_check.lock bash -c 'cd /home/scanner && /home/scanner/venv/bin/python ai_optimizer.py --check-and-run >> /tmp/ai_check.log 2>&1'
+
+# Watchdog — restart live_scanner if not running
+*/5 * * * * pgrep -f live_scanner.py > /dev/null || sudo bash /home/scanner/start.sh restart >> /var/log/scanner.log 2>&1
+
+# Sentiment (every 5 min on market days)
+0 7,12,17,22 * * 1-5 cd /home/scanner && /home/scanner/venv/bin/python3 sentiment.py --limit 200 >> /tmp/sentiment.log 2>&1
 ```
+
+**IMPORTANT:** `flock -n /tmp/ai_check.lock` on the AI poller prevents multiple instances from stacking up when AI analysis takes >5 min (e.g. calling Claude API). Without flock, each 5-min cron tick spawns a new process, causing OOM on the e2-micro.
 
 ---
 
@@ -371,7 +409,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 | Insider scraper DNS failures | Transient GCP VM network issue. ~300 filing cap helps. |
 | Fundamentals in backtest | Always 0 (no per-date yfinance fundamental data) |
 | AI Analysis | Requires Anthropic credits before it can run |
-| Firebase write auth (REST API) | ✅ Fixed — Optimizer now writes via JS SDK client-side, bypassing Flask auth issues. Firebase rules updated to allow `.write: true` on `/scanner/optimizer_suggestions` and related paths. |
+| Firebase write auth (REST API) | ✅ Fixed — All browser writes use Firebase JS SDK. Rules updated on both staging and production to allow `.write: true` on: `optimizer_suggestions`, `run_ai_requested`, `ai_recommendations`, `approved_weights`. |
+| AI cron overlapping instances | ✅ Fixed — `flock -n /tmp/ai_check.lock` on cron prevents stacking when AI analysis takes >5 min. Applied to both staging and production crontabs. |
 
 ---
 
@@ -420,10 +459,10 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## 13. Pending / Future Work
 
-- [ ] Wait for v4_quality_setup backtest to finish, then analyze results in Analytics
+- [ ] Wait for v4_quality_setup backtest to finish (currently at day ~20/180), then analyze results in Analytics
 - [ ] If v4 validated → update Status labels (BUILDING/WATCH/READY) to use Buy Now thresholds
-- [ ] If v4 validated → merge fix/scanner-bugs → main (promote to production)
 - [ ] Congressional trading: consider paid API (Quiver Quantitative)
-- [x] Test "Approve" flow end-to-end: approve AI rec → run `--apply` → verify live_scanner.py patched ✅
-- [ ] Add Anthropic credits to enable AI analysis button
-- [ ] Apply same Firebase rules update to production database
+- [x] Test "Approve" flow end-to-end: approve AI rec → cron auto-applies → live_scanner.py patched ✅
+- [x] AI optimizer full auto-apply flow working end-to-end ✅
+- [x] flock on AI cron to prevent overlapping instances ✅
+- [ ] Verify AI optimizer end-to-end on production after merge

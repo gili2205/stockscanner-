@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.3.1"
+VERSION = "v4.4.0"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -3576,7 +3576,7 @@ def approve_recommendation(rec_id):
             json={**proposed, '_approved_from': rec_id, '_approved_at': __import__('datetime').datetime.now().isoformat()},
             timeout=10
         )
-        return jsonify({'ok': True, 'message': 'Approved. Run python ai_optimizer.py --apply on the VM to update live_scanner.py.'})
+        return jsonify({'ok': True, 'message': 'Approved — cron will apply automatically within 5 minutes.'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -3684,6 +3684,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .badge-pending{background:#1a2a3d;color:var(--blue);border:1px solid #3498db44;}
 .badge-applied{background:#1a3d2b;color:var(--green);border:1px solid #27ae6044;}
 
+/* AI rec delete button */
+.btn-delete-rec{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:2px 6px;border-radius:4px;margin-left:auto;opacity:0.5;transition:opacity .15s;}
+.btn-delete-rec:hover{opacity:1;color:var(--red);}
+/* AI rec expanded detail */
+.ai-detail{padding:16px 4px 4px;border-top:1px solid var(--border);margin-top:10px;overflow:hidden;}
+
 /* Empty state */
 .empty-state{text-align:center;padding:40px 24px;color:var(--muted);}
 .empty-state h3{color:var(--text);font-size:15px;margin-bottom:8px;}
@@ -3756,12 +3762,13 @@ code{background:var(--bg);padding:2px 6px;border-radius:4px;font-family:monospac
 
 /* History selector */
 .hist-list{display:flex;flex-direction:column;gap:6px;margin-bottom:20px;}
-.hist-item{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color .15s;}
+.hist-item{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;display:block;cursor:pointer;transition:border-color .15s;}
 .hist-item:hover{border-color:var(--blue);}
 .hist-item.active{border-color:var(--purple);}
-.hist-ts{font-size:11px;color:var(--muted);flex-shrink:0;width:150px;}
-.hist-sum{flex:1;font-size:12px;}
-.hist-delta{font-size:13px;font-weight:700;flex-shrink:0;}
+.hist-row{display:flex;align-items:center;gap:10px;width:100%;min-width:0;}
+.hist-ts{font-size:11px;color:var(--muted);flex-shrink:0;white-space:nowrap;}
+.hist-sum{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.hist-delta{font-size:13px;font-weight:700;flex-shrink:0;white-space:nowrap;}
 
 .fg{color:var(--green);}.fr{color:var(--red);}.fa{color:var(--amber);}
 .pgfoot{padding:14px 24px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);text-align:center;}
@@ -3864,8 +3871,8 @@ fdb.ref('/scanner/optimization_reports').on('value', function(snap) {
 
 fdb.ref('/scanner/ai_recommendations').on('value', function(snap) {
   aiRecs = snap.val() || {};
-  var ids = Object.keys(aiRecs).sort().reverse();
-  if (!currentAiId || !aiRecs[currentAiId]) currentAiId = ids[0] || null;
+  // Don't auto-expand any row — user clicks to expand
+  if (currentAiId && !aiRecs[currentAiId]) currentAiId = null;
   loaded.ai = true;
   checkReady();
 });
@@ -3955,14 +3962,10 @@ function deriveOptSuggestions(factors, baselineWR) {
 }
 
 // ── Build ONE consolidated suggestion card from all signals ───────────────────
-function buildConsolidatedSug(sugs, baselineWR) {
+function buildConsolidatedSug(sugs, baselineWR, simulation) {
   var patchable = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return s.patch; });
   var observeOnly = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return !s.patch; });
   var totalChanges = patchable.length;
-
-  // Best projected WR = highest wr_with among boost signals (conservative: take min of boost signals)
-  var bestWR = null;
-  sugs.reinforce.forEach(function(s){ if (s.wr_with && (bestWR === null || s.wr_with < bestWR)) bestWR = s.wr_with; });
 
   var h = '<div class="suggestion-item" id="consolidated-sug" style="border-color:#27ae6033">';
 
@@ -3970,8 +3973,18 @@ function buildConsolidatedSug(sugs, baselineWR) {
   h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">';
   h += '<span style="font-size:14px;font-weight:700">&#128200; Recommended Scoring Changes</span>';
   if (totalChanges > 0) h += '<span class="dpill g">' + totalChanges + ' weight change' + (totalChanges > 1 ? 's' : '') + '</span>';
-  if (baselineWR && bestWR) {
-    h += '<span class="dpill g">Projected WR: ' + baselineWR.toFixed(1) + '% &rarr; up to ' + bestWR.toFixed(1) + '%</span>';
+  // Show simulation result if available, otherwise fall back to naive estimate
+  if (simulation && simulation.baseline_wr != null && simulation.projected_wr != null) {
+    var simDelta = simulation.wr_delta >= 0 ? '+' + simulation.wr_delta.toFixed(1) : simulation.wr_delta.toFixed(1);
+    var simColor = simulation.wr_delta >= 0 ? 'var(--green)' : 'var(--red)';
+    h += '<span class="dpill g" title="Simulated by re-scoring ' + simulation.baseline_n + ' historical picks with proposed weights">Simulated WR: ' + simulation.baseline_wr.toFixed(1) + '% &rarr; ' + simulation.projected_wr.toFixed(1) + '% (' + simDelta + '%)</span>';
+    if (simulation.avg_delta != null) {
+      var avgDelta = simulation.avg_delta >= 0 ? '+' + simulation.avg_delta.toFixed(2) : simulation.avg_delta.toFixed(2);
+      h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)">Avg return ' + avgDelta + '%</span>';
+    }
+  } else if (baselineWR) {
+    // No simulation yet (old report) — show note to re-run optimizer
+    h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)" title="Optimizer reruns every Sunday at 4am">&#9432; Simulation updates Sunday</span>';
   }
   h += '</div>';
 
@@ -4165,11 +4178,12 @@ function renderPage() {
 
     // One consolidated suggestion card (all signals combined, one Accept button)
     var baselineWR = parseFloat(stats.win_rate) || null;
+    var simulation = rData.simulation || null;  // pre-computed simulation from optimizer.py
     var sugs = deriveOptSuggestions(factors, baselineWR);
     var totalSugs = sugs.reinforce.length + sugs.reduce.length;
     h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:24px 0 10px;">&#128200; Scoring Recommendation — based on '+(stats.total_picks||'N')+' picks</div>';
     if (totalSugs > 0) {
-      h += buildConsolidatedSug(sugs, baselineWR);
+      h += buildConsolidatedSug(sugs, baselineWR, simulation);
     } else {
       h += '<div style="padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions yet — need factors with &gt;5% win-rate lift and at least 10 picks. Run more backtest history for stronger signals.</div>';
     }
@@ -4204,104 +4218,116 @@ function renderPage() {
     h += '<p>Click <strong style="color:var(--purple)">Run AI Analysis</strong> above to generate your first recommendation.</p>';
     h += '<p style="margin-top:8px;font-size:11px;color:var(--muted)">Make sure ANTHROPIC_API_KEY is set in /home/scanner/.env on the VM.</p></div>';
   } else {
-    // History list if multiple
-    if (aiIds.length > 1) {
-      h += '<div class="hist-list">';
-      aiIds.slice(0,5).forEach(function(id) {
-        var r = aiRecs[id];
-        var d = r.win_rate_delta || 0;
-        h += '<div class="hist-item'+(id===currentAiId?' active':'')+'" data-id="'+id+'" onclick="selectAiRec(this.dataset.id)">';
-        h += '<span class="hist-ts">'+id.replace('_',' ').replace(/_/g,':')+'</span>';
-        h += '<span class="hist-sum">'+(r.window||'')+'w &middot; '+(r.claude_summary||'').substring(0,70)+'…</span>';
-        h += '<span class="hist-delta '+dc(d)+'">'+fmt(d,true)+' WR</span>';
+    // Rows — always visible, click to expand/collapse details
+    h += '<div class="hist-list">';
+    aiIds.forEach(function(id) {
+      var r = aiRecs[id];
+      var d = r.win_rate_delta || 0;
+      var st = r.status || 'pending';
+      var stLabel = r.applied ? '&#9679; Applied' : st === 'approved' ? '&#10003; Approved' : st === 'rejected' ? '&#10005; Rejected' : '&#9711; Pending';
+      var stCls   = r.applied ? 'badge-approved' : st === 'approved' ? 'badge-pending' : st === 'rejected' ? 'badge-rejected' : 'badge-pending';
+      var isOpen  = id === currentAiId;
+      h += '<div class="hist-item'+(isOpen?' active':'')+'">';
+      h += '<div class="hist-row" data-id="'+id+'" onclick="selectAiRec(this.dataset.id)">';
+      h += '<span class="hist-ts">'+id.replace('_',' ').replace(/_/g,':')+'</span>';
+      h += '<span class="hist-sum">'+(r.window||'1m')+'w &middot; '+(r.claude_summary||'')+'</span>';
+      h += '<span class="hist-delta '+dc(d)+'">'+fmt(d,true)+' WR</span>';
+      h += '<span class="badge '+stCls+'" style="font-size:10px;padding:2px 7px;white-space:nowrap;flex-shrink:0">'+stLabel+'</span>';
+      h += '<button class="btn-delete-rec" data-id="'+id+'" onclick="event.stopPropagation();deleteAiRec(this.dataset.id)" title="Delete">&#128465;</button>';
+      h += '</div>';
+
+      // Expandable detail
+      if (isOpen) {
+        var cur  = (r.current_stats  || {}).all || {};
+        var proj = (r.projected_stats|| {}).all || {};
+        var wrD  = r.win_rate_delta  || 0;
+        var avgD = r.avg_return_delta || 0;
+        h += '<div class="ai-detail">';
+
+        // Stats comparison
+        h += '<div class="cmp-grid" style="margin-top:12px">';
+        h += '<div class="cmp-card cur"><div class="cmp-lbl">&#128202; Current</div><div class="cmp-val" style="color:var(--blue)">'+fmt(cur.win_rate,false)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(cur.avg_return)+' avg &middot; '+(cur.n||'—')+' picks</div></div>';
+        h += '<div class="cmp-card proj"><div class="cmp-lbl">&#128200; Projected</div><div class="cmp-val" style="color:var(--green)">'+fmt(proj.win_rate,false)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(proj.avg_return)+' avg &middot; '+(proj.n||'—')+' picks</div></div>';
+        h += '<div class="cmp-card delta"><div class="cmp-lbl">&#9654; Improvement</div><div class="cmp-val '+dc(wrD)+'" style="font-size:32px">'+fmt(wrD,true)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(avgD)+' avg ret</div></div>';
         h += '</div>';
-      });
-      h += '</div>';
-    }
 
-    var rec = aiRecs[currentAiId];
-    if (rec) {
-      var cur  = (rec.current_stats  || {}).all || {};
-      var proj = (rec.projected_stats|| {}).all || {};
-      var wrD  = rec.win_rate_delta  || 0;
-      var avgD = rec.avg_return_delta || 0;
-      var st   = rec.status || 'pending';
+        // Reasoning
+        if (r.claude_reasoning) {
+          h += '<div class="reasoning">'+r.claude_reasoning.replace(/\\n/g,'<br>')+'</div>';
+        }
 
-      // Summary pill + status
-      h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;">';
-      h += '<div style="background:var(--purple);color:#fff;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;">&#129504; '+(rec.claude_summary||'')+'</div>';
-      h += statusBadge(st, rec.applied);
-      if (rec.claude_confidence) h += '<span class="badge '+(rec.claude_confidence==='HIGH'?'badge-approved':rec.claude_confidence==='LOW'?'badge-rejected':'badge-pending')+'">'+rec.claude_confidence+' confidence</span>';
-      h += '</div>';
+        // Changes table
+        var changes = r.changes || [];
+        if (changes.length) {
+          h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:14px 0 8px;">Proposed Weight Changes ('+changes.length+')</div>';
+          h += '<table class="changes-table"><thead><tr><th>Weight Key</th><th>Current</th><th></th><th>Proposed</th><th>Reason</th></tr></thead><tbody>';
+          changes.forEach(function(ch) {
+            var up = ch.proposed_value > ch.current_value;
+            var same = ch.proposed_value === ch.current_value;
+            var cls = same ? 'val-cur' : up ? 'val-up' : 'val-down';
+            h += '<tr><td><strong>'+ch.weight_key+'</strong></td>';
+            h += '<td><span class="val-chip val-cur">'+ch.current_value+'</span></td>';
+            h += '<td style="text-align:center;color:var(--muted)">'+(same?'=':up?'&#8593;':'&#8595;')+'</td>';
+            h += '<td><span class="val-chip '+cls+'">'+ch.proposed_value+'</span></td>';
+            h += '<td><div class="reason-text">'+ch.reason+'</div></td></tr>';
+          });
+          h += '</tbody></table>';
+        }
 
-      // Stats comparison
-      h += '<div class="cmp-grid">';
-      h += '<div class="cmp-card cur"><div class="cmp-lbl">&#128202; Current</div><div class="cmp-val" style="color:var(--blue)">'+fmt(cur.win_rate,false)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(cur.avg_return)+' avg &middot; '+(cur.n||'—')+' picks</div></div>';
-      h += '<div class="cmp-card proj"><div class="cmp-lbl">&#128200; Projected</div><div class="cmp-val" style="color:var(--green)">'+fmt(proj.win_rate,false)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(proj.avg_return)+' avg &middot; '+(proj.n||'—')+' picks</div></div>';
-      h += '<div class="cmp-card delta"><div class="cmp-lbl">&#9654; Improvement</div><div class="cmp-val '+dc(wrD)+'" style="font-size:32px">'+fmt(wrD,true)+'</div><div class="cmp-sub">Win Rate &middot; '+fmtAvg(avgD)+' avg ret</div></div>';
-      h += '</div>';
-
-      // Reasoning
-      if (rec.claude_reasoning) {
-        h += '<div class="reasoning">'+rec.claude_reasoning.replace(/\\n/g,'<br>')+'</div>';
+        // Action bar
+        h += '<div class="action-bar" id="ai-action-bar">';
+        if (st === 'pending') {
+          h += '<button class="btn btn-approve" onclick="approveAiRec()">&#10003; Approve</button>';
+          h += '<button class="btn btn-reject" onclick="rejectAiRec()">&#10005; Reject</button>';
+          h += '<span class="action-note">Approving queues changes — cron will apply automatically within 5 min.</span>';
+        } else if (st === 'approved' && !r.applied) {
+          h += '<button class="btn btn-disabled" disabled>&#10003; Approved</button>';
+          h += '<span class="action-note">&#9711; Queued — cron will apply automatically within 5 min.</span>';
+        } else if (r.applied) {
+          h += '<button class="btn btn-disabled" disabled>&#9679; Applied</button>';
+          if (r.applied_at) h += '<span class="action-note">Applied '+r.applied_at+'</span>';
+        } else {
+          h += '<button class="btn btn-disabled" disabled>&#10005; Rejected</button>';
+        }
+        h += '</div>';
+        h += '</div>'; // ai-detail
       }
-
-      // Changes table
-      var changes = rec.changes || [];
-      if (changes.length) {
-        h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:10px;">Proposed Weight Changes ('+changes.length+')</div>';
-        h += '<table class="changes-table"><thead><tr><th>Weight Key</th><th>Current</th><th></th><th>Proposed</th><th>Reason</th></tr></thead><tbody>';
-        changes.forEach(function(ch) {
-          var up = ch.proposed_value > ch.current_value;
-          var same = ch.proposed_value === ch.current_value;
-          var cls = same ? 'val-cur' : up ? 'val-up' : 'val-down';
-          h += '<tr>';
-          h += '<td><strong>'+ch.weight_key+'</strong></td>';
-          h += '<td><span class="val-chip val-cur">'+ch.current_value+'</span></td>';
-          h += '<td style="text-align:center;color:var(--muted)">'+(same?'=':up?'&#8593;':'&#8595;')+'</td>';
-          h += '<td><span class="val-chip '+cls+'">'+ch.proposed_value+'</span></td>';
-          h += '<td><div class="reason-text">'+ch.reason+'</div></td>';
-          h += '</tr>';
-        });
-        h += '</tbody></table>';
-      }
-
-      // Action bar
-      h += '<div class="action-bar" id="ai-action-bar">';
-      if (st === 'pending') {
-        h += '<button class="btn btn-approve" onclick="approveAiRec()">&#10003; Approve</button>';
-        h += '<button class="btn btn-reject" onclick="rejectAiRec()">&#10005; Reject</button>';
-        h += '<span class="action-note">Approving queues changes. Then run <code>python ai_optimizer.py --apply</code> on the VM.</span>';
-      } else if (st === 'approved' && !rec.applied) {
-        h += '<button class="btn btn-disabled" disabled>&#10003; Approved</button>';
-        h += '<span class="action-note">&#9654; Run <code>python ai_optimizer.py --apply</code> on the VM, then restart the scanner.</span>';
-      } else if (rec.applied) {
-        h += '<button class="btn btn-disabled" disabled>&#9679; Applied</button>';
-        if (rec.applied_at) h += '<span class="action-note">Applied '+rec.applied_at+'</span>';
-      } else {
-        h += '<button class="btn btn-disabled" disabled>&#10005; Rejected</button>';
-        h += '<span class="action-note">Generate a new recommendation on the VM.</span>';
-      }
-      h += '</div>';
-    }
+      h += '</div>'; // hist-item
+    });
+    h += '</div>';
   }
 
   h += '</div></div>'; // section-body + section
   page.innerHTML = h;
 }
 
-function selectAiRec(id) { currentAiId = id; renderPage(); }
+function selectAiRec(id) {
+  currentAiId = (currentAiId === id) ? null : id; // toggle
+  renderPage();
+}
+
+async function deleteAiRec(id) {
+  if (!confirm('Delete this recommendation?')) return;
+  try {
+    await fdb.ref('/scanner/ai_recommendations/' + id).remove();
+    delete aiRecs[id];
+    if (currentAiId === id) currentAiId = null;
+    renderPage();
+  } catch(e) { alert('Error deleting: ' + e.message); }
+}
 
 // ── Trigger AI run ────────────────────────────────────────────────────────────
 async function triggerAiRun() {
   var btn = document.getElementById('run-ai-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Queuing...'; }
   try {
-    var resp = await fetch('/api/run-ai-analysis', {method: 'POST'});
-    var data = await resp.json();
-    if (!data.ok) { alert('Error: ' + (data.error || 'Unknown')); renderPage(); }
-    // Firebase listener will update aiFlag and re-render automatically
-  } catch(e) { alert('Network error: ' + e.message); renderPage(); }
+    // Write directly via Firebase JS SDK (Flask REST API has no auth token → 401)
+    await fdb.ref('/scanner/run_ai_requested').set({
+      status: 'pending',
+      requested_at: new Date().toISOString()
+    });
+    // Firebase listener on run_ai_requested will update aiFlag and re-render automatically
+  } catch(e) { alert('Error queuing AI analysis: ' + e.message); renderPage(); }
 }
 
 // ── Optimizer approve/reject ──────────────────────────────────────────────────
@@ -4309,17 +4335,31 @@ async function triggerAiRun() {
 async function approveAiRec() {
   document.getElementById('ai-action-bar').innerHTML = '<span style="color:var(--muted)">Approving...</span>';
   try {
-    var resp = await fetch('/api/recommendations/'+currentAiId+'/approve', {method:'POST'});
-    var data = await resp.json();
-    if (data.ok) { aiRecs[currentAiId].status = 'approved'; renderPage(); }
-    else { alert('Error: '+(data.error||'Unknown')); renderPage(); }
-  } catch(e) { alert('Network error: '+e.message); renderPage(); }
+    var ts = new Date().toISOString();
+    var rec = aiRecs[currentAiId] || {};
+    // Write status directly via Firebase JS SDK (Flask REST API has no auth token)
+    await fdb.ref('/scanner/ai_recommendations/' + currentAiId).update({
+      status: 'approved',
+      approved_at: ts
+    });
+    // Also store proposed weights for reference
+    if (rec.proposed_weights) {
+      await fdb.ref('/scanner/approved_weights').set(
+        Object.assign({}, rec.proposed_weights, {_approved_from: currentAiId, _approved_at: ts})
+      );
+    }
+    aiRecs[currentAiId].status = 'approved';
+    renderPage();
+  } catch(e) { alert('Error approving: ' + e.message); renderPage(); }
 }
 
 async function rejectAiRec() {
   if (!confirm('Reject this recommendation?')) return;
   try {
-    await fetch('/api/recommendations/'+currentAiId+'/reject', {method:'POST'});
+    await fdb.ref('/scanner/ai_recommendations/' + currentAiId).update({
+      status: 'rejected',
+      rejected_at: new Date().toISOString()
+    });
     aiRecs[currentAiId].status = 'rejected';
     renderPage();
   } catch(e) { alert('Network error: '+e.message); }

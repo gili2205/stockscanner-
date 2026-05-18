@@ -151,17 +151,18 @@ Flow:
 3. Calls Claude with the performance data → Claude suggests specific weight changes
 4. Shadow-backtests the proposed weights against the same historical picks (fast estimate)
 5. Saves recommendation to `/scanner/ai_recommendations/{timestamp}` with status `pending`
-6. Human reviews and sets status to `approved`
-7. `--apply` reads the approved recommendation, patches `live_scanner.py`, and logs the verify commands
+6. Human reviews in the Optimizer UI and clicks **Approve** → status set to `approved` via Firebase JS SDK
+7. Cron (`--check-and-run`, every 5 min) detects the approved recommendation, patches `live_scanner.py`, restarts the scanner, and marks it `applied` — no manual VM step needed
 
 Every recommendation is tagged with an `experiment_id` (e.g. `ai_2026-05-14_10-30-00`) that links to the experiment framework for real backtest verification.
 
-`--check-and-run` (cron every 5 min) now:
-1. Auto-applies any pending stat suggestions from Firebase `/scanner/optimizer_suggestions`
-2. Restarts `live_scanner.py` via watchdog if suggestions were applied
-3. Checks for AI analysis requests (`/scanner/run_ai_requested` flag)
+`--check-and-run` (cron every 5 min, protected by `flock` to prevent overlapping instances) now runs in order:
+1. **Apply approved AI recommendations** from `/scanner/ai_recommendations` (step 0 — highest priority)
+2. **Apply stat suggestions** from `/scanner/optimizer_suggestions` (accepted in the Optimizer UI)
+3. **Restart scanner** if anything was applied (kills live_scanner.py; watchdog restarts it within 5 min)
+4. **Run AI analysis** if `/scanner/run_ai_requested` flag is set to `pending`
 
-Accepted suggestions from the Optimizer UI are written to `/scanner/optimizer_suggestions`. The cron applies them within 5 minutes and restarts the scanner automatically.
+All browser-triggered writes use the Firebase JS SDK directly (not Flask REST API) to avoid auth token issues. Firebase security rules must allow `.write: true` on: `optimizer_suggestions`, `run_ai_requested`, `ai_recommendations`, `approved_weights`.
 
 ### `smart_money.py`
 Fetches smart money signals from SEC EDGAR:
