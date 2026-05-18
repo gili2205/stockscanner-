@@ -4227,12 +4227,12 @@ function renderPage() {
       var stCls   = r.applied ? 'badge-approved' : st === 'approved' ? 'badge-pending' : st === 'rejected' ? 'badge-rejected' : 'badge-pending';
       var isOpen  = id === currentAiId;
       h += '<div class="hist-item'+(isOpen?' active':'')+'" style="cursor:pointer">';
-      h += '<div style="display:flex;align-items:center;gap:10px;width:100%;" onclick="selectAiRec(\''+id+'\')">';
+      h += '<div style="display:flex;align-items:center;gap:10px;width:100%;" data-id="'+id+'" onclick="selectAiRec(this.dataset.id)">';
       h += '<span class="hist-ts">'+id.replace('_',' ').replace(/_/g,':')+'</span>';
-      h += '<span class="hist-sum">'+(r.window||'1m')+'w &middot; '+(r.claude_summary||'').substring(0,65)+'…</span>';
+      h += '<span class="hist-sum">'+(r.window||'1m')+'w &middot; '+(r.claude_summary||'').substring(0,65)+'...</span>';
       h += '<span class="hist-delta '+dc(d)+'">'+fmt(d,true)+' WR</span>';
       h += '<span class="badge '+stCls+'" style="font-size:10px;padding:2px 7px;white-space:nowrap">'+stLabel+'</span>';
-      h += '<button class="btn-delete-rec" onclick="event.stopPropagation();deleteAiRec(\''+id+'\')" title="Delete">&#128465;</button>';
+      h += '<button class="btn-delete-rec" data-id="'+id+'" onclick="event.stopPropagation();deleteAiRec(this.dataset.id)" title="Delete">&#128465;</button>';
       h += '</div>';
 
       // Expandable detail
