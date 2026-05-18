@@ -4151,7 +4151,7 @@ function renderPage() {
     h += '<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">';
     availWindows.forEach(function(w) {
       var active = w === win;
-      h += '<button onclick="selectedOptWindow=\''+w+'\';renderPage()" style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid '+(active?'var(--purple)':'var(--border)')+';background:'+(active?'var(--purple)':'var(--bg3)')+';color:'+(active?'#fff':'var(--muted)')+'">'+w+'</button>';
+      h += '<button data-win="'+w+'" onclick="selectedOptWindow=this.dataset.win;renderPage()" style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid '+(active?'var(--purple)':'var(--border)')+';background:'+(active?'var(--purple)':'var(--bg3)')+';color:'+(active?'#fff':'var(--muted)')+'">'+w+'</button>';
     });
     h += '</div>';
 
