@@ -302,34 +302,68 @@ Merge to `main` only after explicit user approval.
 
 **Vercel auto-deploys `app.py` changes — never tell the user to git pull for UI changes.**
 
-### Promoting to production — full checklist
+### Promoting to production — FULL CHECKLIST
 
-After user says "merge to main" or "promote to production":
+**Go through every item below. Do NOT skip steps even if they seem unnecessary.**
 
+#### 1. Git
 ```bash
-# 1. Merge on local machine
 git checkout main
 git merge fix/scanner-bugs
 git push origin main
+git checkout fix/scanner-bugs   # always return to staging branch
+```
 
-# 2. Pull on production VM
-ssh gilih2205@<prod-ip>
+#### 2. Vercel (automatic)
+- Production Vercel auto-deploys when `main` is pushed — no action needed
+- Verify deployment succeeded at vercel.com dashboard
+
+#### 3. Production VM
+```bash
+# SSH in (use GCP console if needed)
 cd /home/scanner
 git pull origin main
 
-# 3. Restart scanner only if live_scanner.py changed
+# Restart scanner ONLY if live_scanner.py changed in this release
 sudo bash /home/scanner/start.sh restart
-
-# 4. Manual steps (if needed):
-#    - Update Firebase rules on production DB (stockscanner-f9f81-default-rtdb)
-#      if new Firebase paths were added (ai_recommendations, approved_weights, etc.)
-#    - Update production crontab if cron jobs changed
 ```
 
-**After merge, switch back to staging branch for future work:**
+#### 4. Firebase Rules — ALWAYS CHECK
+Go to **Firebase Console → stockscanner-f9f81-default-rtdb → Rules**
+Compare staging rules (stockscanner-staging-default-rtdb) with production rules.
+Any new path added to staging rules must also be added to production.
+
+**Current required rules (production):**
+```json
+{
+  "rules": {
+    ".read": true,
+    ".write": false,
+    "scanner": {
+      "watchlist":              { ".write": true },
+      "sentiment_universe":    { "pinned": { ".write": true } },
+      "optimizer_suggestions": { ".write": true },
+      "run_ai_requested":      { ".write": true },
+      "ai_recommendations":    { ".write": true },
+      "approved_weights":      { ".write": true }
+    }
+  }
+}
+```
+
+#### 5. Cron Jobs — check if changed
 ```bash
-git checkout fix/scanner-bugs
+crontab -l   # on production VM — compare with section 9 of this doc
+# If cron changed on staging, apply same change to production crontab
 ```
+
+#### 6. Environment Variables — check if changed
+```bash
+cat /home/scanner/.env   # verify all new env vars are present
+```
+
+#### 7. Tell the user what manual steps they need to do
+Always explicitly list which of steps 4–6 require manual action before declaring "done".
 
 ---
 
