@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-VERSION = "v4.4.5"
+VERSION = "v4.4.6"
 
 FIREBASE_CONFIGS = {
     "production": {
@@ -4036,16 +4036,9 @@ function buildStatSugDetail(sugs, simulation, status, recId) {
   // Action bar
   h += '<div class="action-bar" id="stat-action-bar-'+(recId||'pending')+'">';
   if (!status || status === 'pending') {
-    var simNeg = simulation && simulation.wr_delta != null && simulation.wr_delta < 0;
-    if (simNeg) {
-      h += '<button class="btn btn-disabled" disabled title="Simulation shows negative impact — not recommended">&#10003; Accept</button>';
-      h += '<button class="btn btn-reject" data-reportid="__pending__" onclick="rejectPendingStatRec(this.dataset.reportid)">&#10005; Dismiss</button>';
-      h += '<span class="action-note" style="color:var(--amber)">&#9888; Simulation shows these changes reduce win rate. Dismiss or wait for more data.</span>';
-    } else {
-      h += '<button class="btn btn-approve" data-statid="pending" onclick="acceptStatSuggestion(this)">&#10003; Accept</button>';
-      h += '<button class="btn btn-reject" data-reportid="__pending__" onclick="rejectPendingStatRec(this.dataset.reportid)">&#10005; Dismiss</button>';
-      h += '<span class="action-note">Queues changes to live_scanner.py · cron applies automatically within 5 min</span>';
-    }
+    h += '<button class="btn btn-approve" data-statid="pending" onclick="acceptStatSuggestion(this)">&#10003; Accept</button>';
+    h += '<button class="btn btn-reject" data-reportid="__pending__" onclick="rejectPendingStatRec(this.dataset.reportid)">&#10005; Dismiss</button>';
+    h += '<span class="action-note">Queues changes to live_scanner.py · cron applies automatically within 5 min</span>';
   } else if (status === 'queued') {
     h += '<span class="badge badge-pending">&#9711; Queued — cron will apply within 5 min</span>';
     h += '<span class="action-note">The VM cron will patch live_scanner.py and restart the scanner automatically.</span>';
@@ -4215,24 +4208,20 @@ function renderPage() {
     // ── Current pending row (computed live from latest report) ────────────────
     var pendingReportId = optIds[0];
     var rejectedRecs = getRejectedStatRecs();
-    if (patchable.length > 0 && !rejectedRecs[pendingReportId]) {
-      var simNeg = simulation && simulation.wr_delta != null && simulation.wr_delta < 0;
+    var simNeg = simulation && simulation.wr_delta != null && simulation.wr_delta < 0;
+    if (patchable.length > 0 && !simNeg && !rejectedRecs[pendingReportId]) {
       var isOpen = currentStatId === '__pending__';
       h += '<div class="hist-item'+(isOpen?' active':'')+'">';
       h += '<div class="hist-row" data-id="__pending__" onclick="selectStatRec(this.dataset.id)">';
       h += '<span class="hist-ts">'+pendingReportId.replace('report_','').replace(/_/g,' ')+'</span>';
       h += '<span class="hist-sum">'+win+' window &middot; '+patchable.length+' weight change'+(patchable.length>1?'s':'');
-      if (simulation && simulation.wr_delta != null) h += ' &middot; WR '+(simulation.wr_delta>=0?'+':'')+simulation.wr_delta.toFixed(1)+'%';
+      if (simulation && simulation.wr_delta != null) h += ' &middot; WR +'+(simulation.wr_delta).toFixed(1)+'%';
       h += '</span>';
-      if (simNeg) {
-        h += '<span class="badge badge-rejected" style="font-size:10px;padding:2px 7px;white-space:nowrap;flex-shrink:0">&#9888; Negative sim</span>';
-      } else {
-        h += '<span class="badge badge-pending" style="font-size:10px;padding:2px 7px;white-space:nowrap;flex-shrink:0">&#9711; Pending</span>';
-      }
+      h += '<span class="badge badge-pending" style="font-size:10px;padding:2px 7px;white-space:nowrap;flex-shrink:0">&#9711; Pending</span>';
       h += '</div>';
       if (isOpen) h += buildStatSugDetail(sugs, simulation, 'pending', null);
       h += '</div>';
-    } else if (!patchable.length) {
+    } else if (!patchable.length || simNeg) {
       h += '<div style="padding:14px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--muted)">&#9432; No significant suggestions yet — need factors with &gt;5% win-rate lift and at least 10 picks. Run more backtest history for stronger signals.</div>';
     }
 
