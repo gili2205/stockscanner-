@@ -557,13 +557,33 @@ def apply_stat_suggestions():
     scanner_path.write_text(code)
     log.info(f"live_scanner.py updated with {len(applied_ids)} stat suggestion(s).")
 
-    # Mark applied in Firebase
+    # Mark individual param records as applied
+    applied_at = datetime.now().isoformat()
     for rec_id in applied_ids:
         sugs_ref.child(rec_id).update({
             "applied":    True,
-            "applied_at": datetime.now().isoformat()
+            "applied_at": applied_at
         })
     log.info("Marked suggestions as applied in Firebase.")
+
+    # Mark the batch record in stat_recommendations as applied (UI row status)
+    batch_ids = set()
+    for rec_id, rec in pending:
+        if rec_id in applied_ids and rec.get("batch_id"):
+            batch_ids.add(rec.get("batch_id"))
+    if batch_ids:
+        stat_rec_ref = db.reference("/scanner/stat_recommendations")
+        for bid in batch_ids:
+            try:
+                stat_rec_ref.child(bid).update({
+                    "applied":    True,
+                    "applied_at": applied_at,
+                    "status":     "applied"
+                })
+                log.info(f"Marked stat_recommendations/{bid} as applied.")
+            except Exception as e:
+                log.warning(f"Could not mark stat_recommendations/{bid}: {e}")
+
     return True
 
 
