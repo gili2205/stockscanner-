@@ -3576,7 +3576,7 @@ def approve_recommendation(rec_id):
             json={**proposed, '_approved_from': rec_id, '_approved_at': __import__('datetime').datetime.now().isoformat()},
             timeout=10
         )
-        return jsonify({'ok': True, 'message': 'Approved. Run python ai_optimizer.py --apply on the VM to update live_scanner.py.'})
+        return jsonify({'ok': True, 'message': 'Approved — cron will apply automatically within 5 minutes.'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -4278,10 +4278,10 @@ function renderPage() {
       if (st === 'pending') {
         h += '<button class="btn btn-approve" onclick="approveAiRec()">&#10003; Approve</button>';
         h += '<button class="btn btn-reject" onclick="rejectAiRec()">&#10005; Reject</button>';
-        h += '<span class="action-note">Approving queues changes. Then run <code>python ai_optimizer.py --apply</code> on the VM.</span>';
+        h += '<span class="action-note">Approving queues changes — cron will apply automatically within 5 min.</span>';
       } else if (st === 'approved' && !rec.applied) {
         h += '<button class="btn btn-disabled" disabled>&#10003; Approved</button>';
-        h += '<span class="action-note">&#9654; Run <code>python ai_optimizer.py --apply</code> on the VM, then restart the scanner.</span>';
+        h += '<span class="action-note">&#9711; Queued — cron will apply automatically within 5 min.</span>';
       } else if (rec.applied) {
         h += '<button class="btn btn-disabled" disabled>&#9679; Applied</button>';
         if (rec.applied_at) h += '<span class="action-note">Applied '+rec.applied_at+'</span>';

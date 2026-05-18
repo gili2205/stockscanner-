@@ -391,7 +391,7 @@ def apply_approved_recommendation():
     ]
     if not approved:
         log.info("No pending approved recommendations found.")
-        return
+        return False
 
     # Take the most recent approved one
     approved.sort(key=lambda x: x[0], reverse=True)
@@ -456,7 +456,7 @@ def apply_approved_recommendation():
 
     if not applied:
         log.warning("No changes could be applied automatically. Edit live_scanner.py manually.")
-        return
+        return False
 
     scanner_path.write_text(code)
     log.info(f"live_scanner.py updated. Changes applied:\n" + "\n".join(applied))
@@ -475,6 +475,7 @@ def apply_approved_recommendation():
     log.info(f"       python backtest.py --days 60 --experiment post_weight_change")
     log.info(f"       python optimizer.py --all-windows")
     log.info(f"  3. Bump SCORING_VERSION in backtest.py to document the change")
+    return True
 
 
 def apply_stat_suggestions():
@@ -689,6 +690,12 @@ if __name__ == "__main__":
 
     if args.check_and_run:
         did_something = False
+
+        # ── 0. Auto-apply any approved AI recommendations ────────────────────
+        ai_applied = apply_approved_recommendation()
+        if ai_applied:
+            did_something = True
+            restart_scanner()   # kill scanner; watchdog restarts with new weights
 
         # ── 1. Auto-apply any pending stat suggestions (accepted in the UI) ──
         stat_applied = apply_stat_suggestions()
