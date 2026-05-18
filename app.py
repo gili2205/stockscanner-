@@ -3856,6 +3856,7 @@ var FACTOR_V4_MAP = {
 
 var optReports = {}, aiRecs = {}, currentAiId = null, aiFlag = null, optSuggestions = {};
 var selectedOptWindow = '1m';
+var sugOpen = false;
 var PENDING_PATCHES = {}; // keyed by id, holds patch arrays for Accept buttons
 
 // Load all data sources in parallel
@@ -3968,26 +3969,29 @@ function buildConsolidatedSug(sugs, baselineWR, simulation) {
   var observeOnly = sugs.reinforce.concat(sugs.reduce).filter(function(s){ return !s.patch; });
   var totalChanges = patchable.length;
 
-  var h = '<div class="suggestion-item" id="consolidated-sug" style="border-color:#27ae6033">';
+  var h = '<div class="suggestion-item" id="consolidated-sug" style="border-color:#27ae6033;padding:0;">';
 
-  // Header
-  h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">';
+  // Clickable header row (always visible)
+  h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 18px;cursor:pointer;" onclick="sugOpen=!sugOpen;renderPage()">';
   h += '<span style="font-size:14px;font-weight:700">&#128200; Recommended Scoring Changes</span>';
   if (totalChanges > 0) h += '<span class="dpill g">' + totalChanges + ' weight change' + (totalChanges > 1 ? 's' : '') + '</span>';
-  // Show simulation result if available, otherwise fall back to naive estimate
   if (simulation && simulation.baseline_wr != null && simulation.projected_wr != null) {
     var simDelta = simulation.wr_delta >= 0 ? '+' + simulation.wr_delta.toFixed(1) : simulation.wr_delta.toFixed(1);
-    var simColor = simulation.wr_delta >= 0 ? 'var(--green)' : 'var(--red)';
     h += '<span class="dpill g" title="Simulated by re-scoring ' + simulation.baseline_n + ' historical picks with proposed weights">Simulated WR: ' + simulation.baseline_wr.toFixed(1) + '% &rarr; ' + simulation.projected_wr.toFixed(1) + '% (' + simDelta + '%)</span>';
     if (simulation.avg_delta != null) {
       var avgDelta = simulation.avg_delta >= 0 ? '+' + simulation.avg_delta.toFixed(2) : simulation.avg_delta.toFixed(2);
       h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)">Avg return ' + avgDelta + '%</span>';
     }
   } else if (baselineWR) {
-    // No simulation yet (old report) — show note to re-run optimizer
     h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)" title="Optimizer reruns every Sunday at 4am">&#9432; Simulation updates Sunday</span>';
   }
+  h += '<span style="margin-left:auto;color:var(--muted);font-size:12px">' + (sugOpen ? '&#9650;' : '&#9660;') + '</span>';
   h += '</div>';
+
+  if (!sugOpen) { h += '</div>'; return h; }
+
+  // Expanded body
+  h += '<div style="padding:0 18px 18px;">';
 
   // Boost changes table
   if (sugs.reinforce.length) {
@@ -4076,7 +4080,8 @@ function buildConsolidatedSug(sugs, baselineWR, simulation) {
     h += '</div>';
   }
 
-  h += '</div>';
+  h += '</div>'; // expanded body
+  h += '</div>'; // suggestion-item
   return h;
 }
 
