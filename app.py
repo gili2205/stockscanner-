@@ -3984,7 +3984,7 @@ function buildConsolidatedSug(sugs, baselineWR, simulation) {
     }
   } else if (baselineWR) {
     // No simulation yet (old report) — show note to re-run optimizer
-    h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)" title="Re-run optimizer.py to get a simulated projection">&#9432; Re-run optimizer for simulation</span>';
+    h += '<span class="dpill" style="background:var(--bg3);color:var(--muted)" title="Optimizer reruns every Sunday at 4am">&#9432; Simulation updates Sunday</span>';
   }
   h += '</div>';
 
