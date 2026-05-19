@@ -57,6 +57,65 @@ MIN_PRICE      = 15.0
 MIN_AVG_VOL    = 400_000
 MIN_DOLLAR_VOL = 10_000_000
 
+# ── Scoring weights ───────────────────────────────────────────────────────────
+# Each environment (staging/production) maintains its own weights in Firebase
+# at /scanner/scoring_weights. The optimizer writes there; we read at startup.
+DEFAULT_WEIGHTS = {
+    # EMA trend structure
+    "ema_full":             25,
+    "ema_partial":          15,
+    "ema_weak":              5,
+    # HH/HL structure
+    "hh_hl_85":             12,
+    "hh_hl_70":              8,
+    "hh_hl_55":              4,
+    # ATR compression
+    "atr_020":              20,
+    "atr_025":              15,
+    "atr_030":              10,
+    "atr_040":               5,
+    # Volume contraction
+    "vc_050":               15,
+    "vc_065":               10,
+    "vc_080":                5,
+    # Distance to level
+    "dist_1":               20,
+    "dist_2":               16,
+    "dist_3p5":             11,
+    "dist_6":                5,
+    "dist_10":               1,
+    # Liquidity
+    "liquidity_200m":        8,
+    "liquidity_50m":         6,
+    "liquidity_20m":         4,
+    "liquidity_other":       2,
+    # Penalties
+    "penalty_weak_ema":     18,
+    "penalty_far_dist":     12,
+    "penalty_neg_mom":      10,
+    "penalty_high_vol_atr":  8,
+    # Score thresholds
+    "threshold_ready":      72,
+    "threshold_watch":      55,
+}
+
+def load_scoring_weights():
+    """Load per-environment scoring weights from Firebase, fallback to defaults."""
+    try:
+        fw = db.reference("/scanner/scoring_weights").get() or {}
+        w  = {**DEFAULT_WEIGHTS, **{k: v for k, v in fw.items() if k in DEFAULT_WEIGHTS}}
+        overrides = [k for k in fw if k in DEFAULT_WEIGHTS]
+        if overrides:
+            log.info(f"Scoring weights: {len(overrides)} overrides from Firebase: {overrides}")
+        else:
+            log.info("Scoring weights: using all defaults (no Firebase overrides)")
+        return w
+    except Exception as e:
+        log.warning(f"Could not load scoring weights from Firebase ({e}) — using defaults")
+        return dict(DEFAULT_WEIGHTS)
+
+W = load_scoring_weights()
+
 # ── Universe ──────────────────────────────────────────────────────────────────
 def get_nasdaq_universe():
     tickers = _fetch_edgar()
@@ -400,45 +459,45 @@ def score_stock(ticker, df, live_price=None, fund=None):
         # ════════════════════════════════════════════════════════════════
         ta = 0
 
-        # EMA trend structure (25 pts)
-        if   ema=="full":    ta+=25
-        elif ema=="partial": ta+=15
-        elif ema=="weak":    ta+=5
+        # EMA trend structure
+        if   ema=="full":    ta+=W["ema_full"]
+        elif ema=="partial": ta+=W["ema_partial"]
+        elif ema=="weak":    ta+=W["ema_weak"]
 
-        # HH/HL structure (12 pts)
-        if   hh_hl>=0.85: ta+=12
-        elif hh_hl>=0.70: ta+=8
-        elif hh_hl>=0.55: ta+=4
+        # HH/HL structure
+        if   hh_hl>=0.85: ta+=W["hh_hl_85"]
+        elif hh_hl>=0.70: ta+=W["hh_hl_70"]
+        elif hh_hl>=0.55: ta+=W["hh_hl_55"]
 
-        # ATR compression (20 pts) — tighter base = higher score
-        if   atr_c<=0.20: ta+=20
-        elif atr_c<=0.25: ta+=15
-        elif atr_c<=0.30: ta+=10
-        elif atr_c<=0.40: ta+=5
+        # ATR compression — tighter base = higher score
+        if   atr_c<=0.20: ta+=W["atr_020"]
+        elif atr_c<=0.25: ta+=W["atr_025"]
+        elif atr_c<=0.30: ta+=W["atr_030"]
+        elif atr_c<=0.40: ta+=W["atr_040"]
 
-        # Volume contraction (15 pts)
-        if   vc<=0.50: ta+=15
-        elif vc<=0.65: ta+=10
-        elif vc<=0.80: ta+=5
+        # Volume contraction
+        if   vc<=0.50: ta+=W["vc_050"]
+        elif vc<=0.65: ta+=W["vc_065"]
+        elif vc<=0.80: ta+=W["vc_080"]
 
-        # Distance to level (20 pts) — near the pivot = low risk entry
-        if   dist<=1.0: ta+=20
-        elif dist<=2.0: ta+=16
-        elif dist<=3.5: ta+=11
-        elif dist<=6.0: ta+=5
-        elif dist<=10:  ta+=1
+        # Distance to level — near the pivot = low risk entry
+        if   dist<=1.0: ta+=W["dist_1"]
+        elif dist<=2.0: ta+=W["dist_2"]
+        elif dist<=3.5: ta+=W["dist_3p5"]
+        elif dist<=6.0: ta+=W["dist_6"]
+        elif dist<=10:  ta+=W["dist_10"]
 
-        # Liquidity (8 pts)
-        if   avg_dollar_vol>=200_000_000: ta+=8
-        elif avg_dollar_vol>=50_000_000:  ta+=6
-        elif avg_dollar_vol>=20_000_000:  ta+=4
-        else:                             ta+=2
+        # Liquidity
+        if   avg_dollar_vol>=200_000_000: ta+=W["liquidity_200m"]
+        elif avg_dollar_vol>=50_000_000:  ta+=W["liquidity_50m"]
+        elif avg_dollar_vol>=20_000_000:  ta+=W["liquidity_20m"]
+        else:                             ta+=W["liquidity_other"]
 
         # Penalties
-        if ema=="weak":            ta=max(0,ta-18)
-        if dist>15:                ta=max(0,ta-12)
-        if mom1m<-5:               ta=max(0,ta-10)
-        if atr_c>0.7 and mom1m<10: ta=max(0,ta-8)
+        if ema=="weak":            ta=max(0,ta-W["penalty_weak_ema"])
+        if dist>15:                ta=max(0,ta-W["penalty_far_dist"])
+        if mom1m<-5:               ta=max(0,ta-W["penalty_neg_mom"])
+        if atr_c>0.7 and mom1m<10: ta=max(0,ta-W["penalty_high_vol_atr"])
 
         score_technical = min(100, ta)
 
@@ -543,7 +602,7 @@ def score_stock(ticker, df, live_price=None, fund=None):
         # Must score at least 25
         if score < 25: return None
 
-        status = "READY" if score>=72 else "WATCH" if score>=55 else "BUILDING"
+        status = "READY" if score>=W["threshold_ready"] else "WATCH" if score>=W["threshold_watch"] else "BUILDING"
         pre    = (atr_c<=0.32 and vc<=0.80 and dist<=5.0
                   and ema in ("full","partial") and mom1m>=0)
         bull_flag = (atr_c<0.28 and vc<0.70 and mom1m>=8 and ema in ("full","partial"))
