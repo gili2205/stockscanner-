@@ -383,27 +383,21 @@ def score_stock(ticker, df, live_price=None, fund=None):
     try:
         closes = df["Close"].dropna()
         if len(closes) < 20: return None
-        # Determine whether the last row in df is today's partial candle or
-        # yesterday's final close. We check the date of the last index entry.
-        et_tz    = pytz.timezone('America/New_York')
-        today_et = datetime.now(et_tz).date()
-        last_idx = df.index[-1]
-        last_date = last_idx.date() if hasattr(last_idx, 'date') else last_idx
-        has_today_candle = (last_date == today_et)
-
-        if has_today_candle:
-            # closes[-1] = today's intraday, closes[-2] = yesterday's close
-            yest_close  = float(closes.iloc[-2]) if len(closes) >= 2 else float(closes.iloc[-1])
-            prev2_close = float(closes.iloc[-3]) if len(closes) >= 3 else yest_close
-        else:
-            # closes[-1] = yesterday's close (no candle for today yet)
-            yest_close  = float(closes.iloc[-1])
-            prev2_close = float(closes.iloc[-2]) if len(closes) >= 2 else yest_close
-
-        last_close = float(closes.iloc[-1])
-        price = live_price if (live_price and live_price > 0) else last_close
-        chg          = round((price - yest_close) / yest_close * 100, 2)
+        # closes[-1] may be today's partial candle (market open) or yesterday's
+        # close (market closed). Either way, closes[-2] is always "the prior
+        # completed session" — use it as the reference for change_pct.
+        last_close  = float(closes.iloc[-1])
+        yest_close  = float(closes.iloc[-2]) if len(closes) >= 2 else last_close
+        prev2_close = float(closes.iloc[-3]) if len(closes) >= 3 else yest_close
         prev_day_chg = round((yest_close - prev2_close) / prev2_close * 100, 2)
+        if live_price and live_price > 0:
+            price = live_price
+            chg   = round((price - yest_close) / yest_close * 100, 2)
+        else:
+            # No live price from Alpaca — fall back to yesterday's completed
+            # change so we never display 0% just because a quote is missing
+            price = last_close
+            chg   = prev_day_chg
 
         # ── Hard quality gates ────────────────────────────────────────
         if price < MIN_PRICE: return None
