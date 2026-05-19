@@ -62,7 +62,7 @@ first_ref = db.reference("/scanner/first_seen")
 # Format: "v{N}_{short_description}"
 # Every pick stored in Firebase carries this tag so the optimizer can filter
 # by version and experiments can be compared apples-to-apples.
-SCORING_VERSION = "v4_quality_setup"
+SCORING_VERSION = "v5_ema_gate_only"
 
 # ── Universe ──────────────────────────────────────────────────────────────────
 def get_universe():
@@ -347,9 +347,10 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         # LAYER 1 — TECHNICAL (0-100)
         # ════════════════════════════════════════════════════════════════
         ta = 0
-        if   ema_stack == "full":    ta += 25
-        elif ema_stack == "partial": ta += 15
-        elif ema_stack == "weak":    ta += 5
+        # v5: EMA used as gate only — no pts awarded for full/partial.
+        # EMA scores in Quality (trend strength). Weak EMA still penalized below.
+        # Rationale: in bull markets ~97% of picks have full EMA, so it adds
+        # noise to Setup timing rather than discriminating good entries.
 
         if   hh_hl >= 0.85: ta += 12
         elif hh_hl >= 0.70: ta += 8
@@ -430,7 +431,7 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         score_quality = min(100, q)
 
         t = 0
-        t += 20 if ema_stack == "full" else 10 if ema_stack == "partial" else 2 if ema_stack == "weak" else 0
+        # v5: EMA gate only — no setup pts (kept in Quality score only)
         t += 20 if atr_c <= 0.15 else 15 if atr_c <= 0.25 else 10 if atr_c <= 0.35 else 3 if atr_c <= 0.50 else 0
         t += 18 if vol_c <= 0.50 else 12 if vol_c <= 0.65 else 6 if vol_c <= 0.80 else 0
         t += 14 if dist <= 1.0 else 10 if dist <= 2.0 else 6 if dist <= 3.5 else 2 if dist <= 6.0 else 0

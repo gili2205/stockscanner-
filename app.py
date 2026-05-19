@@ -938,6 +938,9 @@ function makeCard(s, rank) {{
   var chg    = s.change_pct||0;
   var chgCls = chg>=0?'cup':'cdn';
   var chgStr = (chg>=0?'+':'')+chg.toFixed(2)+'%';
+  var prevDay   = s.prev_day_pct;
+  var prevDayCls= (prevDay!=null&&prevDay>=0)?'cup':'cdn';
+  var prevDayStr= prevDay!=null?((prevDay>=0?'+':'')+prevDay.toFixed(2)+'% yest'):null;
   var pe     = s.pe_ratio, rsi=s.rsi, target=s.analyst_target;
   var upside = s.analyst_upside;
   var upsidePct = upside!=null?parseFloat(upside):null;
@@ -1064,7 +1067,8 @@ function makeCard(s, rank) {{
     }}
   }}
   h += '<div style="font-size:20px;font-weight:700">'+s.ticker+smBadge+buzzBadge+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
-  h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
+  var prevDayHtml = prevDayStr?'<span class="chg '+prevDayCls+'" style="margin-left:8px;font-size:11px;opacity:.75" title="Yesterday\'s close-to-close">'+prevDayStr+'</span>':'';
+  h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+prevDayHtml+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
   h += '<div id="'+scoreId+'" style="cursor:pointer" onclick="event.stopPropagation();showBreakdown(this)">';

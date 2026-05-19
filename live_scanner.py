@@ -324,9 +324,15 @@ def score_stock(ticker, df, live_price=None, fund=None):
     try:
         closes = df["Close"].dropna()
         if len(closes) < 20: return None
-        prev  = float(closes.iloc[-1])
-        price = live_price if (live_price and live_price > 0) else prev
-        chg   = round((price-prev)/prev*100, 2)
+        # closes.iloc[-1] may be today's partial candle (when market is open).
+        # Use closes.iloc[-2] as the reference (yesterday's close) so that
+        # change_pct reflects today's intraday move, not 0% vs itself.
+        last_close  = float(closes.iloc[-1])
+        yest_close  = float(closes.iloc[-2]) if len(closes) >= 2 else last_close
+        prev2_close = float(closes.iloc[-3]) if len(closes) >= 3 else yest_close
+        price = live_price if (live_price and live_price > 0) else last_close
+        chg   = round((price - yest_close) / yest_close * 100, 2)
+        prev_day_chg = round((yest_close - prev2_close) / prev2_close * 100, 2)
 
         # ── Hard quality gates ────────────────────────────────────────
         if price < MIN_PRICE: return None
@@ -535,6 +541,7 @@ def score_stock(ticker, df, live_price=None, fund=None):
             "ticker":           ticker,
             "price":            round(price,2),
             "change_pct":       chg,
+            "prev_day_pct":     prev_day_chg,
             "vol_ratio":        vr,
             "score":            score,
             "track":            track,
