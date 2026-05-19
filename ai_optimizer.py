@@ -379,10 +379,29 @@ Return ONLY valid JSON, no markdown fences, no extra text:
 
 def apply_approved_recommendation():
     """
-    Read latest approved recommendation from Firebase and patch live_scanner.py.
-    Creates a backup before making any changes.
+    Read latest approved AI recommendation from Firebase and write the new
+    weights to /scanner/scoring_weights. live_scanner.py reads weights from
+    there at startup — no file patching, no git commits, per-environment safe.
     """
-    log.info("Looking for approved recommendations in Firebase...")
+    # Key aliases: old AI-rec keys → unified scoring_weights keys
+    KEY_ALIAS = {
+        "breakout_ema_full":      "ema_full",
+        "breakout_ema_partial":   "ema_partial",
+        "breakout_hh_hl_strong":  "hh_hl_85",
+        "breakout_hh_hl_ok":      "hh_hl_70",
+        "breakout_atr_max":       "atr_020",
+        "breakout_vol_max":       "vc_050",
+        "breakout_dist_max":      "dist_1",
+        "breakout_liquidity_max": "liquidity_200m",
+        "penalty_weak_ema":       "penalty_weak_ema",
+        "penalty_far_dist":       "penalty_far_dist",
+        "penalty_neg_mom":        "penalty_neg_mom",
+        "penalty_high_vol_atr":   "penalty_high_vol_atr",
+        "threshold_ready":        "threshold_ready",
+        "threshold_watch":        "threshold_watch",
+    }
+
+    log.info("Looking for approved AI recommendations in Firebase...")
     all_recs = ai_recs_ref.get() or {}
 
     approved = [
@@ -393,115 +412,48 @@ def apply_approved_recommendation():
         log.info("No pending approved recommendations found.")
         return False
 
-    # Take the most recent approved one
     approved.sort(key=lambda x: x[0], reverse=True)
     ts, rec = approved[0]
     changes = rec.get("proposed_weights", {})
+    log.info(f"Applying AI recommendation from {ts}: {len(changes)} weight changes")
 
-    log.info(f"Applying recommendation from {ts}: {len(changes)} weight changes")
+    # Load current weights from Firebase (to merge on top)
+    weights_ref = db.reference("/scanner/scoring_weights")
+    current = weights_ref.get() or {}
 
-    scanner_path = Path(__file__).parent / "live_scanner.py"
-    if not scanner_path.exists():
-        log.error("live_scanner.py not found")
-        return
-
-    # Backup
-    backup_path = scanner_path.with_suffix(f".py.bak_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-    backup_path.write_text(scanner_path.read_text())
-    log.info(f"Backup created: {backup_path}")
-
-    code = scanner_path.read_text()
     applied = []
-
-    # Map DEFAULT_WEIGHTS keys → regex patterns in live_scanner.py
-    # 2-group patterns: (prefix)(number)          → replacement: group1 + new_val
-    # 3-group patterns: (prefix)(number)(suffix)  → replacement: group1 + new_val + group3
-    PATCH_PATTERNS = {
-        # ── Positive scoring (ta+=N) ────────────────────────────────────────────
-        "breakout_ema_full":      (r"(if\s+ema==\"full\":\s+ta\+=)(\d+)",              "EMA full pts"),
-        "breakout_ema_partial":   (r"(elif\s+ema==\"partial\":\s+ta\+=)(\d+)",         "EMA partial pts"),
-        "breakout_hh_hl_strong":  (r"(if\s+hh_hl>=0\.85:\s+ta\+=)(\d+)",             "HH/HL strong pts"),
-        "breakout_hh_hl_ok":      (r"(elif\s+hh_hl>=0\.70:\s+ta\+=)(\d+)",           "HH/HL ok pts"),
-        "breakout_atr_max":       (r"(if\s+atr_c<=0\.20:\s+ta\+=)(\d+)",             "ATR max pts"),
-        "breakout_vol_max":       (r"(if\s+vc<=0\.50:\s+ta\+=)(\d+)",                "Vol contraction max pts"),
-        "breakout_dist_max":      (r"(if\s+dist<=1\.0:\s+ta\+=)(\d+)",               "Dist max pts"),
-        "breakout_liquidity_max": (r"(if\s+avg_dollar_vol>=200_000_000:\s+ta\+=)(\d+)", "Liquidity max pts"),
-        # ── Penalties: ta=max(0,ta-N) — 3-group to preserve closing ) ──────────
-        "penalty_weak_ema":       (r"(if\s+ema==\"weak\":\s+ta=max\(0,ta-)(\d+)(\))", "Weak EMA penalty"),
-        "penalty_far_dist":       (r"(if\s+dist>15:\s+ta=max\(0,ta-)(\d+)(\))",       "Far dist penalty"),
-        "penalty_neg_mom":        (r"(if\s+mom1m<-5:\s+ta=max\(0,ta-)(\d+)(\))",      "Neg momentum penalty"),
-        "penalty_high_vol_atr":   (r"(if\s+atr_c>0\.7\s+and\s+mom1m<10:\s+ta=max\(0,ta-)(\d+)(\))", "High vol ATR penalty"),
-        # ── Status thresholds — 3-group to preserve trailing text ───────────────
-        "threshold_ready":        (r'("READY"\s+if\s+score>=)(\d+)(\s+else)',          "READY threshold"),
-        "threshold_watch":        (r'("WATCH"\s+if\s+score>=)(\d+)(\s+else)',          "WATCH threshold"),
-    }
-
-    import re as re_mod
+    skipped = []
     for key, new_val in changes.items():
-        if key not in PATCH_PATTERNS:
-            log.warning(f"  No patch pattern for '{key}' — skipping (not patchable automatically)")
-            continue
-        entry = PATCH_PATTERNS[key]
-        pattern, desc = entry[0], entry[1]
-        # 2-group: prefix + number; 3-group: prefix + number + suffix
-        def make_replacement(nv, pat):
-            def repl(m):
-                suffix = m.group(3) if len(m.groups()) >= 3 else ''
-                return m.group(1) + str(nv) + suffix
-            return repl
-        new_code = re_mod.sub(pattern, make_replacement(new_val, pattern), code)
-        if new_code != code:
-            old_match = re_mod.search(pattern, code)
-            old_val = old_match.group(2) if old_match else "?"
-            code = new_code
-            applied.append(f"  {key}: {old_val} → {new_val}  ({desc})")
-            log.info(f"  Patched {key}: {old_val} → {new_val}")
-        else:
-            log.warning(f"  Could not patch {key} (pattern not matched) — edit live_scanner.py manually")
+        canonical = KEY_ALIAS.get(key, key)  # translate old keys; pass through new ones
+        current[canonical] = new_val
+        applied.append(f"{canonical}: → {new_val}")
+        log.info(f"  {canonical} = {new_val}")
 
     if not applied:
-        log.warning("No changes could be applied automatically. Edit live_scanner.py manually.")
+        log.warning("No weight changes to apply.")
         return False
 
-    scanner_path.write_text(code)
-    log.info(f"live_scanner.py updated. Changes applied:\n" + "\n".join(applied))
+    weights_ref.set(current)
+    log.info(f"Written {len(applied)} weight(s) to /scanner/scoring_weights in Firebase.")
 
-    # Commit to git so future `git pull` doesn't wipe the applied weights
-    import subprocess
-    try:
-        repo_dir = str(scanner_path.parent)
-        commit_msg = f"Auto-apply AI optimizer recommendation {ts}"
-        subprocess.run(["git", "add", "live_scanner.py"], cwd=repo_dir, check=True)
-        subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_dir, check=True)
-        subprocess.run(["git", "push", "origin", "main"], cwd=repo_dir, check=True)
-        log.info("Committed and pushed live_scanner.py changes to git.")
-    except Exception as e:
-        log.warning(f"Could not commit to git: {e} — changes applied locally but may be overwritten by git pull.")
-
-    # Mark as applied in Firebase
-    experiment_id = rec.get("experiment_id", f"ai_{ts}")
+    applied_at = datetime.now().isoformat()
     ai_recs_ref.child(ts).update({
         "applied":         True,
-        "applied_at":      datetime.now().isoformat(),
+        "applied_at":      applied_at,
         "applied_changes": applied,
     })
-    log.info(f"Marked recommendation {ts} as applied in Firebase.")
-    log.info("Next steps:")
-    log.info("  1. Restart live_scanner.py for the new scoring to take effect in production")
-    log.info(f"  2. Run a backtest experiment to verify on historical data:")
-    log.info(f"       python backtest.py --days 60 --experiment post_weight_change")
-    log.info(f"       python optimizer.py --all-windows")
-    log.info(f"  3. Bump SCORING_VERSION in backtest.py to document the change")
+    log.info(f"Marked AI recommendation {ts} as applied.")
+    log.info("Restart live_scanner (scanner.service) to load the new weights.")
     return True
 
 
 def apply_stat_suggestions():
     """
     Apply statistically-derived suggestions queued by the Optimizer UI.
-    Reads /scanner/optimizer_suggestions, applies approved+unapplied ones
-    to live_scanner.py using the same PATCH_PATTERNS as AI suggestions.
+    Reads /scanner/optimizer_suggestions, merges approved weights into
+    /scanner/scoring_weights in Firebase. live_scanner.py reads from there
+    at startup — no file patching, no git commits, per-environment safe.
     """
-    import re as re_mod
     sugs_ref = db.reference("/scanner/optimizer_suggestions")
     all_sugs = sugs_ref.get() or {}
 
@@ -511,89 +463,38 @@ def apply_stat_suggestions():
     ]
     if not pending:
         log.info("No pending stat suggestions to apply.")
-        return
+        return False
 
     log.info(f"Found {len(pending)} stat suggestion(s) to apply")
 
-    scanner_path = Path(__file__).parent / "live_scanner.py"
-    if not scanner_path.exists():
-        log.error("live_scanner.py not found")
-        return
-
-    # Backup
-    backup_path = scanner_path.with_suffix(f".py.bak_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-    backup_path.write_text(scanner_path.read_text())
-    log.info(f"Backup: {backup_path}")
-
-    code = scanner_path.read_text()
-
-    PATCH_PATTERNS = {
-        "ema_full":    r"(if\s+ema==\"full\":\s+ta\+=)(\d+)",
-        "ema_partial": r"(elif\s+ema==\"partial\":\s+ta\+=)(\d+)",
-        "atr_025":     r"(elif\s+atr_c<=0\.25:\s+ta\+=)(\d+)",
-        "atr_030":     r"(elif\s+atr_c<=0\.30:\s+ta\+=)(\d+)",
-        "vc_050":      r"(if\s+vc<=0\.50:\s+ta\+=)(\d+)",
-        "vc_065":      r"(elif\s+vc<=0\.65:\s+ta\+=)(\d+)",
-        "hh_hl_85":   r"(if\s+hh_hl>=0\.85:\s+ta\+=)(\d+)",
-        "hh_hl_70":   r"(elif\s+hh_hl>=0\.70:\s+ta\+=)(\d+)",
-        "dist_1":      r"(if\s+dist<=1\.0:\s+ta\+=)(\d+)",
-        "dist_3p5":    r"(elif\s+dist<=3\.5:\s+ta\+=)(\d+)",
-    }
+    # Load current weights from Firebase
+    weights_ref = db.reference("/scanner/scoring_weights")
+    current = weights_ref.get() or {}
 
     applied_ids = []
+    applied_at  = datetime.now().isoformat()
+
     for rec_id, rec in pending:
-        param       = rec.get("param")
-        new_val     = rec.get("proposed_pts")
-        factor      = rec.get("factor", param)
+        param   = rec.get("param")
+        new_val = rec.get("proposed_pts")
         if not param or new_val is None:
             log.warning(f"  Skipping {rec_id}: missing param or proposed_pts")
             continue
-        pattern = PATCH_PATTERNS.get(param)
-        if not pattern:
-            log.warning(f"  No patch pattern for param='{param}' — edit live_scanner.py manually")
-            continue
-        old_match = re_mod.search(pattern, code)
-        old_val   = old_match.group(2) if old_match else "?"
-        new_code  = re_mod.sub(pattern, lambda m, nv=str(new_val): m.group(1) + nv, code)
-        if new_code != code:
-            code = new_code
-            log.info(f"  Patched {param} ({factor}): {old_val} → {new_val}")
-            applied_ids.append(rec_id)
-        else:
-            log.warning(f"  Could not patch {param} — pattern not matched, edit manually")
+        current[param] = new_val
+        applied_ids.append(rec_id)
+        log.info(f"  {param} = {new_val}")
 
     if not applied_ids:
-        log.warning("No stat suggestions could be applied automatically.")
+        log.warning("No stat suggestions could be applied.")
         return False
 
-    scanner_path.write_text(code)
-    log.info(f"live_scanner.py updated with {len(applied_ids)} stat suggestion(s).")
-
-    # Commit the change to git so future `git pull` doesn't wipe it
-    import subprocess
-    try:
-        repo_dir = str(scanner_path.parent)
-        params_summary = ", ".join(
-            f"{rec.get('param')} → {rec.get('proposed_pts')}"
-            for _, rec in pending if rec.get("param") in [
-                (r, rc) for r, rc in [(rid, rc) for rid, rc in pending if rid in applied_ids]
-            ]
-        )
-        commit_msg = f"Auto-apply stat optimizer suggestions: {', '.join(applied_ids)}"
-        subprocess.run(["git", "add", "live_scanner.py"], cwd=repo_dir, check=True)
-        subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_dir, check=True)
-        subprocess.run(["git", "push", "origin", "main"], cwd=repo_dir, check=True)
-        log.info("Committed and pushed live_scanner.py changes to git.")
-    except Exception as e:
-        log.warning(f"Could not commit to git: {e} — changes are applied locally but may be overwritten by git pull.")
+    # Write merged weights back to Firebase
+    weights_ref.set(current)
+    log.info(f"Written {len(applied_ids)} weight(s) to /scanner/scoring_weights.")
 
     # Mark individual param records as applied
-    applied_at = datetime.now().isoformat()
     for rec_id in applied_ids:
-        sugs_ref.child(rec_id).update({
-            "applied":    True,
-            "applied_at": applied_at
-        })
+        sugs_ref.child(rec_id).update({"applied": True, "applied_at": applied_at})
     log.info("Marked suggestions as applied in Firebase.")
 
     # Mark the batch record in stat_recommendations as applied (UI row status)
@@ -614,6 +515,7 @@ def apply_stat_suggestions():
             except Exception as e:
                 log.warning(f"Could not mark stat_recommendations/{bid}: {e}")
 
+    log.info("Restart live_scanner (scanner.service) to load the new weights.")
     return True
 
 
