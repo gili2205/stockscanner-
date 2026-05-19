@@ -1,7 +1,7 @@
 # NASDAQ Scanner — Full Context Document
 **For continuing this project in a new Claude thread**
 
-Last updated: 2026-05-16 — v4.0.0
+Last updated: 2026-05-19 — v4.4.6
 
 ---
 
@@ -9,11 +9,12 @@ Last updated: 2026-05-16 — v4.0.0
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| `app.py` (Flask app) | **v4.4.0** | AI rec auto-apply end-to-end; collapsible rec rows; delete button |
-| `backtest.py` | **v4_quality_setup** | Atomic cache writes, ThreadPoolExecutor fix |
-| `ai_optimizer.py` | — | Full auto-apply: approved AI recs + stat suggestions via cron |
+| `app.py` (Flask app) | **v4.4.6** | Stat optimizer rows UI; bottom-line impact card; negative sim suppression |
+| `backtest.py` | **v5_ema_gate_only** | EMA removed from Setup/Technical scoring (gate only); experiment branch |
+| `optimizer.py` | — | Deduplicates to first-seen ticker (matches analytics dashboard) |
+| `ai_optimizer.py` | — | Full auto-apply: approved AI recs + stat suggestions via cron; marks stat_recommendations batch applied |
 | `smart_money.py` | — | No version constant; track via git |
-| Last updated | **2026-05-18** | v4.4.0 |
+| Last updated | **2026-05-19** | v4.4.6 |
 
 ### Version bump rules
 - **Patch** (v4.0.**x**): bug fix, UI tweak, copy change
@@ -242,15 +243,29 @@ Shared constants (SCORE_READY=85, SCORE_WATCH=70, etc.)
 
 ---
 
-## 5. Current Experiment: v4_quality_setup
+## 5. Experiments
 
-- **Status**: Running as of 2026-05-16
-- **Days**: 180 (2025-09-08 → 2026-05-15)
+### v5_ema_gate_only (current — staging only)
+- **Status**: Ready to run as of 2026-05-19
+- **SCORING_VERSION**: `v5_ema_gate_only`
+- **Firebase path**: `/scanner/experiments/v5_ema_gate_only/`
+- **Change**: EMA full/partial no longer awards points in Technical (ta) or Setup (t) scores. EMA kept in Quality (q) score only. Weak EMA penalty kept.
+- **Rationale**: Optimizer data shows ~97% of picks have full EMA in a bull market → not a discriminating signal. EMA full shows −15% WR lift at 1m window. ATR compression and distance-to-level are better entry timing signals.
+- **Run command**:
+  ```bash
+  nohup /home/scanner/venv/bin/python backtest.py --days 60 --experiment v5_ema_gate_only > /tmp/exp_v5.log 2>&1 &
+  ```
+- **Compare command** (after forward returns fill in):
+  ```bash
+  /home/scanner/venv/bin/python optimizer.py --compare v5_ema_gate_only
+  ```
+- **Promote if**: WR and avg return improve vs production baseline
+
+### v4_quality_setup (completed)
+- **Status**: Complete
 - **SCORING_VERSION**: `v4_quality_setup`
-- **New fields stored**: `rsi`, `score_quality`, `score_setup`, `score_buy_now`
 - **Firebase path**: `/scanner/experiments/v4_quality_setup/`
-- **Purpose**: Validate new Quality/Setup/BuyNow scoring vs old blended score
-- **What to check when done**: avg return by Buy Now bucket (≥65 vs 40-64 vs <40). If high Buy Now → high returns, scoring is validated.
+- **Purpose**: Validate Quality/Setup/BuyNow scoring vs old blended score
 
 ---
 
@@ -333,7 +348,7 @@ Go to **Firebase Console → stockscanner-f9f81-default-rtdb → Rules**
 Compare staging rules (stockscanner-staging-default-rtdb) with production rules.
 Any new path added to staging rules must also be added to production.
 
-**Current required rules (production):**
+**Current required rules (both staging and production):**
 ```json
 {
   "rules": {
@@ -345,7 +360,8 @@ Any new path added to staging rules must also be added to production.
       "optimizer_suggestions": { ".write": true },
       "run_ai_requested":      { ".write": true },
       "ai_recommendations":    { ".write": true },
-      "approved_weights":      { ".write": true }
+      "approved_weights":      { ".write": true },
+      "stat_recommendations":  { ".write": true }
     }
   }
 }
@@ -493,10 +509,12 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## 13. Pending / Future Work
 
-- [ ] Wait for v4_quality_setup backtest to finish (currently at day ~20/180), then analyze results in Analytics
+- [ ] Run v5_ema_gate_only experiment on staging VM (60 days), wait ~1 week for returns, then compare
+- [ ] If v5 validated → apply EMA gate change to live_scanner.py and promote to production
 - [ ] If v4 validated → update Status labels (BUILDING/WATCH/READY) to use Buy Now thresholds
 - [ ] Congressional trading: consider paid API (Quiver Quantitative)
 - [x] Test "Approve" flow end-to-end: approve AI rec → cron auto-applies → live_scanner.py patched ✅
 - [x] AI optimizer full auto-apply flow working end-to-end ✅
 - [x] flock on AI cron to prevent overlapping instances ✅
-- [ ] Verify AI optimizer end-to-end on production after merge
+- [x] Stat optimizer redesigned as rows (Pending/Queued/Applied) matching AI rec UI ✅
+- [x] Optimizer stats deduplicated to match analytics dashboard ✅
