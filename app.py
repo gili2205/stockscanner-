@@ -1067,7 +1067,7 @@ function makeCard(s, rank) {{
     }}
   }}
   h += '<div style="font-size:20px;font-weight:700">'+s.ticker+smBadge+buzzBadge+'<span class="mcap-badge" id="mcap-'+s.ticker+'">&#8212;</span><span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">'+(s.sector||'NASDAQ')+'</span></div>';
-  var prevDayHtml = prevDayStr?'<span class="chg '+prevDayCls+'" style="margin-left:8px;font-size:11px;opacity:.75" title="Yesterday\'s close-to-close">'+prevDayStr+'</span>':'';
+  var prevDayHtml = prevDayStr?'<span class="chg '+prevDayCls+'" style="margin-left:8px;font-size:11px;opacity:.75" title="Yesterday&#39;s close-to-close">'+prevDayStr+'</span>':'';
   h += '<div style="font-size:13px;color:var(--muted);margin-top:3px">$'+price.toFixed(2)+'<span class="chg '+chgCls+'" style="margin-left:6px">'+chgStr+'</span>'+prevDayHtml+(daysLabel?'<span style="margin-left:10px;font-size:11px;color:'+daysColor+'">'+daysLabel+'</span>':'')+'</div>';
   h += '</div></div>';
   h += '<div style="text-align:right">';
