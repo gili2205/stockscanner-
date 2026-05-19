@@ -466,6 +466,18 @@ def apply_approved_recommendation():
     scanner_path.write_text(code)
     log.info(f"live_scanner.py updated. Changes applied:\n" + "\n".join(applied))
 
+    # Commit to git so future `git pull` doesn't wipe the applied weights
+    import subprocess
+    try:
+        repo_dir = str(scanner_path.parent)
+        commit_msg = f"Auto-apply AI optimizer recommendation {ts}"
+        subprocess.run(["git", "add", "live_scanner.py"], cwd=repo_dir, check=True)
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=repo_dir, check=True)
+        log.info("Committed and pushed live_scanner.py changes to git.")
+    except Exception as e:
+        log.warning(f"Could not commit to git: {e} — changes applied locally but may be overwritten by git pull.")
+
     # Mark as applied in Firebase
     experiment_id = rec.get("experiment_id", f"ai_{ts}")
     ai_recs_ref.child(ts).update({
@@ -556,6 +568,24 @@ def apply_stat_suggestions():
 
     scanner_path.write_text(code)
     log.info(f"live_scanner.py updated with {len(applied_ids)} stat suggestion(s).")
+
+    # Commit the change to git so future `git pull` doesn't wipe it
+    import subprocess
+    try:
+        repo_dir = str(scanner_path.parent)
+        params_summary = ", ".join(
+            f"{rec.get('param')} → {rec.get('proposed_pts')}"
+            for _, rec in pending if rec.get("param") in [
+                (r, rc) for r, rc in [(rid, rc) for rid, rc in pending if rid in applied_ids]
+            ]
+        )
+        commit_msg = f"Auto-apply stat optimizer suggestions: {', '.join(applied_ids)}"
+        subprocess.run(["git", "add", "live_scanner.py"], cwd=repo_dir, check=True)
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=repo_dir, check=True)
+        log.info("Committed and pushed live_scanner.py changes to git.")
+    except Exception as e:
+        log.warning(f"Could not commit to git: {e} — changes are applied locally but may be overwritten by git pull.")
 
     # Mark individual param records as applied
     applied_at = datetime.now().isoformat()
