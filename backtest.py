@@ -17,7 +17,7 @@ Strategy:
     4. Fetch forward returns at 1W/2W/1M/2M/3M for picks that have enough history
 """
 
-import os, sys, time, json, logging, argparse
+import os, sys, time, json, logging, argparse, gc
 import concurrent.futures
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -347,10 +347,9 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         # LAYER 1 — TECHNICAL (0-100)
         # ════════════════════════════════════════════════════════════════
         ta = 0
-        # v5: EMA used as gate only — no pts awarded for full/partial.
-        # EMA scores in Quality (trend strength). Weak EMA still penalized below.
-        # Rationale: in bull markets ~97% of picks have full EMA, so it adds
-        # noise to Setup timing rather than discriminating good entries.
+        if   ema_stack == "full":    ta += 25
+        elif ema_stack == "partial": ta += 15
+        elif ema_stack == "weak":    ta += 5
 
         if   hh_hl >= 0.85: ta += 12
         elif hh_hl >= 0.70: ta += 8
@@ -431,7 +430,6 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         score_quality = min(100, q)
 
         t = 0
-        # v5: EMA gate only — no setup pts (kept in Quality score only)
         t += 20 if atr_c <= 0.15 else 15 if atr_c <= 0.25 else 10 if atr_c <= 0.35 else 3 if atr_c <= 0.50 else 0
         t += 18 if vol_c <= 0.50 else 12 if vol_c <= 0.65 else 6 if vol_c <= 0.80 else 0
         t += 14 if dist <= 1.0 else 10 if dist <= 2.0 else 6 if dist <= 3.5 else 2 if dist <= 6.0 else 0
@@ -691,6 +689,10 @@ def run_backtest(n_days: int = None, specific_date: date = None, experiment: str
             seen_msg = f", {len(new_first)} new first-seen" if not experiment else ""
             log.info(f"  {day}: {len(top200)} picks stored{seen_msg} | {elapsed}s "
                      f"[{days_done}/{len(all_dates)} done]")
+
+            # Free day-local objects to keep memory flat across days
+            del results, top200, scores
+            gc.collect()
 
             # Periodic meta update so we can see progress in Firebase
             if experiment and days_done % 10 == 0:

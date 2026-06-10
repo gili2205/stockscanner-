@@ -1468,10 +1468,11 @@ def lookup():
             return jsonify({'error': 'No data found for '+ticker}), 404
         info = tk.info or {}
         fi   = tk.fast_info
-        closes = [round(x,2) for x in hist['Close'].tolist()]
-        highs  = [round(x,2) for x in hist['High'].tolist()]
-        lows   = [round(x,2) for x in hist['Low'].tolist()]
-        vols   = hist['Volume'].tolist()
+        import math as _math
+        closes = [round(x,2) for x in hist['Close'].tolist() if not _math.isnan(x)]
+        highs  = [round(x,2) for x in hist['High'].tolist()  if not _math.isnan(x)]
+        lows   = [round(x,2) for x in hist['Low'].tolist()   if not _math.isnan(x)]
+        vols   = [int(x)     for x in hist['Volume'].tolist() if not _math.isnan(x)]
         price  = getattr(fi, 'last_price', None) or closes[-1]
         chg    = round((price - closes[-2]) / closes[-2] * 100, 2) if len(closes) > 1 else 0
         # Fundamentals
