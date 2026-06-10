@@ -61,35 +61,34 @@ MIN_DOLLAR_VOL = 10_000_000
 # Each environment (staging/production) maintains its own weights in Firebase
 # at /scanner/scoring_weights. The optimizer writes there; we read at startup.
 DEFAULT_WEIGHTS = {
-    # EMA trend structure — 0 pts in Technical (v5: EMA is gate only)
-    # Points redistributed proportionally (×1.33) to other factors below
-    "ema_full":              0,
-    "ema_partial":           0,
-    "ema_weak":              0,
+    # EMA trend structure
+    "ema_full":             25,
+    "ema_partial":          15,
+    "ema_weak":              5,
     # HH/HL structure
-    "hh_hl_85":             16,
-    "hh_hl_70":             11,
-    "hh_hl_55":              5,
+    "hh_hl_85":             12,
+    "hh_hl_70":              8,
+    "hh_hl_55":              4,
     # ATR compression
-    "atr_020":              26,
-    "atr_025":              20,
-    "atr_030":              13,
-    "atr_040":               7,
+    "atr_020":              20,
+    "atr_025":              15,
+    "atr_030":              10,
+    "atr_040":               5,
     # Volume contraction
-    "vc_050":               20,
-    "vc_065":               13,
-    "vc_080":                7,
+    "vc_050":               15,
+    "vc_065":               10,
+    "vc_080":                5,
     # Distance to level
-    "dist_1":               26,
-    "dist_2":               21,
-    "dist_3p5":             15,
-    "dist_6":                7,
+    "dist_1":               20,
+    "dist_2":               16,
+    "dist_3p5":             11,
+    "dist_6":                5,
     "dist_10":               1,
     # Liquidity
-    "liquidity_200m":       11,
-    "liquidity_50m":         8,
-    "liquidity_20m":         5,
-    "liquidity_other":       3,
+    "liquidity_200m":        8,
+    "liquidity_50m":         6,
+    "liquidity_20m":         4,
+    "liquidity_other":       2,
     # Penalties
     "penalty_weak_ema":     18,
     "penalty_far_dist":     12,

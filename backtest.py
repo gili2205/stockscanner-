@@ -347,36 +347,33 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         # LAYER 1 — TECHNICAL (0-100)
         # ════════════════════════════════════════════════════════════════
         ta = 0
-        # v5: EMA used as gate only — no pts awarded for full/partial.
-        # EMA scores in Quality (trend strength). Weak EMA still penalized below.
-        # Rationale: in bull markets ~97% of picks have full EMA, so it adds
-        # noise to Setup timing rather than discriminating good entries.
+        if   ema_stack == "full":    ta += 25
+        elif ema_stack == "partial": ta += 15
+        elif ema_stack == "weak":    ta += 5
 
-        # Points scaled up proportionally (×1.33) to compensate for EMA removal.
-        # Total max remains ~100 so score distribution stays the same.
-        if   hh_hl >= 0.85: ta += 16
-        elif hh_hl >= 0.70: ta += 11
-        elif hh_hl >= 0.55: ta += 5
+        if   hh_hl >= 0.85: ta += 12
+        elif hh_hl >= 0.70: ta += 8
+        elif hh_hl >= 0.55: ta += 4
 
-        if   atr_c <= 0.20: ta += 26
-        elif atr_c <= 0.25: ta += 20
-        elif atr_c <= 0.30: ta += 13
-        elif atr_c <= 0.40: ta += 7
+        if   atr_c <= 0.20: ta += 20
+        elif atr_c <= 0.25: ta += 15
+        elif atr_c <= 0.30: ta += 10
+        elif atr_c <= 0.40: ta += 5
 
-        if   vol_c <= 0.50: ta += 20
-        elif vol_c <= 0.65: ta += 13
-        elif vol_c <= 0.80: ta += 7
+        if   vol_c <= 0.50: ta += 15
+        elif vol_c <= 0.65: ta += 10
+        elif vol_c <= 0.80: ta += 5
 
-        if   dist <= 1.0: ta += 26
-        elif dist <= 2.0: ta += 21
-        elif dist <= 3.5: ta += 15
-        elif dist <= 6.0: ta += 7
+        if   dist <= 1.0: ta += 20
+        elif dist <= 2.0: ta += 16
+        elif dist <= 3.5: ta += 11
+        elif dist <= 6.0: ta += 5
         elif dist <= 10:  ta += 1
 
-        if   avg_dollar_vol >= 200_000_000: ta += 11
-        elif avg_dollar_vol >= 50_000_000:  ta += 8
-        elif avg_dollar_vol >= 20_000_000:  ta += 5
-        else:                               ta += 3
+        if   avg_dollar_vol >= 200_000_000: ta += 8
+        elif avg_dollar_vol >= 50_000_000:  ta += 6
+        elif avg_dollar_vol >= 20_000_000:  ta += 4
+        else:                               ta += 2
 
         if ema_stack == "weak":         ta = max(0, ta - 18)
         if dist > 15:                   ta = max(0, ta - 12)
@@ -433,7 +430,6 @@ def score_stock_historical(ticker: str, df: pd.DataFrame, as_of: date) -> dict |
         score_quality = min(100, q)
 
         t = 0
-        # v5: EMA gate only — no setup pts (kept in Quality score only)
         t += 20 if atr_c <= 0.15 else 15 if atr_c <= 0.25 else 10 if atr_c <= 0.35 else 3 if atr_c <= 0.50 else 0
         t += 18 if vol_c <= 0.50 else 12 if vol_c <= 0.65 else 6 if vol_c <= 0.80 else 0
         t += 14 if dist <= 1.0 else 10 if dist <= 2.0 else 6 if dist <= 3.5 else 2 if dist <= 6.0 else 0
